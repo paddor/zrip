@@ -61,6 +61,16 @@ pub(crate) fn compress_dfast_block(
             hash_long,
             sequences,
         ),
+        17 => compress_dfast_block_impl::<17>(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_short,
+            hash_long,
+            sequences,
+        ),
         18 => compress_dfast_block_impl::<18>(
             src,
             block_start,
@@ -84,6 +94,12 @@ pub(crate) fn compress_dfast_block(
     }
 }
 
+/// 4-cursor DFast match finder with prefetch pipeline.
+///
+/// Port of C zstd's 4-cursor pattern from ZSTD_compressBlock_fast to dual
+/// hash tables.  Pipeline: ip0, ip1=ip0+1, ip2=ip0+step, ip3=ip2+1.  Each
+/// iteration probes two positions, reusing hash computations across shifts
+/// and prefetching both hash_short and hash_long for the next position.
 fn compress_dfast_block_impl<const HASH_LOG: u32>(
     src: &[u8],
     block_start: usize,
@@ -95,246 +111,545 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
     sequences: &mut Vec<Sequence>,
 ) {
     sequences.clear();
-    let mut anchor = block_start;
-    let mut ip = block_start;
-    let acceleration = params.target_length.max(1) as usize;
-    let search_strength = params.search_strength as usize;
-    let search_log = params.search_log;
-    let mut rep = *rep_offsets;
     let block_size = block_end - block_start;
-
     if block_size < 16 {
         return;
     }
 
-    let limit = block_end - 8;
+    let acceleration = params.target_length.max(1) as usize;
+    let step_size = acceleration + 1;
+    let search_strength = params.search_strength as usize;
+    let search_log = params.search_log;
+    let ilimit = block_end - 8;
     let max_distance = 1usize << params.window_log;
+
     let hash_log = if HASH_LOG != 0 {
         HASH_LOG
     } else {
         params.hash_log
     };
 
-    while ip < limit {
-        let rep0 = rep[0] as usize;
-        if (rep0 > 0) & (ip >= rep0) && rd32(src, ip) == rd32(src, ip - rep0) {
-            let ml = count_match(src, ip + 4, ip - rep0 + 4, block_end) + 4;
-            let mut back = 0usize;
-            while ip - back > anchor
-                && ip - back > rep0
-                && src[ip - back - 1] == src[ip - back - rep0 - 1]
-            {
-                back += 1;
-            }
-            ip -= back;
-            let lit_len = (ip - anchor) as u32;
-            sequences.push(Sequence {
-                literal_length: lit_len,
-                offset: rep0 as u32,
-                match_length: (ml + back) as u32,
-            });
-            ip += ml + back;
-            anchor = ip;
-            update_hashes(src, ip, hash_log, hash_short, hash_long);
-            rep_match_loop(
-                src,
-                &mut ip,
-                &mut anchor,
-                &mut rep,
-                hash_log,
-                hash_short,
-                hash_long,
-                sequences,
-                limit,
-                block_end,
-            );
-            continue;
+    let src_ptr = src.as_ptr();
+    let ht_short = hash_short.as_mut_ptr();
+    let ht_long = hash_long.as_mut_ptr();
+
+    let mut rep = *rep_offsets;
+    let mut anchor = block_start;
+    let mut ip0 = block_start;
+
+    unsafe {
+        core::hint::assert_unchecked(rep[0] > 0);
+        core::hint::assert_unchecked(rep[1] > 0);
+    }
+
+    #[inline(always)]
+    unsafe fn rdp32(p: *const u8, pos: usize) -> u32 {
+        unsafe { (p.add(pos) as *const u32).read_unaligned() }
+    }
+
+    #[inline(always)]
+    unsafe fn rdp64(p: *const u8, pos: usize) -> u64 {
+        unsafe { (p.add(pos) as *const u64).read_unaligned() }
+    }
+
+    'start: loop {
+        let mut ip1 = ip0 + 1;
+        let mut ip2 = ip0 + step_size;
+        let mut ip3 = ip2 + 1;
+
+        if ip3 >= ilimit {
+            break;
         }
 
-        let search_start = ip;
+        let mut hs0 = h4(unsafe { rdp32(src_ptr, ip0) }, hash_log);
+        let mut hl0 = h8(unsafe { rdp64(src_ptr, ip0) }, hash_log);
+        let mut hs1 = h4(unsafe { rdp32(src_ptr, ip1) }, hash_log);
+        let mut hl1 = h8(unsafe { rdp64(src_ptr, ip1) }, hash_log);
+
+        let mut match_short = unsafe { *ht_short.add(hs0) } as usize;
+        let mut match_long = unsafe { *ht_long.add(hl0) } as usize;
 
         loop {
-            let val4 = rd32(src, ip);
-            let val8 = rd64(src, ip);
-
-            let hs = h4(val4, hash_log) as usize;
-            let hl = h8(val8, hash_log) as usize;
-
-            let match_short_pos = hl32(hash_short, hs) as usize;
-            let match_long_pos = hl32(hash_long, hl) as usize;
-
-            hs32(hash_short, hs, ip as u32);
-            hs32(hash_long, hl, ip as u32);
-
-            if match_long_pos < ip
-                && ip - match_long_pos <= max_distance
-                && val8 == rd64(src, match_long_pos)
-            {
-                let match_len = count_match(src, ip + 8, match_long_pos + 8, block_end) + 8;
-                let mut back = 0usize;
-                while ip - back > anchor
-                    && match_long_pos > back
-                    && src[ip - back - 1] == src[match_long_pos - back - 1]
-                {
-                    back += 1;
-                }
-                let match_start = ip - back;
-                emit_match(
-                    match_start,
-                    match_long_pos - back,
-                    match_len + back,
-                    anchor,
-                    sequences,
-                    &mut rep,
-                );
-                ip += match_len;
-                anchor = ip;
-                insert_complementary(
-                    src,
-                    match_start,
-                    ip,
-                    search_log,
-                    hash_log,
-                    hash_short,
-                    hash_long,
-                );
-                update_hashes(src, ip, hash_log, hash_short, hash_long);
-                rep_match_loop(
-                    src,
-                    &mut ip,
-                    &mut anchor,
-                    &mut rep,
-                    hash_log,
-                    hash_short,
-                    hash_long,
-                    sequences,
-                    limit,
-                    block_end,
-                );
-                break;
+            // --- Store hashes for ip0 ---
+            unsafe {
+                *ht_short.add(hs0) = ip0 as u32;
+                *ht_long.add(hl0) = ip0 as u32;
             }
 
-            if match_short_pos < ip
-                && ip - match_short_pos <= max_distance
-                && val4 == rd32(src, match_short_pos)
+            // --- Rep check at step-ahead position ip2 ---
             {
-                if ip + 1 < limit {
-                    let val8_next = rd64(src, ip + 1);
-                    let hl_next = h8(val8_next, hash_log) as usize;
-                    let match_long_next = hl32(hash_long, hl_next) as usize;
-
-                    if match_long_next < ip + 1
-                        && ip + 1 - match_long_next <= max_distance
-                        && val8_next == rd64(src, match_long_next)
-                    {
-                        let long_len = count_match(src, ip + 9, match_long_next + 8, block_end) + 8;
-                        let short_len =
-                            count_match(src, ip + 4, match_short_pos + 4, block_end) + 4;
-
-                        if long_len > short_len + 1 {
-                            ip += 1;
-                            hs32(hash_long, hl_next, ip as u32);
-                            let mut back = 0usize;
-                            while ip - back > anchor
-                                && match_long_next > back
-                                && src[ip - back - 1] == src[match_long_next - back - 1]
-                            {
-                                back += 1;
-                            }
-                            let match_start = ip - back;
-                            emit_match(
-                                match_start,
-                                match_long_next - back,
-                                long_len + back,
-                                anchor,
-                                sequences,
-                                &mut rep,
-                            );
-                            ip += long_len;
-                            anchor = ip;
-                            insert_complementary(
-                                src,
-                                match_start,
-                                ip,
-                                search_log,
-                                hash_log,
-                                hash_short,
-                                hash_long,
-                            );
-                            update_hashes(src, ip, hash_log, hash_short, hash_long);
+                let rep0 = rep[0] as usize;
+                if ip2 >= rep0 {
+                    let v = unsafe { rdp32(src_ptr, ip2) };
+                    if v == unsafe { rdp32(src_ptr, ip2 - rep0) } {
+                        let fill_pos = ip0;
+                        unsafe {
+                            *ht_short.add(hs1) = ip1 as u32;
+                            *ht_long.add(hl1) = ip1 as u32;
+                        }
+                        ip0 = ip2;
+                        if ip0 > anchor
+                            && unsafe { *src_ptr.add(ip0 - 1) == *src_ptr.add(ip0 - rep0 - 1) }
+                        {
+                            ip0 -= 1;
+                        }
+                        let back = ip2 - ip0;
+                        let mlen = count_match(src, ip2 + 4, ip2 - rep0 + 4, block_end) + 4 + back;
+                        sequences.push(Sequence {
+                            literal_length: (ip0 - anchor) as u32,
+                            offset: rep0 as u32,
+                            match_length: mlen as u32,
+                        });
+                        ip0 += mlen;
+                        anchor = ip0;
+                        if ip0 <= ilimit {
+                            update_hashes(src, fill_pos + 2, hash_log, hash_short, hash_long);
+                            update_hashes(src, ip0 - 2, hash_log, hash_short, hash_long);
                             rep_match_loop(
                                 src,
-                                &mut ip,
+                                &mut ip0,
                                 &mut anchor,
                                 &mut rep,
                                 hash_log,
                                 hash_short,
                                 hash_long,
                                 sequences,
-                                limit,
+                                ilimit,
                                 block_end,
                             );
-                            break;
                         }
+                        continue 'start;
                     }
                 }
+            }
 
-                let mut match_len = count_match(src, ip + 4, match_short_pos + 4, block_end) + 4;
+            // --- Long match check at ip0 ---
+            if match_long < ip0
+                && ip0 - match_long <= max_distance
+                && unsafe { rdp64(src_ptr, ip0) == rdp64(src_ptr, match_long) }
+            {
+                unsafe {
+                    *ht_short.add(hs1) = ip1 as u32;
+                    *ht_long.add(hl1) = ip1 as u32;
+                }
                 let mut back = 0usize;
-                while ip - back > anchor
-                    && match_short_pos > back
-                    && src[ip - back - 1] == src[match_short_pos - back - 1]
+                while ip0 > anchor + back
+                    && match_long > back + block_start
+                    && unsafe {
+                        *src_ptr.add(ip0 - back - 1) == *src_ptr.add(match_long - back - 1)
+                    }
                 {
                     back += 1;
                 }
-                let match_start = ip - back;
-                match_len += back;
+                let match_start = ip0 - back;
+                let mlen = count_match(src, ip0 + 8, match_long + 8, block_end) + 8 + back;
                 emit_match(
                     match_start,
-                    match_short_pos - back,
-                    match_len,
+                    match_long - back,
+                    mlen,
                     anchor,
                     sequences,
                     &mut rep,
                 );
-                ip += match_len - back;
-                anchor = ip;
-                insert_complementary(
-                    src,
+                ip0 += mlen - back;
+                anchor = ip0;
+                if ip0 <= ilimit {
+                    insert_complementary(
+                        src,
+                        match_start,
+                        ip0,
+                        search_log,
+                        hash_log,
+                        hash_short,
+                        hash_long,
+                    );
+                    update_hashes(src, ip0, hash_log, hash_short, hash_long);
+                    rep_match_loop(
+                        src,
+                        &mut ip0,
+                        &mut anchor,
+                        &mut rep,
+                        hash_log,
+                        hash_short,
+                        hash_long,
+                        sequences,
+                        ilimit,
+                        block_end,
+                    );
+                }
+                continue 'start;
+            }
+
+            // --- Short match check at ip0 ---
+            if match_short < ip0
+                && ip0 - match_short <= max_distance
+                && unsafe { rdp32(src_ptr, ip0) == rdp32(src_ptr, match_short) }
+            {
+                // ip+1 lookahead: prefer long match at ip1 if significantly better
+                if ip1 < ilimit {
+                    let ml_next = unsafe { *ht_long.add(hl1) } as usize;
+                    if ml_next < ip1
+                        && ip1 - ml_next <= max_distance
+                        && unsafe { rdp64(src_ptr, ip1) == rdp64(src_ptr, ml_next) }
+                    {
+                        let long_len = count_match(src, ip1 + 8, ml_next + 8, block_end) + 8;
+                        let short_len = count_match(src, ip0 + 4, match_short + 4, block_end) + 4;
+
+                        if long_len > short_len + 1 {
+                            unsafe {
+                                *ht_short.add(hs1) = ip1 as u32;
+                                *ht_long.add(hl1) = ip1 as u32;
+                            }
+                            ip0 = ip1;
+                            let mut back = 0usize;
+                            while ip0 > anchor + back
+                                && ml_next > back + block_start
+                                && unsafe {
+                                    *src_ptr.add(ip0 - back - 1) == *src_ptr.add(ml_next - back - 1)
+                                }
+                            {
+                                back += 1;
+                            }
+                            let match_start = ip0 - back;
+                            emit_match(
+                                match_start,
+                                ml_next - back,
+                                long_len + back,
+                                anchor,
+                                sequences,
+                                &mut rep,
+                            );
+                            ip0 += long_len;
+                            anchor = ip0;
+                            if ip0 <= ilimit {
+                                insert_complementary(
+                                    src,
+                                    match_start,
+                                    ip0,
+                                    search_log,
+                                    hash_log,
+                                    hash_short,
+                                    hash_long,
+                                );
+                                update_hashes(src, ip0, hash_log, hash_short, hash_long);
+                                rep_match_loop(
+                                    src,
+                                    &mut ip0,
+                                    &mut anchor,
+                                    &mut rep,
+                                    hash_log,
+                                    hash_short,
+                                    hash_long,
+                                    sequences,
+                                    ilimit,
+                                    block_end,
+                                );
+                            }
+                            continue 'start;
+                        }
+                    }
+                }
+
+                // Take short match at ip0
+                unsafe {
+                    *ht_short.add(hs1) = ip1 as u32;
+                    *ht_long.add(hl1) = ip1 as u32;
+                }
+                let mut mlen = count_match(src, ip0 + 4, match_short + 4, block_end) + 4;
+                let mut back = 0usize;
+                while ip0 > anchor + back
+                    && match_short > back + block_start
+                    && unsafe {
+                        *src_ptr.add(ip0 - back - 1) == *src_ptr.add(match_short - back - 1)
+                    }
+                {
+                    back += 1;
+                }
+                let match_start = ip0 - back;
+                mlen += back;
+                emit_match(
                     match_start,
-                    ip,
-                    search_log,
-                    hash_log,
-                    hash_short,
-                    hash_long,
-                );
-                update_hashes(src, ip, hash_log, hash_short, hash_long);
-                rep_match_loop(
-                    src,
-                    &mut ip,
-                    &mut anchor,
-                    &mut rep,
-                    hash_log,
-                    hash_short,
-                    hash_long,
+                    match_short - back,
+                    mlen,
+                    anchor,
                     sequences,
-                    limit,
-                    block_end,
+                    &mut rep,
                 );
-                break;
+                ip0 += mlen - back;
+                anchor = ip0;
+                if ip0 <= ilimit {
+                    insert_complementary(
+                        src,
+                        match_start,
+                        ip0,
+                        search_log,
+                        hash_log,
+                        hash_short,
+                        hash_long,
+                    );
+                    update_hashes(src, ip0, hash_log, hash_short, hash_long);
+                    rep_match_loop(
+                        src,
+                        &mut ip0,
+                        &mut anchor,
+                        &mut rep,
+                        hash_log,
+                        hash_short,
+                        hash_long,
+                        sequences,
+                        ilimit,
+                        block_end,
+                    );
+                }
+                continue 'start;
             }
 
-            let step = acceleration + ((ip - search_start) >> search_strength);
-            ip += step;
+            // === First shift ===
+            match_short = unsafe { *ht_short.add(hs1) } as usize;
+            match_long = unsafe { *ht_long.add(hl1) } as usize;
+            hs0 = hs1;
+            hl0 = hl1;
 
-            if ip >= limit {
+            hs1 = h4(unsafe { rdp32(src_ptr, ip2) }, hash_log);
+            hl1 = h8(unsafe { rdp64(src_ptr, ip2) }, hash_log);
+            ip0 = ip1;
+            ip1 = ip2;
+            ip2 = ip3;
+
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    ht_short.add(hs1) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                );
+                core::arch::x86_64::_mm_prefetch(
+                    ht_long.add(hl1) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                );
+            }
+
+            // --- Store hashes for shifted ip0 ---
+            unsafe {
+                *ht_short.add(hs0) = ip0 as u32;
+                *ht_long.add(hl0) = ip0 as u32;
+            }
+
+            // --- Long match check at shifted ip0 ---
+            if match_long < ip0
+                && ip0 - match_long <= max_distance
+                && unsafe { rdp64(src_ptr, ip0) == rdp64(src_ptr, match_long) }
+            {
+                if step_size + ((ip0 - anchor) >> search_strength) <= 4 {
+                    unsafe {
+                        *ht_short.add(hs1) = ip1 as u32;
+                        *ht_long.add(hl1) = ip1 as u32;
+                    }
+                }
+                let mut back = 0usize;
+                while ip0 > anchor + back
+                    && match_long > back + block_start
+                    && unsafe {
+                        *src_ptr.add(ip0 - back - 1) == *src_ptr.add(match_long - back - 1)
+                    }
+                {
+                    back += 1;
+                }
+                let match_start = ip0 - back;
+                let mlen = count_match(src, ip0 + 8, match_long + 8, block_end) + 8 + back;
+                emit_match(
+                    match_start,
+                    match_long - back,
+                    mlen,
+                    anchor,
+                    sequences,
+                    &mut rep,
+                );
+                ip0 += mlen - back;
+                anchor = ip0;
+                if ip0 <= ilimit {
+                    insert_complementary(
+                        src,
+                        match_start,
+                        ip0,
+                        search_log,
+                        hash_log,
+                        hash_short,
+                        hash_long,
+                    );
+                    update_hashes(src, ip0, hash_log, hash_short, hash_long);
+                    rep_match_loop(
+                        src,
+                        &mut ip0,
+                        &mut anchor,
+                        &mut rep,
+                        hash_log,
+                        hash_short,
+                        hash_long,
+                        sequences,
+                        ilimit,
+                        block_end,
+                    );
+                }
+                continue 'start;
+            }
+
+            // --- Short match check at shifted ip0 ---
+            if match_short < ip0
+                && ip0 - match_short <= max_distance
+                && unsafe { rdp32(src_ptr, ip0) == rdp32(src_ptr, match_short) }
+            {
+                // ip+1 lookahead (hash_long[hl1] was prefetched in the shift)
+                if ip1 < ilimit {
+                    let ml_next = unsafe { *ht_long.add(hl1) } as usize;
+                    if ml_next < ip1
+                        && ip1 - ml_next <= max_distance
+                        && unsafe { rdp64(src_ptr, ip1) == rdp64(src_ptr, ml_next) }
+                    {
+                        let long_len = count_match(src, ip1 + 8, ml_next + 8, block_end) + 8;
+                        let short_len = count_match(src, ip0 + 4, match_short + 4, block_end) + 4;
+
+                        if long_len > short_len + 1 {
+                            if step_size + ((ip0 - anchor) >> search_strength) <= 4 {
+                                unsafe {
+                                    *ht_short.add(hs1) = ip1 as u32;
+                                    *ht_long.add(hl1) = ip1 as u32;
+                                }
+                            }
+                            ip0 = ip1;
+                            let mut back = 0usize;
+                            while ip0 > anchor + back
+                                && ml_next > back + block_start
+                                && unsafe {
+                                    *src_ptr.add(ip0 - back - 1) == *src_ptr.add(ml_next - back - 1)
+                                }
+                            {
+                                back += 1;
+                            }
+                            let match_start = ip0 - back;
+                            emit_match(
+                                match_start,
+                                ml_next - back,
+                                long_len + back,
+                                anchor,
+                                sequences,
+                                &mut rep,
+                            );
+                            ip0 += long_len;
+                            anchor = ip0;
+                            if ip0 <= ilimit {
+                                insert_complementary(
+                                    src,
+                                    match_start,
+                                    ip0,
+                                    search_log,
+                                    hash_log,
+                                    hash_short,
+                                    hash_long,
+                                );
+                                update_hashes(src, ip0, hash_log, hash_short, hash_long);
+                                rep_match_loop(
+                                    src,
+                                    &mut ip0,
+                                    &mut anchor,
+                                    &mut rep,
+                                    hash_log,
+                                    hash_short,
+                                    hash_long,
+                                    sequences,
+                                    ilimit,
+                                    block_end,
+                                );
+                            }
+                            continue 'start;
+                        }
+                    }
+                }
+
+                // Take short match
+                if step_size + ((ip0 - anchor) >> search_strength) <= 4 {
+                    unsafe {
+                        *ht_short.add(hs1) = ip1 as u32;
+                        *ht_long.add(hl1) = ip1 as u32;
+                    }
+                }
+                let mut mlen = count_match(src, ip0 + 4, match_short + 4, block_end) + 4;
+                let mut back = 0usize;
+                while ip0 > anchor + back
+                    && match_short > back + block_start
+                    && unsafe {
+                        *src_ptr.add(ip0 - back - 1) == *src_ptr.add(match_short - back - 1)
+                    }
+                {
+                    back += 1;
+                }
+                let match_start = ip0 - back;
+                mlen += back;
+                emit_match(
+                    match_start,
+                    match_short - back,
+                    mlen,
+                    anchor,
+                    sequences,
+                    &mut rep,
+                );
+                ip0 += mlen - back;
+                anchor = ip0;
+                if ip0 <= ilimit {
+                    insert_complementary(
+                        src,
+                        match_start,
+                        ip0,
+                        search_log,
+                        hash_log,
+                        hash_short,
+                        hash_long,
+                    );
+                    update_hashes(src, ip0, hash_log, hash_short, hash_long);
+                    rep_match_loop(
+                        src,
+                        &mut ip0,
+                        &mut anchor,
+                        &mut rep,
+                        hash_log,
+                        hash_short,
+                        hash_long,
+                        sequences,
+                        ilimit,
+                        block_end,
+                    );
+                }
+                continue 'start;
+            }
+
+            // === Second shift with step gap ===
+            match_short = unsafe { *ht_short.add(hs1) } as usize;
+            match_long = unsafe { *ht_long.add(hl1) } as usize;
+            hs0 = hs1;
+            hl0 = hl1;
+
+            hs1 = h4(unsafe { rdp32(src_ptr, ip2) }, hash_log);
+            hl1 = h8(unsafe { rdp64(src_ptr, ip2) }, hash_log);
+            ip0 = ip1;
+            ip1 = ip2;
+            let step = step_size + ((ip0 - anchor) >> search_strength);
+            ip2 = ip0 + step;
+            ip3 = ip1 + step;
+
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    ht_short.add(hs1) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                );
+                core::arch::x86_64::_mm_prefetch(
+                    ht_long.add(hl1) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                );
+            }
+
+            if ip3 >= ilimit {
                 break;
             }
         }
-
-        if ip >= limit {
-            break;
-        }
+        break;
     }
 }
 
