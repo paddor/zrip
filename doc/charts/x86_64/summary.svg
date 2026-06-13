@@ -100,15 +100,15 @@
   <rect x="643.6" y="807.7" width="50.0" height="1.6" fill="#c084fc" rx="1"/>
   <text x="591.8" y="838" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Incompressible</text>
   <rect x="250" y="850" width="12" height="12" fill="#60a5fa" rx="2"/>
-  <text x="268" y="860" fill="#e6edf3" font-size="10" font-weight="500">C zstd (libzstd)</text>
+  <text x="268" y="860" fill="#e6edf3" font-size="10" font-weight="500">C zstd 1.5.7 (libzstd)</text>
   <rect x="250" y="868" width="12" height="12" fill="#f87171" rx="2"/>
   <text x="268" y="878" fill="#e6edf3" font-size="10" font-weight="500">zrip (safe Rust)</text>
   <rect x="250" y="886" width="12" height="12" fill="#f59e0b" rx="2"/>
-  <text x="268" y="896" fill="#e6edf3" font-size="10" font-weight="500">structured-zstd (unsafe Rust)</text>
+  <text x="268" y="896" fill="#e6edf3" font-size="10" font-weight="500">structured-zstd 0.0.37 (unsafe Rust)</text>
   <rect x="460" y="850" width="12" height="12" fill="#4ade80" rx="2"/>
-  <text x="478" y="860" fill="#e6edf3" font-size="10" font-weight="500">ruzstd (safe Rust)</text>
+  <text x="478" y="860" fill="#e6edf3" font-size="10" font-weight="500">ruzstd 0.8.2 (safe Rust)</text>
   <rect x="460" y="868" width="12" height="12" fill="#c084fc" rx="2"/>
-  <text x="478" y="878" fill="#e6edf3" font-size="10" font-weight="500">lz4rip (safe Rust, LZ4)</text>
+  <text x="478" y="878" fill="#e6edf3" font-size="10" font-weight="500">lz4rip 0.3.1 (safe Rust, LZ4)</text>
   <text x="240" y="921" fill="#e6edf3" font-size="9">bright = compress + decompress</text>
   <text x="480" y="921" fill="#7d8590" font-size="9">dim = transfer @1 GB/s</text>
 </svg>

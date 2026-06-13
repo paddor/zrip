@@ -26,11 +26,11 @@ COLORS = {
 }
 
 LABELS = {
-    "C zstd":          "C zstd (libzstd)",
+    "C zstd":          "C zstd 1.5.7 (libzstd)",
     "zrip":            "zrip (safe Rust)",
-    "structured-zstd": "structured-zstd (unsafe Rust)",
-    "ruzstd":          "ruzstd (safe Rust)",
-    "lz4rip":          "lz4rip (safe Rust, LZ4)",
+    "structured-zstd": "structured-zstd 0.0.37 (unsafe Rust)",
+    "ruzstd":          "ruzstd 0.8.2 (safe Rust)",
+    "lz4rip":          "lz4rip 0.3.1 (safe Rust, LZ4)",
 }
 
 LEVELS = [3, 1, -1]

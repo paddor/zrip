@@ -13,8 +13,9 @@ zrip = "0.1"
 ## Why zrip
 
 **Fastest pure-Rust zstd encoder available.** 91% faster encode than
-structured-zstd at L3, 25% faster at L1. Faster decode than structured-zstd
-at L3 (36%) and L-1 (12%). 3x faster decode than ruzstd at L1.
+structured-zstd 0.0.37 at L3, 25% faster at L1. Faster decode than
+structured-zstd at L3 (36%) and L-1 (12%). 3x faster decode than
+ruzstd 0.8.2 at L1.
 
 **Negative levels (-7..-1) for high-throughput pipelines.** Most zstd
 libraries only expose levels 1+.
@@ -31,7 +32,7 @@ Geomean across a 16-file Silesia + misc corpus on Intel i7-8700B (x86_64,
 SSE2/AVX2), performance governor, turbo off. Ratio is `original / compressed`;
 higher is better.
 
-### zrip vs C zstd
+### zrip vs C zstd 1.5.7
 
 | Level | Strategy | zrip enc | C enc | zrip dec | C dec | zrip ratio | C ratio |
 |------:|:---------|:--------:|------:|:--------:|------:|:----------:|--------:|
