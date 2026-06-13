@@ -12,9 +12,9 @@ zrip = "0.1"
 
 ## Why zrip
 
-**Fastest pure-Rust zstd encoder available.** 66% faster encode than
-structured-zstd at L3, 20% faster at L-1. Faster decode than ruzstd at all
-levels and faster decode than structured-zstd at L3 (34%) and L-1 (12%).
+**Fastest pure-Rust zstd encoder available.** 72% faster encode than
+structured-zstd at L3, 23% faster at L-1. 3x faster decode than ruzstd at
+L1 and faster decode than structured-zstd at L3 (35%) and L-1 (12%).
 
 **Negative levels (-7..-1) for high-throughput pipelines.** Most zstd
 libraries only expose levels 1+.
@@ -35,17 +35,13 @@ higher is better.
 
 | Level | Strategy | zrip enc | C enc | zrip dec | C dec | zrip ratio | C ratio |
 |------:|:---------|:--------:|------:|:--------:|------:|:----------:|--------:|
-|    -7 | Fast     | 324 MB/s |   532 | 833 MB/s |  1800 |      2.13x |   2.13x |
-|    -1 | Fast     | 229 MB/s |   383 | 673 MB/s |  1461 |      2.70x |   2.78x |
-|     1 | Fast     | 193 MB/s |   320 | 566 MB/s |  1047 |      3.13x |   3.33x |
-|     2 | Fast     | 188 MB/s |   263 | 551 MB/s |   938 |      3.23x |   3.45x |
-|     3 | DFast    | 155 MB/s |   193 | 689 MB/s |   904 |      3.23x |   3.57x |
-|     4 | DFast    | 159 MB/s |   183 | 685 MB/s |   872 |      3.23x |   3.70x |
+|    -1 | Fast     | 235 MB/s |   403 | 741 MB/s |  1564 |      2.80x |   2.91x |
+|     1 | Fast     | 228 MB/s |   346 | 667 MB/s |  1146 |      3.20x |   3.53x |
+|     3 | DFast    | 164 MB/s |   203 | 755 MB/s |   989 |      3.35x |   3.80x |
 
-Encode is 40-50% of C zstd at negative levels, closing to ~85% at L3/L4.
-Decode is 45-75% of C zstd. Ratio is within 2% at negative levels, widening
-to ~13% at L4. The gap is pure Rust vs hand-tuned C with SIMD assembly in its
-hot paths.
+Encode is 58-81% of C zstd depending on level. Decode is 47-76% of C zstd.
+Ratio is within 4% at L-1, widening to ~12% at L3. The gap is pure Rust vs
+hand-tuned C with SIMD assembly in its hot paths.
 
 ## API
 
