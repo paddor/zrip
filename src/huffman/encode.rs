@@ -3,6 +3,10 @@ use alloc::vec;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
+use crate::fse::FseDecodeEntry;
+use crate::fse::table_builder::{
+    build_decode_table, normalize_counts, serialize_fse_table_description,
+};
 use crate::huffman::{MAX_BITS, MAX_SYMBOL_VALUE};
 
 pub struct HuffmanEncodeTable {
@@ -35,14 +39,15 @@ impl HuffmanEncodeTable {
             return None;
         }
 
-        // Direct weight encoding supports at most 128 explicit symbols.
-        // Fall back to raw literals for blocks with more distinct values.
-        if max_sym as usize > 128 {
-            return None;
-        }
-
         let (weights, table_log) = compute_huffman_weights(&freqs, num_symbols)?;
         let (codes, num_bits) = build_encode_codes(&weights, table_log);
+
+        if max_sym as usize > 128 {
+            let explicit = &weights[..max_sym as usize];
+            if serialize_weights_fse(explicit).is_none() {
+                return None;
+            }
+        }
 
         Some(Self {
             codes,
@@ -70,15 +75,19 @@ impl HuffmanEncodeTable {
         let explicit = &self.weights[..self.max_symbol as usize];
         let num_symbols = explicit.len();
 
-        let mut out = Vec::with_capacity(1 + (num_symbols + 1) / 2);
-        out.push((num_symbols + 127) as u8);
-        let num_bytes = (num_symbols + 1) / 2;
-        for i in 0..num_bytes {
-            let hi = explicit.get(i * 2).copied().unwrap_or(0);
-            let lo = explicit.get(i * 2 + 1).copied().unwrap_or(0);
-            out.push((hi << 4) | lo);
+        if num_symbols <= 128 {
+            let mut out = Vec::with_capacity(1 + (num_symbols + 1) / 2);
+            out.push((num_symbols + 127) as u8);
+            let num_bytes = (num_symbols + 1) / 2;
+            for i in 0..num_bytes {
+                let hi = explicit.get(i * 2).copied().unwrap_or(0);
+                let lo = explicit.get(i * 2 + 1).copied().unwrap_or(0);
+                out.push((hi << 4) | lo);
+            }
+            out
+        } else {
+            serialize_weights_fse(explicit).expect("FSE weight encoding verified in from_data")
         }
-        out
     }
 
     pub fn encode_single_stream(&self, data: &[u8]) -> Vec<u8> {
@@ -300,6 +309,176 @@ fn build_encode_codes(
     (codes, num_bits)
 }
 
+#[derive(Clone, Copy)]
+struct WeightSymTT {
+    delta_nb_bits: u32,
+    delta_find_state: i32,
+}
+
+struct WeightFseEnc {
+    symbol_tt: Vec<WeightSymTT>,
+    state_table: Vec<u16>,
+    table_log: u8,
+}
+
+impl WeightFseEnc {
+    fn build(
+        decode_table: &[FseDecodeEntry],
+        table_size: usize,
+        max_sym: usize,
+        table_log: u8,
+    ) -> Self {
+        let num_symbols = max_sym + 1;
+        let mut count = vec![0u32; num_symbols];
+        for i in 0..table_size {
+            count[decode_table[i].symbol as usize] += 1;
+        }
+
+        let mut symbol_tt = vec![
+            WeightSymTT {
+                delta_nb_bits: (table_log as u32 + 1) << 16,
+                delta_find_state: 0,
+            };
+            num_symbols
+        ];
+        let mut total = 0i32;
+        for s in 0..num_symbols {
+            let c = count[s];
+            if c == 0 {
+                symbol_tt[s].delta_nb_bits = ((table_log as u32 + 1) << 16) | (1u32 << table_log);
+                continue;
+            }
+            let max_bits_out = if c == 1 {
+                table_log as u32
+            } else {
+                table_log as u32 - (31 - (c - 1).leading_zeros())
+            };
+            let min_state_plus = c << max_bits_out;
+            symbol_tt[s].delta_nb_bits = (max_bits_out << 16).wrapping_sub(min_state_plus);
+            symbol_tt[s].delta_find_state = total - c as i32;
+            total += c as i32;
+        }
+
+        let mut cumul = vec![0u32; num_symbols + 1];
+        for s in 0..num_symbols {
+            cumul[s + 1] = cumul[s] + count[s];
+        }
+
+        let mut state_table = vec![0u16; table_size];
+        let mut cumul_copy = cumul.clone();
+        for i in 0..table_size {
+            let s = decode_table[i].symbol as usize;
+            let idx = cumul_copy[s] as usize;
+            state_table[idx] = (table_size + i) as u16;
+            cumul_copy[s] += 1;
+        }
+
+        Self {
+            symbol_tt,
+            state_table,
+            table_log,
+        }
+    }
+
+    fn init_state(&self, symbol: u8) -> u32 {
+        let tt = &self.symbol_tt[symbol as usize];
+        let nb_bits_out = tt.delta_nb_bits.wrapping_add(1 << 15) >> 16;
+        let base_state = (nb_bits_out << 16).wrapping_sub(tt.delta_nb_bits);
+        let idx = (base_state >> nb_bits_out) as i32 + tt.delta_find_state;
+        self.state_table[idx as usize] as u32
+    }
+}
+
+fn serialize_weights_fse(weights: &[u8]) -> Option<Vec<u8>> {
+    let n = weights.len();
+    if n < 2 {
+        return None;
+    }
+
+    let max_w = *weights.iter().max().unwrap() as usize;
+    let mut freqs = vec![0u32; max_w + 1];
+    for &w in weights {
+        freqs[w as usize] += 1;
+    }
+
+    let distinct = freqs.iter().filter(|&&f| f > 0).count();
+    if distinct <= 1 {
+        return None;
+    }
+
+    let min_log = if max_w > 0 {
+        (32 - (max_w as u32).leading_zeros()) as u8 + 2
+    } else {
+        5
+    };
+    let acc_log = min_log.max(5).min(7);
+
+    let dist = normalize_counts(&freqs, acc_log);
+    for (i, &f) in freqs.iter().enumerate() {
+        if f > 0 && dist[i] == 0 {
+            return None;
+        }
+    }
+
+    let table_desc = serialize_fse_table_description(&dist, acc_log);
+    let decode_table = build_decode_table(&dist, acc_log).ok()?;
+    let table_size = 1usize << acc_log;
+    let enc = WeightFseEnc::build(&decode_table, table_size, max_w, acc_log);
+
+    let fse_stream = encode_weights_interleaved(weights, &enc)?;
+
+    let compressed_size = table_desc.len() + fse_stream.len();
+    if compressed_size > 127 {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(1 + compressed_size);
+    out.push(compressed_size as u8);
+    out.extend_from_slice(&table_desc);
+    out.extend_from_slice(&fse_stream);
+
+    Some(out)
+}
+
+fn encode_weights_interleaved(weights: &[u8], enc: &WeightFseEnc) -> Option<Vec<u8>> {
+    use crate::bitstream::writer::BitWriter;
+
+    let n = weights.len();
+    if n < 2 {
+        return None;
+    }
+
+    let acc_log = enc.table_log;
+    let table_size = 1u32 << acc_log;
+
+    let last_s1 = if n % 2 != 0 { n - 1 } else { n - 2 };
+    let last_s2 = if n % 2 != 0 { n - 2 } else { n - 1 };
+
+    let mut state1 = enc.init_state(weights[last_s1]);
+    let mut state2 = enc.init_state(weights[last_s2]);
+
+    let mut writer = BitWriter::with_capacity(n * 2 + 16);
+
+    if n > 2 {
+        for k in (0..=(n - 3)).rev() {
+            let w = weights[k];
+            let state = if k % 2 == 0 { &mut state1 } else { &mut state2 };
+
+            let tt = &enc.symbol_tt[w as usize];
+            let nb = ((tt.delta_nb_bits.wrapping_add(*state)) >> 16) as u8;
+            writer.write_bits(*state & ((1u32 << nb) - 1), nb);
+            let idx = (*state >> nb as u32) as i32 + tt.delta_find_state;
+            *state = enc.state_table[idx as usize] as u32;
+        }
+    }
+
+    writer.write_bits(state2 - table_size, acc_log);
+    writer.write_bits(state1 - table_size, acc_log);
+    writer.close_reverse_stream();
+
+    Some(writer.into_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,6 +562,54 @@ mod tests {
         let (decode_table, decode_log) =
             crate::huffman::weights::build_huffman_decode_table(&parsed_weights).unwrap();
         let decoded = crate::huffman::decode::decode_single_stream(
+            &decode_table,
+            decode_log,
+            &encoded,
+            data.len(),
+        )
+        .unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn roundtrip_high_symbol_fse_weights() {
+        let mut data: Vec<u8> = (0u8..=200).cycle().take(8192).collect();
+        data.extend(vec![0u8; 4096]);
+        let table = HuffmanEncodeTable::from_data(&data).unwrap();
+        assert!(table.max_symbol > 128);
+        let weights_raw = table.serialize_weights();
+        assert!(weights_raw[0] < 128, "header byte must indicate FSE path");
+        let encoded = table.encode_4_streams(&data);
+
+        let (parsed_weights, _) =
+            crate::huffman::weights::parse_huffman_weights(&weights_raw).unwrap();
+        let (decode_table, decode_log) =
+            crate::huffman::weights::build_huffman_decode_table(&parsed_weights).unwrap();
+        let decoded = crate::huffman::decode::decode_4_streams(
+            &decode_table,
+            decode_log,
+            &encoded,
+            data.len(),
+        )
+        .unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn roundtrip_255_symbols_fse_weights() {
+        let mut data: Vec<u8> = (0u8..=255).cycle().take(8192).collect();
+        data.extend(vec![0u8; 2048]);
+        let table = HuffmanEncodeTable::from_data(&data).unwrap();
+        assert_eq!(table.max_symbol, 255);
+        let weights_raw = table.serialize_weights();
+        assert!(weights_raw[0] < 128);
+        let encoded = table.encode_4_streams(&data);
+
+        let (parsed_weights, _) =
+            crate::huffman::weights::parse_huffman_weights(&weights_raw).unwrap();
+        let (decode_table, decode_log) =
+            crate::huffman::weights::build_huffman_decode_table(&parsed_weights).unwrap();
+        let decoded = crate::huffman::decode::decode_4_streams(
             &decode_table,
             decode_log,
             &encoded,

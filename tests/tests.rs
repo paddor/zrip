@@ -86,6 +86,24 @@ fn zrip_compress_c_decompress() {
     assert_eq!(decompressed, original);
 }
 
+#[test]
+fn zrip_compress_c_decompress_high_symbol_count() {
+    let mut original = Vec::with_capacity(65536);
+    for _ in 0..128 {
+        original.extend_from_slice(b"AAAAAAAAAAAAAAAA");
+        original.extend((0u8..=255).rev());
+        original.extend_from_slice(b"BBBBBBBBBBBBBBBB");
+        original.extend(128u8..=255);
+    }
+    for level in [-1, 1, 3] {
+        let compressed = zrip::compress(&original, level).unwrap();
+        let decompressed = zstd::decode_all(&compressed[..])
+            .unwrap_or_else(|e| panic!("C zstd failed to decompress level {level}: {e}"));
+        assert_eq!(decompressed.len(), original.len(), "level {level}");
+        assert_eq!(decompressed, original, "level {level}");
+    }
+}
+
 // ===== Decoder cross-validation (C compress -> zrip decompress) =====
 
 #[test]
