@@ -10,6 +10,8 @@ zrip = "0.1"
 
 ![zstd pipeline benchmark](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/summary.svg)
 
+![encode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/scatter.svg)
+
 ## Why zrip
 
 **Fastest pure-Rust zstd encoder available.** 91% faster encode than
