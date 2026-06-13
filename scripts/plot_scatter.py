@@ -16,12 +16,13 @@ import platform
 import sys
 
 
-CODEC_ORDER = ["C zstd", "zrip", "structured-zstd", "lz4rip"]
+CODEC_ORDER = ["C zstd", "zrip", "structured-zstd", "ruzstd", "lz4rip"]
 
 COLORS = {
     "C zstd":          "#60a5fa",
     "zrip":            "#f87171",
     "structured-zstd": "#f59e0b",
+    "ruzstd":          "#4ade80",
     "lz4rip":          "#c084fc",
 }
 
@@ -29,7 +30,13 @@ LABELS = {
     "C zstd":          "C zstd 1.5.7 (libzstd)",
     "zrip":            "zrip (safe Rust)",
     "structured-zstd": "structured-zstd 0.0.37 (unsafe Rust)",
+    "ruzstd":          "ruzstd 0.8.2 (safe Rust)",
     "lz4rip":          "lz4rip 0.3.1 (safe Rust, LZ4)",
+}
+
+# ruzstd only compresses at L1; other levels output raw (1.00x ratio).
+LEVEL_FILTER = {
+    "ruzstd": {1},
 }
 
 COMPRESSIBLE = {
@@ -106,8 +113,11 @@ def compute_points(data):
 
     for codec in CODEC_ORDER:
         rows = data.get(codec, [])
+        allowed = LEVEL_FILTER.get(codec)
         levels = sorted(set(r["level"] for r in rows))
         for level in levels:
+            if allowed is not None and level not in allowed:
+                continue
             level_rows = [r for r in rows if r["level"] == level]
             for group_name, file_set in groups:
                 enc_logs = []
@@ -281,7 +291,12 @@ def render_panel(L, points, data, group_name, xl, xr, p_top, p_bot,
             if idx not in label_indices:
                 continue
 
-            lbl = "LZ4" if codec == "lz4rip" else str(level)
+            if codec == "lz4rip":
+                lbl = "LZ4"
+            elif codec == "ruzstd":
+                lbl = "L1"
+            else:
+                lbl = str(level)
             lbl_w = len(lbl) * 5.5 + 4
             lbl_h = 10
 
