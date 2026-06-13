@@ -28,6 +28,7 @@ pub fn decode_single_stream(
     }
 
     while output.len() < output_size {
+        reader.refill();
         let remaining = reader.bits_remaining();
         if remaining == 0 {
             return Err(DecompressError::BadHuffmanStream);
@@ -100,6 +101,7 @@ fn decode_stream_tail(
     let tl = table_log as usize;
     let mut pos = 0;
 
+    reader.refill();
     while pos + 4 <= output_size && reader.bits_remaining() >= tl + tl + tl + tl {
         for _ in 0..4 {
             let bits = reader.peek_bits(table_log);
@@ -111,6 +113,7 @@ fn decode_stream_tail(
     }
 
     while pos < output_size {
+        reader.refill();
         let remaining = reader.bits_remaining();
         if remaining == 0 {
             return Err(DecompressError::BadHuffmanStream);
