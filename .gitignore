@@ -1,0 +1,8 @@
+/info/
+/target/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/corpus/
+/doc/charts/
+Cargo.lock

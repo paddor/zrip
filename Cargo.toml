@@ -1,0 +1,47 @@
+[package]
+name = "zrip"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Pure Rust zstd codec: Fast/DFast strategies (levels -7..4), COVER/FastCOVER dict builder"
+license = "MIT"
+repository = "https://github.com/paddor/zrip"
+categories = ["compression"]
+keywords = ["zstd", "zstandard", "compression", "decompression"]
+
+[features]
+default = ["std", "frame"]
+std = ["alloc"]
+alloc = []
+frame = ["std"]
+dict_builder = ["std"]
+nightly = []
+
+[dependencies]
+
+[dev-dependencies]
+zstd = "0.13"
+zstd-safe = "7"
+binggan = "0.14"
+proptest = "1"
+libc = "0.2"
+lz4rip = "0.3.1"
+ruzstd = "0.8"
+structured-zstd = "0.0.36"
+
+[[bench]]
+name = "binggan_bench"
+harness = false
+
+[[example]]
+name = "zrip_bench"
+
+[[example]]
+name = "quickstart"
+
+[[example]]
+name = "ruzstd_compare"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

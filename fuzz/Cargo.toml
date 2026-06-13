@@ -1,0 +1,63 @@
+[package]
+name = "zrip-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+zrip = { path = "..", features = ["dict_builder"] }
+zstd = "0.13"
+
+[[bin]]
+name = "fuzz_roundtrip_frame"
+path = "fuzz_targets/roundtrip_frame.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_roundtrip_block"
+path = "fuzz_targets/roundtrip_block.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_corrupt_decompress"
+path = "fuzz_targets/corrupt_decompress.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_c_compress_zrip_decompress"
+path = "fuzz_targets/c_compress_zrip_decompress.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_zrip_compress_c_decompress"
+path = "fuzz_targets/zrip_compress_c_decompress.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_roundtrip_dict"
+path = "fuzz_targets/roundtrip_dict.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_corrupt_bitflip"
+path = "fuzz_targets/corrupt_bitflip.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_corrupt_splice"
+path = "fuzz_targets/corrupt_splice.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_corrupt_truncate"
+path = "fuzz_targets/corrupt_truncate.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_corrupt_overwrite"
+path = "fuzz_targets/corrupt_overwrite.rs"
+doc = false
