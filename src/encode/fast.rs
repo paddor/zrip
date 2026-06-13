@@ -111,7 +111,10 @@ fn compress_fast_block_impl<const HASH_LOG: u32>(
     let search_strength = params.search_strength as usize;
     let ilimit = block_end - 4;
     let max_distance = 1usize << params.window_log;
-    let mut probe_limit = (block_start + max_distance).min(block_end);
+
+    let probe_interval = (block_size / 4).max(4096).min(block_size);
+    let mut probe_limit = block_start + probe_interval;
+    let mut total_match_bytes: usize = 0;
 
     let src_ptr = src.as_ptr();
     let ht_ptr = hash_table.as_mut_ptr();
@@ -170,6 +173,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32>(
                     unsafe { *ht_ptr.add(h1) = ip1 as u32 };
                     let back = ip2 - ip0;
                     let mlen = count_match(src, ip2 + 4, ip2 - rep1 + 4, block_end) + 4 + back;
+                    total_match_bytes += mlen;
                     let lit_len = (ip0 - anchor) as u32;
                     sequences.push(Sequence {
                         literal_length: lit_len,
@@ -215,6 +219,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32>(
                 let match_start = ip0 - back;
                 let offset = (match_start - (match_idx - back)) as u32;
                 let mlen = count_match(src, ip0 + 4, match_idx + 4, block_end) + 4 + back;
+                total_match_bytes += mlen;
                 let lit_len = (match_start - anchor) as u32;
                 sequences.push(Sequence {
                     literal_length: lit_len,
@@ -281,6 +286,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32>(
                 let match_start = ip0 - back;
                 let offset = (match_start - (match_idx - back)) as u32;
                 let mlen = count_match(src, ip0 + 4, match_idx + 4, block_end) + 4 + back;
+                total_match_bytes += mlen;
                 let lit_len = (match_start - anchor) as u32;
                 sequences.push(Sequence {
                     literal_length: lit_len,
@@ -328,13 +334,12 @@ fn compress_fast_block_impl<const HASH_LOG: u32>(
             }
 
             if ip0 >= probe_limit {
-                probe_limit = block_end;
                 let scanned = ip0 - block_start;
-                let total_match: usize = sequences.iter().map(|s| s.match_length as usize).sum();
-                if total_match * 8 < scanned {
+                if total_match_bytes * 6 < scanned {
                     sequences.clear();
                     return;
                 }
+                probe_limit = probe_limit.saturating_add(probe_interval).min(block_end);
             }
 
             if ip3 >= ilimit {

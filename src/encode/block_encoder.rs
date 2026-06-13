@@ -227,9 +227,15 @@ pub(crate) fn encode_compressed_block(
         return;
     }
 
+    let n = sequences.len();
+    let total_match: usize = sequences.iter().map(|s| s.match_length as usize).sum();
+    if total_match <= n * 3 {
+        encode_raw_block(src, last, output);
+        return;
+    }
+
     let saved_rep = *rep_offsets;
 
-    let n = sequences.len();
     workspace.lit_buf.clear();
     workspace.lit_buf.reserve(src.len() + 16);
     workspace.packed_seqs.clear();
