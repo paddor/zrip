@@ -99,6 +99,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
     let mut ip = block_start;
     let acceleration = params.target_length.max(1) as usize;
     let search_strength = params.search_strength as usize;
+    let search_log = params.search_log;
     let mut rep = *rep_offsets;
     let block_size = block_end - block_start;
 
@@ -188,7 +189,15 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                 );
                 ip += match_len;
                 anchor = ip;
-                insert_complementary(src, match_start, ip, hash_log, hash_short, hash_long);
+                insert_complementary(
+                    src,
+                    match_start,
+                    ip,
+                    search_log,
+                    hash_log,
+                    hash_short,
+                    hash_long,
+                );
                 update_hashes(src, ip, hash_log, hash_short, hash_long);
                 rep_match_loop(
                     src,
@@ -247,6 +256,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                                 src,
                                 match_start,
                                 ip,
+                                search_log,
                                 hash_log,
                                 hash_short,
                                 hash_long,
@@ -289,7 +299,15 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                 );
                 ip += match_len - back;
                 anchor = ip;
-                insert_complementary(src, match_start, ip, hash_log, hash_short, hash_long);
+                insert_complementary(
+                    src,
+                    match_start,
+                    ip,
+                    search_log,
+                    hash_log,
+                    hash_short,
+                    hash_long,
+                );
                 update_hashes(src, ip, hash_log, hash_short, hash_long);
                 rep_match_loop(
                     src,
@@ -484,24 +502,29 @@ fn insert_complementary(
     src: &[u8],
     match_start: usize,
     match_end: usize,
+    search_log: u32,
     hash_log: u32,
     hash_short: &mut [u32],
     hash_long: &mut [u32],
 ) {
-    let pos1 = match_start + 2;
-    if pos1 + 8 <= src.len() && pos1 < match_end {
-        let hs = h4(rd32(src, pos1), hash_log) as usize;
-        hs32(hash_short, hs, pos1 as u32);
-        let hl = h8(rd64(src, pos1), hash_log) as usize;
-        hs32(hash_long, hl, pos1 as u32);
+    let step = 1usize << search_log;
+    let safe_end = match_end.min(src.len().saturating_sub(7));
+    let cap_end = safe_end.min(match_start + 2 + step * 4);
+    let mut pos = match_start + 2;
+    while pos < cap_end {
+        let hs = h4(rd32(src, pos), hash_log) as usize;
+        hs32(hash_short, hs, pos as u32);
+        let hl = h8(rd64(src, pos), hash_log) as usize;
+        hs32(hash_long, hl, pos as u32);
+        pos += step;
     }
     if match_end >= 2 {
-        let pos2 = match_end - 2;
-        if pos2 + 8 <= src.len() && pos2 > match_start + 2 {
-            let hs = h4(rd32(src, pos2), hash_log) as usize;
-            hs32(hash_short, hs, pos2 as u32);
-            let hl = h8(rd64(src, pos2), hash_log) as usize;
-            hs32(hash_long, hl, pos2 as u32);
+        let tail = match_end - 2;
+        if tail < safe_end && tail >= cap_end {
+            let hs = h4(rd32(src, tail), hash_log) as usize;
+            hs32(hash_short, hs, tail as u32);
+            let hl = h8(rd64(src, tail), hash_log) as usize;
+            hs32(hash_long, hl, tail as u32);
         }
     }
 }
