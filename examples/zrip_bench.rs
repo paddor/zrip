@@ -296,54 +296,21 @@ fn codec_cache_path(codec: &str) -> PathBuf {
     cache_dir().join(format!("{}.jsonl", codec.replace(' ', "_")))
 }
 
-fn load_cache(codec: &str) -> Vec<BenchResult> {
-    let path = codec_cache_path(codec);
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-    content.lines().filter_map(parse_json_line).collect()
-}
-
-fn save_cache(results: &[BenchResult], codec: &str) {
+fn append_cache(results: &[BenchResult], codec: &str) {
     let entries: Vec<_> = results.iter().filter(|r| r.codec == codec).collect();
     if entries.is_empty() {
         return;
     }
     let path = codec_cache_path(codec);
-    let mut f = std::fs::File::create(&path).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .unwrap();
     for r in &entries {
         writeln!(f, "{}", r.to_json()).unwrap();
     }
-    eprintln!("cached {} results to {}", entries.len(), path.display());
-}
-
-fn parse_json_line(line: &str) -> Option<BenchResult> {
-    let line = line.trim().trim_matches(',');
-    if line == "[" || line == "]" || line.is_empty() {
-        return None;
-    }
-    let get = |key: &str| -> Option<String> {
-        let prefix = format!("\"{key}\": ");
-        let start = line.find(&prefix)? + prefix.len();
-        let rest = &line[start..];
-        if let Some(stripped) = rest.strip_prefix('"') {
-            let end = stripped.find('"')?;
-            Some(stripped[..end].to_string())
-        } else {
-            let end = rest.find([',', '}']).unwrap_or(rest.len());
-            Some(rest[..end].to_string())
-        }
-    };
-    Some(BenchResult {
-        codec: get("codec")?,
-        input_name: get("input")?,
-        level: get("level")?.parse().ok()?,
-        input_size: get("input_size")?.parse().ok()?,
-        compressed_size: get("compressed_size")?.parse().ok()?,
-        compress_ns: get("compress_ns")?.parse().ok()?,
-        decompress_ns: get("decompress_ns")?.parse().ok()?,
-    })
+    eprintln!("appended {} results to {}", entries.len(), path.display());
 }
 
 const CODECS: &[&str] = &["C zstd", "zrip", "ruzstd", "structured-zstd", "lz4rip"];
@@ -408,7 +375,6 @@ fn main() {
 
     let target_ns = 20_000_000u64;
 
-    let cached: Vec<Vec<BenchResult>> = CODECS.iter().map(|c| load_cache(c)).collect();
     let mut results: Vec<BenchResult> = Vec::new();
 
     let all_paths: Vec<&str> = ALL_FILES
@@ -432,17 +398,9 @@ fn main() {
         };
 
         for &level in levels {
-            for (ci, &codec) in CODECS.iter().enumerate() {
+            for &codec in CODECS {
                 let should_run = only.is_empty() || only.iter().any(|o| codec.contains(o.as_str()));
-
                 if !should_run {
-                    if let Some(c) = cached[ci]
-                        .iter()
-                        .find(|c| c.input_name == name && c.level == level)
-                    {
-                        eprintln!("  {codec} x {name} @{level}: cached");
-                        results.push(c.clone());
-                    }
                     continue;
                 }
 
@@ -461,7 +419,7 @@ fn main() {
     }
 
     for codec in CODECS {
-        save_cache(&results, codec);
+        append_cache(&results, codec);
     }
 
     let stdout = std::io::stdout();

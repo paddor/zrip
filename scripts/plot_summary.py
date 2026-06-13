@@ -15,13 +15,14 @@ import platform
 import sys
 
 
-CODEC_ORDER = ["C zstd", "zrip", "structured-zstd", "ruzstd"]
+CODEC_ORDER = ["C zstd", "zrip", "structured-zstd", "ruzstd", "lz4rip"]
 
 COLORS = {
     "C zstd":          ("#60a5fa", "#4680c4"),
     "zrip":            ("#f87171", "#c45050"),
     "structured-zstd": ("#f59e0b", "#c47d08"),
     "ruzstd":          ("#4ade80", "#3aaf60"),
+    "lz4rip":          ("#c084fc", "#9966cc"),
 }
 
 LABELS = {
@@ -29,6 +30,7 @@ LABELS = {
     "zrip":            "zrip (safe Rust)",
     "structured-zstd": "structured-zstd (unsafe Rust)",
     "ruzstd":          "ruzstd (safe Rust)",
+    "lz4rip":          "lz4rip (safe Rust, LZ4)",
 }
 
 LEVELS = [3, 1, -1]
@@ -98,6 +100,7 @@ def load_all_data():
         path = os.path.join(cache_dir, fname)
         if not os.path.exists(path):
             continue
+        seen = {}
         with open(path) as f:
             for line in f:
                 line = line.strip()
@@ -106,7 +109,8 @@ def load_all_data():
                 r = json.loads(line)
                 if r.get("input_size", 0) < MIN_FILE_SIZE:
                     continue
-                data.setdefault(codec, []).append(r)
+                seen[(r["input"], r["level"])] = r
+        data[codec] = list(seen.values())
     return data
 
 
@@ -119,6 +123,8 @@ def compute_stacks(data):
         rows = data.get(codec, [])
         for level in LEVELS:
             if codec == "ruzstd" and level != 1:
+                continue
+            if codec == "lz4rip" and level != -1:
                 continue
             level_rows = [r for r in rows if r["level"] == level]
             for group_name, file_set in groups:
@@ -170,7 +176,7 @@ def generate_svg(data):
         panel_tops.append(y)
         y += panel_h + panel_gap
 
-    svg_h = y - panel_gap + 110
+    svg_h = y - panel_gap + 130
 
     # shared y-axis scale across all panels
     y_max = 0
@@ -295,8 +301,9 @@ def generate_svg(data):
     leg_y = panel_tops[-1] + panel_h + 35
     legend_items = [(k, LABELS[k]) for k in CODEC_ORDER if k in COLORS]
     row_h = 18
-    leg_positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
+    leg_positions = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1)]
     leg_col_x = [mid_x - 200, mid_x + 10]
+    n_leg_rows = max(row for _, row in leg_positions) + 1
     for i, (key, label) in enumerate(legend_items):
         if i >= len(leg_positions):
             break
@@ -314,7 +321,7 @@ def generate_svg(data):
         )
 
     # bar segment legend
-    seg_y = leg_y + 2 * row_h + 8
+    seg_y = leg_y + n_leg_rows * row_h + 8
     seg_items = [
         ("bright = compress + decompress", "#e6edf3"),
         ("dim = transfer @1 GB/s", "#7d8590"),
