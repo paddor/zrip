@@ -12,9 +12,9 @@ zrip = "0.1"
 
 ## Why zrip
 
-**Fastest pure-Rust zstd encoder available.** 72% faster encode than
-structured-zstd at L3, 23% faster at L-1. 3x faster decode than ruzstd at
-L1 and faster decode than structured-zstd at L3 (35%) and L-1 (12%).
+**Fastest pure-Rust zstd encoder available.** 91% faster encode than
+structured-zstd at L3, 25% faster at L1. Faster decode than structured-zstd
+at L3 (36%) and L-1 (12%). 3x faster decode than ruzstd at L1.
 
 **Negative levels (-7..-1) for high-throughput pipelines.** Most zstd
 libraries only expose levels 1+.
