@@ -48,6 +48,14 @@ INCOMPRESSIBLE = {"sao", "x-ray", "mr"}
 
 MIN_FILE_SIZE = 10_000
 
+# Fixed axis ranges so the chart doesn't shift when data changes.
+FIXED_LOG_X_MIN = 1.477  # 10^1.477 ≈ 30 MB/s
+FIXED_LOG_X_MAX = 3.301  # 10^3.301 ≈ 2000 MB/s
+FIXED_Y_RANGES = {
+    "Compressible":   (2.0, 5.0),
+    "Incompressible": (1.0, 2.0),
+}
+
 
 def detect_hardware():
     try:
@@ -107,7 +115,7 @@ def load_all_data():
 
 
 def compute_points(data):
-    """For each (codec, level, group), compute geomean encode MB/s and ratio."""
+    """For each (codec, level, group), compute geomean encode MB/s (log scale) and ratio."""
     groups = [("Compressible", COMPRESSIBLE), ("Incompressible", INCOMPRESSIBLE)]
     points = {}
 
@@ -154,18 +162,9 @@ def nice_ratio_step(span):
 
 
 def render_panel(L, points, data, group_name, xl, xr, p_top, p_bot,
-                 log_min, log_max):
+                 log_min, log_max, ratio_min, ratio_max):
     pw = xr - xl
     panel_h = p_bot - p_top
-
-    ratios = [v[1] for k, v in points.items() if k[2] == group_name]
-    if not ratios:
-        return
-    rmin = min(ratios)
-    rmax = max(ratios)
-    margin = (rmax - rmin) * 0.15 if rmax > rmin else rmax * 0.1
-    ratio_min = rmin - margin
-    ratio_max = rmax + margin
 
     def map_x(enc_mbs):
         frac = (math.log10(enc_mbs) - log_min) / (log_max - log_min)
@@ -224,7 +223,7 @@ def render_panel(L, points, data, group_name, xl, xr, p_top, p_bot,
     # X-axis label
     L.append(
         f'  <text x="{pcx}" y="{p_bot + 28}" text-anchor="middle"'
-        f' fill="#7d8590" font-size="10">encode MB/s</text>'
+        f' fill="#7d8590" font-size="10">encode MB/s (log scale)</text>'
     )
 
     # Plot each codec
@@ -243,15 +242,18 @@ def render_panel(L, points, data, group_name, xl, xr, p_top, p_bot,
         if not codec_points:
             continue
 
-        # Deduplicate nearly-identical points (e.g. lz4rip across levels)
-        deduped = [codec_points[0]]
-        for cp in codec_points[1:]:
-            prev = deduped[-1]
-            if (abs(cp[1] - prev[1]) / prev[1] > 0.02
-                    or abs(cp[2] - prev[2]) / prev[2] > 0.02):
-                deduped.append(cp)
-        if len(deduped) == 1 and len(codec_points) > 1:
-            codec_points = deduped
+        # Collapse codecs with no meaningful level variation (lz4rip)
+        # into a single averaged point.
+        if len(codec_points) > 1:
+            lo = codec_points[0]
+            hi = codec_points[-1]
+            if (abs(hi[1] - lo[1]) / lo[1] < 0.05
+                    and abs(hi[2] - lo[2]) / lo[2] < 0.05):
+                avg_enc = math.exp(
+                    sum(math.log(e) for _, e, _ in codec_points) / len(codec_points))
+                avg_rat = math.exp(
+                    sum(math.log(r) for _, _, r in codec_points) / len(codec_points))
+                codec_points = [(codec_points[0][0], avg_enc, avg_rat)]
 
         # Draw connecting line
         if len(codec_points) > 1:
@@ -363,14 +365,11 @@ def generate_svg(data):
     panel2_top = panel1_bot + panel_gap
     panel2_bot = panel2_top + panel_h
 
-    # Shared X-axis (log encode MB/s)
-    all_enc = [v[0] for v in points.values()]
-    if not all_enc:
+    # Shared X-axis (log scale) — fixed range
+    if not points:
         return "<svg></svg>"
-    enc_min = min(all_enc) * 0.85
-    enc_max = max(all_enc) * 1.15
-    log_min = math.log10(enc_min)
-    log_max = math.log10(enc_max)
+    log_min = FIXED_LOG_X_MIN
+    log_max = FIXED_LOG_X_MAX
 
     mid_x = svg_w / 2
     L = []
@@ -392,10 +391,13 @@ def generate_svg(data):
             f' font-size="10">{hw_label}</text>'
         )
 
-    render_panel(L, points, data, "Compressible",
-                 xl, xr, panel1_top, panel1_bot, log_min, log_max)
-    render_panel(L, points, data, "Incompressible",
-                 xl, xr, panel2_top, panel2_bot, log_min, log_max)
+    for group_name, p_top, p_bot in [
+        ("Compressible", panel1_top, panel1_bot),
+        ("Incompressible", panel2_top, panel2_bot),
+    ]:
+        y_lo, y_hi = FIXED_Y_RANGES[group_name]
+        render_panel(L, points, data, group_name,
+                     xl, xr, p_top, p_bot, log_min, log_max, y_lo, y_hi)
 
     # Y-axis label (shared, centered between panels)
     y_mid = (panel1_top + panel2_bot) / 2
