@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 770" font-family="system-ui, -apple-system, sans-serif">
-  <rect width="850" height="770" fill="#0d1117"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 790" font-family="system-ui, -apple-system, sans-serif">
+  <rect width="850" height="790" fill="#0d1117"/>
   <text x="425.0" y="18" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">Encode Speed vs Compression Ratio (geomean across corpus)</text>
   <text x="425.0" y="34" text-anchor="middle" fill="#7d8590" font-size="10">Intel Core i7-8700B @ 3.20GHz, performance governor, turbo off</text>
   <rect x="70" y="55" width="760" height="300" fill="#161b22" rx="4"/>
@@ -157,14 +157,14 @@
   <circle cx="802.1" cy="675.4" r="3.5" fill="#c084fc" stroke="#0d1117" stroke-width="1"/>
   <text x="808.1" y="675.4" text-anchor="start" fill="#c084fc" font-size="8" font-weight="600">LZ4</text>
   <text x="16" y="382.5" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600" transform="rotate(-90,16,382.5)">compression ratio</text>
-  <circle cx="-48" cy="750" r="4" fill="#60a5fa"/>
-  <text x="-40" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">C zstd 1.5.7 (libzstd)</text>
-  <circle cx="125" cy="750" r="4" fill="#f87171"/>
-  <text x="133" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">zrip (safe Rust)</text>
-  <circle cx="260" cy="750" r="4" fill="#f59e0b"/>
-  <text x="268" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">structured-zstd 0.0.37 (unsafe Rust)</text>
-  <circle cx="519" cy="750" r="4" fill="#4ade80"/>
-  <text x="527" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">ruzstd 0.8.2 (safe Rust)</text>
-  <circle cx="704" cy="750" r="4" fill="#c084fc"/>
-  <text x="712" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">lz4rip 0.3.1 (safe Rust, LZ4)</text>
+  <circle cx="60" cy="750" r="4" fill="#60a5fa"/>
+  <text x="68" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">C zstd 1.5.7 (libzstd)</text>
+  <circle cx="233" cy="750" r="4" fill="#f87171"/>
+  <text x="241" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">zrip (safe Rust)</text>
+  <circle cx="368" cy="750" r="4" fill="#f59e0b"/>
+  <text x="376" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">structured-zstd 0.0.37 (unsafe Rust)</text>
+  <circle cx="627" cy="750" r="4" fill="#4ade80"/>
+  <text x="635" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">ruzstd 0.8.2 (safe Rust)</text>
+  <circle cx="328" cy="768" r="4" fill="#c084fc"/>
+  <text x="336" y="771.5" fill="#e6edf3" font-size="10" font-weight="500">lz4rip 0.3.1 (safe Rust, LZ4)</text>
 </svg>

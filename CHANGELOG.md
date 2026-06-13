@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.1.2]
+
+### Changed
+
+- Aligned negative-level params to C zstd 1.5.7: window_log 14->19,
+  hash_log 14->13. The larger window improves ratio at negative levels
+  (L-7: 2.19x -> 2.39x geomean) and the smaller hash table (32KB, fits L1
+  cache) keeps encode speed competitive.
+- Updated dev-dependency structured-zstd to 0.0.37.
+
+### Added
+
+- Encode speed vs compression ratio scatter chart showing all levels L-7..L4.
+
 ## [0.1.1]
 
 ### Changed

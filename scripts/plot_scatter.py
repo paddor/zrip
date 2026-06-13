@@ -352,7 +352,7 @@ def generate_svg(data):
     top_margin = 55 if hw_label else 45
     panel_h = 300
     panel_gap = 55
-    bottom_margin = 60
+    bottom_margin = 80
     svg_h = top_margin + panel_h * 2 + panel_gap + bottom_margin
 
     xl = 70
@@ -408,20 +408,37 @@ def generate_svg(data):
     # Legend
     leg_y = panel2_bot + 40
     legend_items = [(k, LABELS[k]) for k in CODEC_ORDER if k in data]
-    total_w = (sum(len(label) * 6.2 + 24 for _, label in legend_items)
-               + 12 * (len(legend_items) - 1))
-    lx = mid_x - total_w / 2
-    for key, label in legend_items:
-        color = COLORS[key]
-        L.append(
-            f'  <circle cx="{lx + 5:.0f}" cy="{leg_y}" r="4"'
-            f' fill="{color}"/>'
-        )
-        L.append(
-            f'  <text x="{lx + 13:.0f}" y="{leg_y + 3.5}" fill="#e6edf3"'
-            f' font-size="10" font-weight="500">{label}</text>'
-        )
-        lx += len(label) * 6.2 + 24 + 12
+    item_widths = [len(label) * 6.2 + 24 for _, label in legend_items]
+    gap = 12
+
+    # Split into two rows if total width exceeds svg_w - 40
+    max_row_w = svg_w - 40
+    rows_of_items = [[]]
+    row_w = 0
+    for i, (item, w) in enumerate(zip(legend_items, item_widths)):
+        needed = w + (gap if rows_of_items[-1] else 0)
+        if rows_of_items[-1] and row_w + needed > max_row_w:
+            rows_of_items.append([])
+            row_w = 0
+        rows_of_items[-1].append(item)
+        row_w += w + (gap if len(rows_of_items[-1]) > 1 else 0)
+
+    for ri, row_items in enumerate(rows_of_items):
+        rw = (sum(len(lb) * 6.2 + 24 for _, lb in row_items)
+              + gap * (len(row_items) - 1))
+        lx = mid_x - rw / 2
+        ry = leg_y + ri * 18
+        for key, label in row_items:
+            color = COLORS[key]
+            L.append(
+                f'  <circle cx="{lx + 5:.0f}" cy="{ry}" r="4"'
+                f' fill="{color}"/>'
+            )
+            L.append(
+                f'  <text x="{lx + 13:.0f}" y="{ry + 3.5}" fill="#e6edf3"'
+                f' font-size="10" font-weight="500">{label}</text>'
+            )
+            lx += len(label) * 6.2 + 24 + gap
 
     L.append("</svg>")
     return "\n".join(L) + "\n"
