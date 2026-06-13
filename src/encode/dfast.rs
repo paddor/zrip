@@ -123,6 +123,10 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
     let ilimit = block_end - 8;
     let max_distance = 1usize << params.window_log;
 
+    let probe_interval = (block_size / 4).max(4096).min(block_size);
+    let mut probe_limit = block_start + probe_interval;
+    let mut total_match_bytes: usize = 0;
+
     let hash_log = if HASH_LOG != 0 {
         HASH_LOG
     } else {
@@ -195,6 +199,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                         }
                         let back = ip2 - ip0;
                         let mlen = count_match(src, ip2 + 4, ip2 - rep0 + 4, block_end) + 4 + back;
+                        total_match_bytes += mlen;
                         sequences.push(Sequence {
                             literal_length: (ip0 - anchor) as u32,
                             offset: rep0 as u32,
@@ -243,6 +248,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                 }
                 let match_start = ip0 - back;
                 let mlen = count_match(src, ip0 + 8, match_long + 8, block_end) + 8 + back;
+                total_match_bytes += mlen;
                 emit_match(
                     match_start,
                     match_long - back,
@@ -311,6 +317,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                                 back += 1;
                             }
                             let match_start = ip0 - back;
+                            total_match_bytes += long_len + back;
                             emit_match(
                                 match_start,
                                 ml_next - back,
@@ -367,6 +374,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                 }
                 let match_start = ip0 - back;
                 mlen += back;
+                total_match_bytes += mlen;
                 emit_match(
                     match_start,
                     match_short - back,
@@ -455,6 +463,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                 }
                 let match_start = ip0 - back;
                 let mlen = count_match(src, ip0 + 8, match_long + 8, block_end) + 8 + back;
+                total_match_bytes += mlen;
                 emit_match(
                     match_start,
                     match_long - back,
@@ -525,6 +534,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                                 back += 1;
                             }
                             let match_start = ip0 - back;
+                            total_match_bytes += long_len + back;
                             emit_match(
                                 match_start,
                                 ml_next - back,
@@ -583,6 +593,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                 }
                 let match_start = ip0 - back;
                 mlen += back;
+                total_match_bytes += mlen;
                 emit_match(
                     match_start,
                     match_short - back,
@@ -643,6 +654,15 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                     ht_long.add(hl1) as *const i8,
                     core::arch::x86_64::_MM_HINT_T0,
                 );
+            }
+
+            if ip0 >= probe_limit {
+                let scanned = ip0 - block_start;
+                if total_match_bytes * 6 < scanned {
+                    sequences.clear();
+                    return;
+                }
+                probe_limit = probe_limit.saturating_add(probe_interval).min(block_end);
             }
 
             if ip3 >= ilimit {
