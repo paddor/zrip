@@ -29,8 +29,8 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
     Some(match level {
         -7 => LevelParams {
             strategy: Strategy::Fast,
-            window_log: 14,
-            hash_log: 14,
+            window_log: 19,
+            hash_log: 13,
             search_log: 0,
             min_match: 4,
             target_length: 8,
@@ -38,8 +38,8 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
         },
         -6 => LevelParams {
             strategy: Strategy::Fast,
-            window_log: 14,
-            hash_log: 14,
+            window_log: 19,
+            hash_log: 13,
             search_log: 0,
             min_match: 4,
             target_length: 7,
@@ -47,8 +47,8 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
         },
         -5 => LevelParams {
             strategy: Strategy::Fast,
-            window_log: 14,
-            hash_log: 14,
+            window_log: 19,
+            hash_log: 13,
             search_log: 0,
             min_match: 4,
             target_length: 6,
@@ -56,8 +56,8 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
         },
         -4 => LevelParams {
             strategy: Strategy::Fast,
-            window_log: 14,
-            hash_log: 14,
+            window_log: 19,
+            hash_log: 13,
             search_log: 0,
             min_match: 4,
             target_length: 5,
@@ -65,8 +65,8 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
         },
         -3 => LevelParams {
             strategy: Strategy::Fast,
-            window_log: 14,
-            hash_log: 14,
+            window_log: 19,
+            hash_log: 13,
             search_log: 0,
             min_match: 4,
             target_length: 4,
@@ -74,8 +74,8 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
         },
         -2 => LevelParams {
             strategy: Strategy::Fast,
-            window_log: 14,
-            hash_log: 14,
+            window_log: 19,
+            hash_log: 13,
             search_log: 0,
             min_match: 4,
             target_length: 3,
@@ -83,8 +83,8 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
         },
         -1 => LevelParams {
             strategy: Strategy::Fast,
-            window_log: 14,
-            hash_log: 14,
+            window_log: 19,
+            hash_log: 13,
             search_log: 0,
             min_match: 4,
             target_length: 2,

@@ -281,7 +281,7 @@ def render_panel(L, points, data, group_name, xl, xr, p_top, p_bot,
             if idx not in label_indices:
                 continue
 
-            lbl = str(level)
+            lbl = "LZ4" if codec == "lz4rip" else str(level)
             lbl_w = len(lbl) * 5.5 + 4
             lbl_h = 10
 

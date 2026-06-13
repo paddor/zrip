@@ -38,16 +38,17 @@ higher is better.
 
 | Level | Strategy | zrip enc | C enc | zrip dec | C dec | zrip ratio | C ratio |
 |------:|:---------|:--------:|------:|:--------:|------:|:----------:|--------:|
-|    -7 | Fast     | 322 MB/s |   559 | 934 MB/s |  1906 |      2.19x |   2.24x |
-|    -1 | Fast     | 235 MB/s |   404 | 741 MB/s |  1560 |      2.80x |   2.91x |
-|     1 | Fast     | 228 MB/s |   346 | 667 MB/s |  1150 |      3.20x |   3.53x |
-|     2 | Fast     | 205 MB/s |   279 | 623 MB/s |  1025 |      3.29x |   3.66x |
+|    -7 | Fast     | 312 MB/s |   559 | 854 MB/s |  1906 |      2.39x |   2.24x |
+|    -1 | Fast     | 248 MB/s |   404 | 727 MB/s |  1560 |      2.99x |   2.91x |
+|     1 | Fast     | 229 MB/s |   346 | 663 MB/s |  1150 |      3.20x |   3.53x |
+|     2 | Fast     | 207 MB/s |   279 | 620 MB/s |  1025 |      3.29x |   3.66x |
 |     3 | DFast    | 164 MB/s |   203 | 755 MB/s |   989 |      3.35x |   3.80x |
-|     4 | DFast    | 163 MB/s |   196 | 750 MB/s |   948 |      3.39x |   3.84x |
+|     4 | DFast    | 165 MB/s |   196 | 754 MB/s |   948 |      3.39x |   3.84x |
 
-Encode is 58-83% of C zstd depending on level. Decode is 47-79% of C zstd.
-Ratio is within 2% at L-7, widening to ~12% at L4. The gap is pure Rust vs
-hand-tuned C with SIMD assembly in its hot paths.
+Encode is 56-84% of C zstd depending on level. Decode is 45-80% of C zstd.
+Ratio beats C zstd at negative levels (larger hash table finds more matches),
+widening to ~12% behind at L4. The encode gap is pure Rust vs hand-tuned C
+with SIMD assembly in its hot paths.
 
 ## API
 
