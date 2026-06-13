@@ -157,14 +157,14 @@
   <circle cx="802.1" cy="675.4" r="3.5" fill="#c084fc" stroke="#0d1117" stroke-width="1"/>
   <text x="808.1" y="675.4" text-anchor="start" fill="#c084fc" font-size="8" font-weight="600">LZ4</text>
   <text x="16" y="382.5" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600" transform="rotate(-90,16,382.5)">compression ratio</text>
-  <circle cx="60" cy="750" r="4" fill="#60a5fa"/>
-  <text x="68" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">C zstd 1.5.7 (libzstd)</text>
-  <circle cx="233" cy="750" r="4" fill="#f87171"/>
-  <text x="241" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">zrip (safe Rust)</text>
-  <circle cx="368" cy="750" r="4" fill="#f59e0b"/>
-  <text x="376" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">structured-zstd 0.0.37 (unsafe Rust)</text>
-  <circle cx="627" cy="750" r="4" fill="#4ade80"/>
-  <text x="635" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">ruzstd 0.8.2 (safe Rust)</text>
-  <circle cx="328" cy="768" r="4" fill="#c084fc"/>
-  <text x="336" y="771.5" fill="#e6edf3" font-size="10" font-weight="500">lz4rip 0.3.1 (safe Rust, LZ4)</text>
+  <circle cx="153" cy="750" r="4" fill="#60a5fa"/>
+  <text x="161" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">C zstd 1.5.7 (libzstd)</text>
+  <circle cx="325" cy="750" r="4" fill="#f87171"/>
+  <text x="333" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">zrip (safe Rust)</text>
+  <circle cx="460" cy="750" r="4" fill="#f59e0b"/>
+  <text x="468" y="753.5" fill="#e6edf3" font-size="10" font-weight="500">structured-zstd 0.0.37 (unsafe Rust)</text>
+  <circle cx="236" cy="768" r="4" fill="#4ade80"/>
+  <text x="244" y="771.5" fill="#e6edf3" font-size="10" font-weight="500">ruzstd 0.8.2 (safe Rust)</text>
+  <circle cx="420" cy="768" r="4" fill="#c084fc"/>
+  <text x="428" y="771.5" fill="#e6edf3" font-size="10" font-weight="500">lz4rip 0.3.1 (safe Rust, LZ4)</text>
 </svg>

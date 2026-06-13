@@ -411,17 +411,13 @@ def generate_svg(data):
     item_widths = [len(label) * 6.2 + 24 for _, label in legend_items]
     gap = 12
 
-    # Split into two rows if total width exceeds svg_w - 40
-    max_row_w = svg_w - 40
-    rows_of_items = [[]]
-    row_w = 0
-    for i, (item, w) in enumerate(zip(legend_items, item_widths)):
-        needed = w + (gap if rows_of_items[-1] else 0)
-        if rows_of_items[-1] and row_w + needed > max_row_w:
-            rows_of_items.append([])
-            row_w = 0
-        rows_of_items[-1].append(item)
-        row_w += w + (gap if len(rows_of_items[-1]) > 1 else 0)
+    # Split into two balanced rows
+    total_w = sum(item_widths) + gap * (len(legend_items) - 1)
+    if total_w > svg_w - 40 and len(legend_items) > 2:
+        split = (len(legend_items) + 1) // 2
+        rows_of_items = [legend_items[:split], legend_items[split:]]
+    else:
+        rows_of_items = [legend_items]
 
     for ri, row_items in enumerate(rows_of_items):
         rw = (sum(len(lb) * 6.2 + 24 for _, lb in row_items)
