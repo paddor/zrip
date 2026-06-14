@@ -4,7 +4,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 
-const LEVELS: &[i32] = &[1, 3];
+const ZRIP_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
+const C_ZSTD_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5];
 
 const SILESIA_DOWNLOADS: &[(&str, &str)] = &[
     (
@@ -315,9 +316,58 @@ fn append_cache(results: &[BenchResult], codec: &str) {
 
 const CODECS: &[&str] = &["C zstd", "zrip", "ruzstd", "structured-zstd", "lz4rip"];
 
-fn main() {
-    ensure_corpus();
+fn levels_for_codec<'a>(codec: &str, level_filter: &'a [i32]) -> &'a [i32] {
+    match codec {
+        "ruzstd" | "lz4rip" => &[1],
+        _ if !level_filter.is_empty() => level_filter,
+        "zrip" => ZRIP_LEVELS,
+        "C zstd" | "structured-zstd" => C_ZSTD_LEVELS,
+        _ => &[1],
+    }
+}
 
+fn fmt_mbs(input_size: usize, ns: f64) -> String {
+    let mbs = input_size as f64 / ns * 1000.0;
+    if mbs >= 1000.0 {
+        format!("{:.0}", mbs)
+    } else if mbs >= 100.0 {
+        format!("{:.0}", mbs)
+    } else {
+        format!("{:.1}", mbs)
+    }
+}
+
+fn display_codec(codec: &str) -> &str {
+    match codec {
+        "structured-zstd" => "s-zstd",
+        other => other,
+    }
+}
+
+fn print_live_line(file: &str, level: i32, results: &[&BenchResult]) {
+    use std::io::Write as _;
+    let stderr = std::io::stderr();
+    let mut err = stderr.lock();
+
+    write!(err, "  L{level:>3} {file:<16}").unwrap();
+    for r in results {
+        let ratio = r.input_size as f64 / r.compressed_size as f64;
+        let enc = fmt_mbs(r.input_size, r.compress_ns);
+        let dec = fmt_mbs(r.input_size, r.decompress_ns);
+        write!(
+            err,
+            "  {:>8} {:>5} enc {:>5} dec {:.2}x",
+            display_codec(&r.codec),
+            enc,
+            dec,
+            ratio
+        )
+        .unwrap();
+    }
+    writeln!(err).unwrap();
+}
+
+fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut only: Vec<String> = Vec::new();
     let mut impl_specified = false;
@@ -361,16 +411,28 @@ fn main() {
         i += 1;
     }
 
+    ensure_corpus();
+
     if !impl_specified {
         only.push("zrip".into());
     } else if only.iter().any(|o| o == "all") {
         only.clear();
     }
 
-    let levels: &[i32] = if level_filter.is_empty() {
-        LEVELS
-    } else {
-        &level_filter
+    let active_codecs: Vec<&str> = CODECS
+        .iter()
+        .copied()
+        .filter(|c| only.is_empty() || only.iter().any(|o| c.contains(o.as_str())))
+        .collect();
+
+    let all_levels: Vec<i32> = {
+        let mut lvls: Vec<i32> = active_codecs
+            .iter()
+            .flat_map(|c| levels_for_codec(c, &level_filter).iter().copied())
+            .collect();
+        lvls.sort();
+        lvls.dedup();
+        lvls
     };
 
     let target_ns = 20_000_000u64;
@@ -397,14 +459,17 @@ fn main() {
             }
         };
 
-        for &level in levels {
-            for &codec in CODECS {
-                let should_run = only.is_empty() || only.iter().any(|o| codec.contains(o.as_str()));
-                if !should_run {
+        eprintln!("{name} ({} bytes)", data.len());
+
+        for &level in &all_levels {
+            let mut level_batch: Vec<BenchResult> = Vec::new();
+
+            for &codec in &active_codecs {
+                let codec_levels = levels_for_codec(codec, &level_filter);
+                if !codec_levels.contains(&level) {
                     continue;
                 }
 
-                eprintln!("  {codec} x {name} @{level}: benchmarking...");
                 let r = match codec {
                     "C zstd" => bench_c_zstd(&data, name, level, target_ns),
                     "zrip" => bench_zrip(&data, name, level, target_ns),
@@ -413,7 +478,13 @@ fn main() {
                     "lz4rip" => bench_lz4rip(&data, name, level, target_ns),
                     _ => unreachable!(),
                 };
-                results.push(r);
+                level_batch.push(r);
+            }
+
+            if !level_batch.is_empty() {
+                let refs: Vec<&BenchResult> = level_batch.iter().collect();
+                print_live_line(name, level, &refs);
+                results.extend(level_batch);
             }
         }
     }
@@ -421,13 +492,4 @@ fn main() {
     for codec in CODECS {
         append_cache(&results, codec);
     }
-
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
-    writeln!(out, "[").unwrap();
-    for (i, r) in results.iter().enumerate() {
-        let comma = if i + 1 < results.len() { "," } else { "" };
-        writeln!(out, "  {}{}", r.to_json(), comma).unwrap();
-    }
-    writeln!(out, "]").unwrap();
 }
