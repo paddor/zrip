@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.1.4]
+
+### Changed
+
+- Split README benchmark table by compressible/incompressible corpus.
+
 ## [0.1.3]
 
 ### Changed
