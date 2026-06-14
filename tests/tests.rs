@@ -453,8 +453,15 @@ fn decompress_empty_input() {
 }
 
 #[test]
+fn compress_level_zero_is_default() {
+    let data = b"ABCDEFGH".repeat(1000);
+    let c0 = zrip::compress(&data, 0).unwrap();
+    let c1 = zrip::compress(&data, 1).unwrap();
+    assert_eq!(c0, c1);
+}
+
+#[test]
 fn compress_invalid_level() {
-    assert!(zrip::compress(b"hello", 0).is_err());
     assert!(zrip::compress(b"hello", 5).is_err());
     assert!(zrip::compress(b"hello", -8).is_err());
     assert!(zrip::compress(b"hello", 100).is_err());

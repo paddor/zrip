@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Level 0 now maps to the library default (level 1) instead of returning an
+  error. Exported `DEFAULT_LEVEL` constant.
 - L-7 now emits raw literals and uses predefined FSE tables only, skipping
   Huffman encoding and custom FSE table construction. Lower ratio, higher
   throughput.

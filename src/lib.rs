@@ -22,6 +22,7 @@
 //! | Level | Strategy | Notes |
 //! |-------|----------|-------|
 //! | -7..=-1 | Fast | Fastest encode, lowest ratio |
+//! | 0 | | Library default (currently level 1) |
 //! | 1..=2 | Fast | Good balance for network transfers |
 //! | 3..=4 | DFast | Better ratio, still fast |
 //!
@@ -96,7 +97,7 @@ pub use error::{CompressError, DecompressError, ZstdError};
 #[cfg(feature = "alloc")]
 pub use dict::Dictionary;
 #[cfg(feature = "alloc")]
-pub use encode::strategy::LevelParams;
+pub use encode::strategy::{DEFAULT_LEVEL, LevelParams};
 
 /// Default safety limit for decompressed output.
 ///
@@ -136,7 +137,7 @@ pub fn decompress_into(
     decode::decompress_into(input, output)
 }
 
-/// Compresses `input` into a zstd frame at the given level (-7..=4).
+/// Compresses `input` into a zstd frame at the given level (-7..=4, or 0 for default).
 #[cfg(feature = "alloc")]
 pub fn compress(input: &[u8], level: i32) -> Result<alloc::vec::Vec<u8>, CompressError> {
     encode::compress(input, level)

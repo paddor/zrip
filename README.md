@@ -131,7 +131,7 @@ is confined to two places:
 | 3 | DFast | 2x 128 KB | Huffman | Predefined/custom FSE | Dual hash (short + long matches) |
 | 4 | DFast | 2x 256 KB | Huffman | Predefined/custom FSE | Best ratio in this crate |
 
-Level 0 is not valid; use 1 for the standard fast level.
+Level 0 maps to the library default (currently level 1).
 
 **L-7** skips Huffman table construction and always emits raw literal blocks
 with predefined FSE tables. This eliminates the most expensive part of the

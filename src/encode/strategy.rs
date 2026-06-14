@@ -25,9 +25,15 @@ pub struct LevelParams {
     pub force_raw_literals: bool,
 }
 
+/// Default compression level used when level 0 is requested.
+pub const DEFAULT_LEVEL: i32 = 1;
+
 /// Returns the compression parameters for a given level, or `None` if out of range.
+///
+/// Level 0 is treated as "library default" and maps to level 1.
 pub fn level_params(level: i32) -> Option<LevelParams> {
     Some(match level {
+        0 => return level_params(DEFAULT_LEVEL),
         -7 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
