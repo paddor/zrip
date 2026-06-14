@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 const ZRIP_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
-const C_ZSTD_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5];
+const C_ZSTD_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 
 const SILESIA_DOWNLOADS: &[(&str, &str)] = &[
     (
@@ -293,25 +293,104 @@ fn cache_dir() -> PathBuf {
     dir
 }
 
-fn codec_cache_path(codec: &str) -> PathBuf {
-    cache_dir().join(format!("{}.jsonl", codec.replace(' ', "_")))
+fn level_cache_dir(level: i32) -> PathBuf {
+    let dir = cache_dir().join(format!("L{}", level));
+    std::fs::create_dir_all(&dir).ok();
+    dir
 }
 
-fn append_cache(results: &[BenchResult], codec: &str) {
-    let entries: Vec<_> = results.iter().filter(|r| r.codec == codec).collect();
-    if entries.is_empty() {
-        return;
+fn level_codec_cache_path(level: i32, codec: &str) -> PathBuf {
+    level_cache_dir(level).join(format!("{}.jsonl", codec.replace(' ', "_")))
+}
+
+fn write_cache(results: &[BenchResult]) {
+    let mut keys: Vec<(i32, &str)> = results
+        .iter()
+        .map(|r| (r.level, r.codec.as_str()))
+        .collect();
+    keys.sort();
+    keys.dedup();
+
+    for (level, codec) in &keys {
+        let path = level_codec_cache_path(*level, codec);
+        let entries: Vec<_> = results
+            .iter()
+            .filter(|r| r.level == *level && r.codec == *codec)
+            .collect();
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
+        for r in &entries {
+            writeln!(f, "{}", r.to_json()).unwrap();
+        }
+        eprintln!("appended {} results to {}", entries.len(), path.display());
     }
-    let path = codec_cache_path(codec);
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .unwrap();
-    for r in &entries {
-        writeln!(f, "{}", r.to_json()).unwrap();
+}
+
+fn parse_level_from_json(line: &str) -> Option<i32> {
+    let idx = line.find("\"level\":")?;
+    let rest = line[idx + 8..].trim_start();
+    let end = rest.find(|c: char| c == ',' || c == '}')?;
+    rest[..end].trim().parse().ok()
+}
+
+fn migrate_flat_cache() {
+    let base = cache_dir();
+    for codec_name in CODECS {
+        let flat_name = format!("{}.jsonl", codec_name.replace(' ', "_"));
+        let flat_path = base.join(&flat_name);
+        if !flat_path.exists() {
+            continue;
+        }
+        let content = match std::fs::read_to_string(&flat_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let mut by_level: Vec<(i32, Vec<&str>)> = Vec::new();
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Some(level) = parse_level_from_json(line) {
+                if let Some(entry) = by_level.iter_mut().find(|(l, _)| *l == level) {
+                    entry.1.push(line);
+                } else {
+                    by_level.push((level, vec![line]));
+                }
+            }
+        }
+
+        if by_level.is_empty() {
+            continue;
+        }
+
+        let mut total = 0;
+        for (level, lines) in &by_level {
+            let dest = level_codec_cache_path(*level, codec_name);
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&dest)
+                .unwrap();
+            for line in lines {
+                writeln!(f, "{}", line).unwrap();
+            }
+            total += lines.len();
+        }
+
+        let bak = base.join(format!("{}.flat", flat_name));
+        std::fs::rename(&flat_path, &bak).ok();
+        eprintln!(
+            "migrated {} entries from {} -> per-level dirs (backup: {})",
+            total,
+            flat_path.display(),
+            bak.display()
+        );
     }
-    eprintln!("appended {} results to {}", entries.len(), path.display());
 }
 
 const CODECS: &[&str] = &["C zstd", "zrip", "ruzstd", "structured-zstd", "lz4rip"];
@@ -412,6 +491,7 @@ fn main() {
     }
 
     ensure_corpus();
+    migrate_flat_cache();
 
     if !impl_specified {
         only.push("zrip".into());
@@ -489,7 +569,5 @@ fn main() {
         }
     }
 
-    for codec in CODECS {
-        append_cache(&results, codec);
-    }
+    write_cache(&results);
 }

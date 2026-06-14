@@ -4,101 +4,95 @@
   <text x="450.0" y="38" text-anchor="middle" fill="#7d8590" font-size="10">Intel Core i7-8700B @ 3.20GHz, performance governor, turbo off</text>
   <text x="22" y="445.0" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600" transform="rotate(-90,22,445.0)">seconds / GB</text>
   <text x="450.0" y="64" text-anchor="middle" fill="#e6edf3" font-size="12" font-weight="600">Level 3</text>
-  <line x1="70" y1="213.3" x2="830" y2="213.3" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="213.3" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">10.0</text>
-  <line x1="70" y1="156.6" x2="830" y2="156.6" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="156.6" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">20.0</text>
-  <line x1="70" y1="99.9" x2="830" y2="99.9" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="99.9" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">30.0</text>
+  <line x1="70" y1="212.9" x2="830" y2="212.9" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="212.9" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">10.0</text>
+  <line x1="70" y1="155.9" x2="830" y2="155.9" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="155.9" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">20.0</text>
+  <line x1="70" y1="98.8" x2="830" y2="98.8" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="98.8" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">30.0</text>
   <line x1="70" y1="270" x2="830" y2="270" stroke="#30363d" stroke-width="1.5"/>
-  <rect x="108.0" y="241.4" width="50.0" height="28.6" fill="#60a5fa" rx="1"/>
-  <rect x="108.0" y="239.9" width="50.0" height="1.5" fill="#4680c4" rx="1"/>
-  <rect x="108.0" y="234.1" width="50.0" height="5.8" fill="#60a5fa" rx="1"/>
-  <rect x="160.5" y="234.6" width="50.0" height="35.4" fill="#f87171" rx="1"/>
-  <rect x="160.5" y="233.0" width="50.0" height="1.7" fill="#c45050" rx="1"/>
-  <rect x="160.5" y="223.5" width="50.0" height="9.5" fill="#f87171" rx="1"/>
-  <rect x="213.0" y="210.3" width="50.0" height="59.7" fill="#f59e0b" rx="1"/>
-  <rect x="213.0" y="208.8" width="50.0" height="1.5" fill="#c47d08" rx="1"/>
-  <rect x="213.0" y="197.0" width="50.0" height="11.9" fill="#f59e0b" rx="1"/>
+  <rect x="108.0" y="241.6" width="50.0" height="28.4" fill="#60a5fa" rx="1"/>
+  <rect x="108.0" y="240.1" width="50.0" height="1.5" fill="#4680c4" rx="1"/>
+  <rect x="108.0" y="234.3" width="50.0" height="5.8" fill="#60a5fa" rx="1"/>
+  <rect x="160.5" y="234.0" width="50.0" height="36.0" fill="#f87171" rx="1"/>
+  <rect x="160.5" y="232.4" width="50.0" height="1.7" fill="#c45050" rx="1"/>
+  <rect x="160.5" y="222.6" width="50.0" height="9.7" fill="#f87171" rx="1"/>
+  <rect x="213.0" y="210.4" width="50.0" height="59.6" fill="#f59e0b" rx="1"/>
+  <rect x="213.0" y="208.9" width="50.0" height="1.5" fill="#c47d08" rx="1"/>
+  <rect x="213.0" y="197.1" width="50.0" height="11.8" fill="#f59e0b" rx="1"/>
   <text x="186.8" y="288" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Compressible</text>
-  <rect x="488.0" y="218.4" width="50.0" height="51.6" fill="#60a5fa" rx="1"/>
-  <rect x="488.0" y="215.1" width="50.0" height="3.3" fill="#4680c4" rx="1"/>
-  <rect x="488.0" y="207.2" width="50.0" height="7.9" fill="#60a5fa" rx="1"/>
-  <rect x="540.5" y="219.9" width="50.0" height="50.1" fill="#f87171" rx="1"/>
-  <rect x="540.5" y="216.3" width="50.0" height="3.6" fill="#c45050" rx="1"/>
-  <rect x="540.5" y="208.1" width="50.0" height="8.2" fill="#f87171" rx="1"/>
-  <rect x="593.0" y="177.1" width="50.0" height="92.9" fill="#f59e0b" rx="1"/>
-  <rect x="593.0" y="173.7" width="50.0" height="3.4" fill="#c47d08" rx="1"/>
-  <rect x="593.0" y="161.7" width="50.0" height="12.0" fill="#f59e0b" rx="1"/>
+  <rect x="488.0" y="219.0" width="50.0" height="51.0" fill="#60a5fa" rx="1"/>
+  <rect x="488.0" y="215.7" width="50.0" height="3.4" fill="#4680c4" rx="1"/>
+  <rect x="488.0" y="207.8" width="50.0" height="7.9" fill="#60a5fa" rx="1"/>
+  <rect x="540.5" y="217.9" width="50.0" height="52.1" fill="#f87171" rx="1"/>
+  <rect x="540.5" y="214.2" width="50.0" height="3.7" fill="#c45050" rx="1"/>
+  <rect x="540.5" y="205.7" width="50.0" height="8.4" fill="#f87171" rx="1"/>
+  <rect x="593.0" y="177.4" width="50.0" height="92.6" fill="#f59e0b" rx="1"/>
+  <rect x="593.0" y="174.0" width="50.0" height="3.4" fill="#c47d08" rx="1"/>
+  <rect x="593.0" y="161.9" width="50.0" height="12.1" fill="#f59e0b" rx="1"/>
   <text x="566.8" y="288" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Incompressible</text>
   <text x="450.0" y="339" text-anchor="middle" fill="#e6edf3" font-size="12" font-weight="600">Level 1</text>
-  <line x1="70" y1="488.3" x2="830" y2="488.3" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="488.3" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">10.0</text>
-  <line x1="70" y1="431.6" x2="830" y2="431.6" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="431.6" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">20.0</text>
-  <line x1="70" y1="374.9" x2="830" y2="374.9" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="374.9" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">30.0</text>
+  <line x1="70" y1="487.9" x2="830" y2="487.9" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="487.9" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">10.0</text>
+  <line x1="70" y1="430.9" x2="830" y2="430.9" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="430.9" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">20.0</text>
+  <line x1="70" y1="373.8" x2="830" y2="373.8" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="373.8" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">30.0</text>
   <line x1="70" y1="545" x2="830" y2="545" stroke="#30363d" stroke-width="1.5"/>
-  <rect x="108.0" y="527.1" width="50.0" height="17.9" fill="#60a5fa" rx="1"/>
+  <rect x="108.0" y="527.0" width="50.0" height="18.0" fill="#60a5fa" rx="1"/>
   <rect x="108.0" y="525.4" width="50.0" height="1.6" fill="#4680c4" rx="1"/>
-  <rect x="108.0" y="520.3" width="50.0" height="5.1" fill="#60a5fa" rx="1"/>
-  <rect x="159.9" y="518.8" width="50.0" height="26.2" fill="#f87171" rx="1"/>
-  <rect x="159.9" y="517.0" width="50.0" height="1.8" fill="#c45050" rx="1"/>
-  <rect x="159.9" y="506.1" width="50.0" height="10.9" fill="#f87171" rx="1"/>
-  <rect x="211.8" y="514.7" width="50.0" height="30.3" fill="#f59e0b" rx="1"/>
-  <rect x="211.8" y="513.1" width="50.0" height="1.6" fill="#c47d08" rx="1"/>
-  <rect x="211.8" y="502.3" width="50.0" height="10.8" fill="#f59e0b" rx="1"/>
-  <rect x="263.6" y="440.9" width="50.0" height="104.1" fill="#4ade80" rx="1"/>
-  <rect x="263.6" y="438.8" width="50.0" height="2.1" fill="#3aaf60" rx="1"/>
+  <rect x="108.0" y="520.2" width="50.0" height="5.2" fill="#60a5fa" rx="1"/>
+  <rect x="159.9" y="518.7" width="50.0" height="26.3" fill="#f87171" rx="1"/>
+  <rect x="159.9" y="516.9" width="50.0" height="1.8" fill="#c45050" rx="1"/>
+  <rect x="159.9" y="505.8" width="50.0" height="11.1" fill="#f87171" rx="1"/>
+  <rect x="211.8" y="514.5" width="50.0" height="30.5" fill="#f59e0b" rx="1"/>
+  <rect x="211.8" y="512.8" width="50.0" height="1.6" fill="#c47d08" rx="1"/>
+  <rect x="211.8" y="502.0" width="50.0" height="10.8" fill="#f59e0b" rx="1"/>
+  <rect x="263.6" y="441.0" width="50.0" height="104.0" fill="#4ade80" rx="1"/>
+  <rect x="263.6" y="438.9" width="50.0" height="2.1" fill="#3aaf60" rx="1"/>
   <rect x="263.6" y="413.0" width="50.0" height="25.9" fill="#4ade80" rx="1"/>
   <text x="211.8" y="563" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Compressible</text>
   <rect x="488.0" y="527.6" width="50.0" height="17.4" fill="#60a5fa" rx="1"/>
-  <rect x="488.0" y="523.9" width="50.0" height="3.7" fill="#4680c4" rx="1"/>
+  <rect x="488.0" y="523.8" width="50.0" height="3.7" fill="#4680c4" rx="1"/>
   <rect x="488.0" y="518.3" width="50.0" height="5.5" fill="#60a5fa" rx="1"/>
   <rect x="539.9" y="515.2" width="50.0" height="29.8" fill="#f87171" rx="1"/>
   <rect x="539.9" y="511.2" width="50.0" height="4.0" fill="#c45050" rx="1"/>
-  <rect x="539.9" y="503.1" width="50.0" height="8.2" fill="#f87171" rx="1"/>
+  <rect x="539.9" y="502.8" width="50.0" height="8.3" fill="#f87171" rx="1"/>
   <rect x="591.8" y="511.4" width="50.0" height="33.6" fill="#f59e0b" rx="1"/>
   <rect x="591.8" y="507.7" width="50.0" height="3.7" fill="#c47d08" rx="1"/>
   <rect x="591.8" y="499.4" width="50.0" height="8.3" fill="#f59e0b" rx="1"/>
   <rect x="643.6" y="398.9" width="50.0" height="146.1" fill="#4ade80" rx="1"/>
   <rect x="643.6" y="394.8" width="50.0" height="4.1" fill="#3aaf60" rx="1"/>
-  <rect x="643.6" y="371.1" width="50.0" height="23.7" fill="#4ade80" rx="1"/>
+  <rect x="643.6" y="371.1" width="50.0" height="23.8" fill="#4ade80" rx="1"/>
   <text x="591.8" y="563" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Incompressible</text>
   <text x="450.0" y="614" text-anchor="middle" fill="#e6edf3" font-size="12" font-weight="600">Level −1</text>
-  <line x1="70" y1="763.3" x2="830" y2="763.3" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="763.3" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">10.0</text>
-  <line x1="70" y1="706.6" x2="830" y2="706.6" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="706.6" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">20.0</text>
-  <line x1="70" y1="649.9" x2="830" y2="649.9" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="649.9" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">30.0</text>
+  <line x1="70" y1="762.9" x2="830" y2="762.9" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="762.9" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">10.0</text>
+  <line x1="70" y1="705.9" x2="830" y2="705.9" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="705.9" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">20.0</text>
+  <line x1="70" y1="648.8" x2="830" y2="648.8" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="648.8" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">30.0</text>
   <line x1="70" y1="820" x2="830" y2="820" stroke="#30363d" stroke-width="1.5"/>
-  <rect x="108.0" y="803.4" width="50.0" height="16.6" fill="#60a5fa" rx="1"/>
-  <rect x="108.0" y="801.5" width="50.0" height="1.9" fill="#4680c4" rx="1"/>
-  <rect x="108.0" y="796.9" width="50.0" height="4.6" fill="#60a5fa" rx="1"/>
-  <rect x="159.9" y="794.4" width="50.0" height="25.6" fill="#f87171" rx="1"/>
-  <rect x="159.9" y="792.5" width="50.0" height="1.9" fill="#c45050" rx="1"/>
-  <rect x="159.9" y="782.1" width="50.0" height="10.4" fill="#f87171" rx="1"/>
-  <rect x="211.8" y="790.3" width="50.0" height="29.7" fill="#f59e0b" rx="1"/>
-  <rect x="211.8" y="788.6" width="50.0" height="1.7" fill="#c47d08" rx="1"/>
-  <rect x="211.8" y="777.9" width="50.0" height="10.7" fill="#f59e0b" rx="1"/>
-  <rect x="263.6" y="806.6" width="50.0" height="13.4" fill="#c084fc" rx="1"/>
-  <rect x="263.6" y="804.2" width="50.0" height="2.4" fill="#9966cc" rx="1"/>
-  <rect x="263.6" y="799.8" width="50.0" height="4.4" fill="#c084fc" rx="1"/>
-  <text x="211.8" y="838" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Compressible</text>
+  <rect x="108.0" y="803.3" width="50.0" height="16.7" fill="#60a5fa" rx="1"/>
+  <rect x="108.0" y="801.4" width="50.0" height="1.9" fill="#4680c4" rx="1"/>
+  <rect x="108.0" y="796.8" width="50.0" height="4.6" fill="#60a5fa" rx="1"/>
+  <rect x="160.5" y="794.2" width="50.0" height="25.8" fill="#f87171" rx="1"/>
+  <rect x="160.5" y="792.3" width="50.0" height="1.9" fill="#c45050" rx="1"/>
+  <rect x="160.5" y="781.7" width="50.0" height="10.6" fill="#f87171" rx="1"/>
+  <rect x="213.0" y="790.1" width="50.0" height="29.9" fill="#f59e0b" rx="1"/>
+  <rect x="213.0" y="788.4" width="50.0" height="1.7" fill="#c47d08" rx="1"/>
+  <rect x="213.0" y="777.7" width="50.0" height="10.7" fill="#f59e0b" rx="1"/>
+  <text x="186.8" y="838" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Compressible</text>
   <rect x="488.0" y="807.5" width="50.0" height="12.5" fill="#60a5fa" rx="1"/>
-  <rect x="488.0" y="803.1" width="50.0" height="4.4" fill="#4680c4" rx="1"/>
-  <rect x="488.0" y="800.7" width="50.0" height="2.4" fill="#60a5fa" rx="1"/>
-  <rect x="539.9" y="797.5" width="50.0" height="22.5" fill="#f87171" rx="1"/>
-  <rect x="539.9" y="793.4" width="50.0" height="4.2" fill="#c45050" rx="1"/>
-  <rect x="539.9" y="786.6" width="50.0" height="6.7" fill="#f87171" rx="1"/>
-  <rect x="591.8" y="788.2" width="50.0" height="31.8" fill="#f59e0b" rx="1"/>
-  <rect x="591.8" y="784.4" width="50.0" height="3.8" fill="#c47d08" rx="1"/>
-  <rect x="591.8" y="776.4" width="50.0" height="8.0" fill="#f59e0b" rx="1"/>
-  <rect x="643.6" y="813.9" width="50.0" height="6.1" fill="#c084fc" rx="1"/>
-  <rect x="643.6" y="809.2" width="50.0" height="4.7" fill="#9966cc" rx="1"/>
-  <rect x="643.6" y="807.7" width="50.0" height="1.6" fill="#c084fc" rx="1"/>
-  <text x="591.8" y="838" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Incompressible</text>
+  <rect x="488.0" y="803.0" width="50.0" height="4.5" fill="#4680c4" rx="1"/>
+  <rect x="488.0" y="800.6" width="50.0" height="2.4" fill="#60a5fa" rx="1"/>
+  <rect x="540.5" y="797.5" width="50.0" height="22.5" fill="#f87171" rx="1"/>
+  <rect x="540.5" y="793.3" width="50.0" height="4.2" fill="#c45050" rx="1"/>
+  <rect x="540.5" y="786.4" width="50.0" height="6.9" fill="#f87171" rx="1"/>
+  <rect x="593.0" y="788.0" width="50.0" height="32.0" fill="#f59e0b" rx="1"/>
+  <rect x="593.0" y="784.2" width="50.0" height="3.8" fill="#c47d08" rx="1"/>
+  <rect x="593.0" y="776.3" width="50.0" height="8.0" fill="#f59e0b" rx="1"/>
+  <text x="566.8" y="838" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Incompressible</text>
   <rect x="250" y="850" width="12" height="12" fill="#60a5fa" rx="2"/>
   <text x="268" y="860" fill="#e6edf3" font-size="10" font-weight="500">C zstd 1.5.7 (libzstd)</text>
   <rect x="250" y="868" width="12" height="12" fill="#f87171" rx="2"/>

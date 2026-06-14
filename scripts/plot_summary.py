@@ -95,23 +95,29 @@ def nice_step(max_val, target_lines):
 def load_all_data():
     cache_dir = os.path.join(os.environ.get("HOME", "."), ".cache", "zrip")
     data = {}
-    for codec in CODEC_ORDER:
-        fname = codec.replace(" ", "_") + ".jsonl"
-        path = os.path.join(cache_dir, fname)
-        if not os.path.exists(path):
+    if not os.path.isdir(cache_dir):
+        return data
+    for entry in os.listdir(cache_dir):
+        level_dir = os.path.join(cache_dir, entry)
+        if not os.path.isdir(level_dir) or not entry.startswith("L"):
             continue
-        seen = {}
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                r = json.loads(line)
-                if r.get("input_size", 0) < MIN_FILE_SIZE:
-                    continue
-                seen[(r["input"], r["level"])] = r
-        data[codec] = list(seen.values())
-    return data
+        for codec in CODEC_ORDER:
+            fname = codec.replace(" ", "_") + ".jsonl"
+            path = os.path.join(level_dir, fname)
+            if not os.path.exists(path):
+                continue
+            if codec not in data:
+                data[codec] = {}
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    r = json.loads(line)
+                    if r.get("input_size", 0) < MIN_FILE_SIZE:
+                        continue
+                    data[codec][(r["input"], r["level"])] = r
+    return {codec: list(seen.values()) for codec, seen in data.items()}
 
 
 def compute_stacks(data):
