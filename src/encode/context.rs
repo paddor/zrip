@@ -215,14 +215,25 @@ fn compress_core(
                         sequences,
                         combined,
                     );
-                    block_encoder::encode_compressed_block(
-                        input,
-                        sequences,
-                        &mut rep_offsets,
-                        true,
-                        output,
-                        workspace,
-                    );
+                    if params.force_raw_literals {
+                        block_encoder::encode_compressed_block_raw(
+                            input,
+                            sequences,
+                            &mut rep_offsets,
+                            true,
+                            output,
+                            workspace,
+                        );
+                    } else {
+                        block_encoder::encode_compressed_block(
+                            input,
+                            sequences,
+                            &mut rep_offsets,
+                            true,
+                            output,
+                            workspace,
+                        );
+                    }
                 } else if has_prefix {
                     combined.clear();
                     combined.reserve(prefix.len() + input.len());
@@ -243,14 +254,25 @@ fn compress_core(
                             hash_table,
                             sequences,
                         );
-                        block_encoder::encode_compressed_block(
-                            &input[offset..offset + chunk_size],
-                            sequences,
-                            &mut rep_offsets,
-                            is_last,
-                            output,
-                            workspace,
-                        );
+                        if params.force_raw_literals {
+                            block_encoder::encode_compressed_block_raw(
+                                &input[offset..offset + chunk_size],
+                                sequences,
+                                &mut rep_offsets,
+                                is_last,
+                                output,
+                                workspace,
+                            );
+                        } else {
+                            block_encoder::encode_compressed_block(
+                                &input[offset..offset + chunk_size],
+                                sequences,
+                                &mut rep_offsets,
+                                is_last,
+                                output,
+                                workspace,
+                            );
+                        }
                         offset += chunk_size;
                     }
                 } else {
@@ -276,14 +298,25 @@ fn compress_core(
                                 hash_table,
                                 sequences,
                             );
-                            block_encoder::encode_compressed_block(
-                                &input[offset..block_end],
-                                sequences,
-                                &mut rep_offsets,
-                                is_last,
-                                output,
-                                workspace,
-                            );
+                            if params.force_raw_literals {
+                                block_encoder::encode_compressed_block_raw(
+                                    &input[offset..block_end],
+                                    sequences,
+                                    &mut rep_offsets,
+                                    is_last,
+                                    output,
+                                    workspace,
+                                );
+                            } else {
+                                block_encoder::encode_compressed_block(
+                                    &input[offset..block_end],
+                                    sequences,
+                                    &mut rep_offsets,
+                                    is_last,
+                                    output,
+                                    workspace,
+                                );
+                            }
                         }
                         offset = block_end;
                     }

@@ -131,14 +131,25 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
                             &mut hash_table,
                             &mut sequences,
                         );
-                        block_encoder::encode_compressed_block(
-                            &input[offset..block_end],
-                            &sequences,
-                            &mut rep_offsets,
-                            is_last,
-                            output,
-                            &mut workspace,
-                        );
+                        if params.force_raw_literals {
+                            block_encoder::encode_compressed_block_raw(
+                                &input[offset..block_end],
+                                &sequences,
+                                &mut rep_offsets,
+                                is_last,
+                                output,
+                                &mut workspace,
+                            );
+                        } else {
+                            block_encoder::encode_compressed_block(
+                                &input[offset..block_end],
+                                &sequences,
+                                &mut rep_offsets,
+                                is_last,
+                                output,
+                                &mut workspace,
+                            );
+                        }
                     }
                     offset = block_end;
                 }
@@ -260,14 +271,25 @@ pub fn compress_with_dict(
                     dfast::compress_dfast_with_prefix(input, &params, &rep_offsets, prefix)
                 }
             };
-            block_encoder::encode_compressed_block(
-                input,
-                &sequences,
-                &mut rep_offsets,
-                true,
-                &mut output,
-                &mut workspace,
-            );
+            if params.force_raw_literals {
+                block_encoder::encode_compressed_block_raw(
+                    input,
+                    &sequences,
+                    &mut rep_offsets,
+                    true,
+                    &mut output,
+                    &mut workspace,
+                );
+            } else {
+                block_encoder::encode_compressed_block(
+                    input,
+                    &sequences,
+                    &mut rep_offsets,
+                    true,
+                    &mut output,
+                    &mut workspace,
+                );
+            }
         } else {
             let mut combined = Vec::with_capacity(prefix.len() + input.len());
             combined.extend_from_slice(prefix);
@@ -293,14 +315,25 @@ pub fn compress_with_dict(
                             &mut hash_table,
                             &mut sequences,
                         );
-                        block_encoder::encode_compressed_block(
-                            &input[offset..offset + chunk_size],
-                            &sequences,
-                            &mut rep_offsets,
-                            is_last,
-                            &mut output,
-                            &mut workspace,
-                        );
+                        if params.force_raw_literals {
+                            block_encoder::encode_compressed_block_raw(
+                                &input[offset..offset + chunk_size],
+                                &sequences,
+                                &mut rep_offsets,
+                                is_last,
+                                &mut output,
+                                &mut workspace,
+                            );
+                        } else {
+                            block_encoder::encode_compressed_block(
+                                &input[offset..offset + chunk_size],
+                                &sequences,
+                                &mut rep_offsets,
+                                is_last,
+                                &mut output,
+                                &mut workspace,
+                            );
+                        }
                         offset += chunk_size;
                     }
                 }

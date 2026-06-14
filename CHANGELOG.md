@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- L-7 now emits raw literals and uses predefined FSE tables only, skipping
+  Huffman encoding and custom FSE table construction. Lower ratio, higher
+  throughput.
+
 ## [0.1.2]
 
 ### Changed

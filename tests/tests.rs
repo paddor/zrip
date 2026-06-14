@@ -2466,6 +2466,7 @@ fn compress_with_params_roundtrip() {
         min_match: 4,
         target_length: 4,
         search_strength: 7,
+        force_raw_literals: false,
     };
     let compressed = zrip::compress_with_params(&data, &params).unwrap();
     let decompressed = zrip::decompress(&compressed).unwrap();
@@ -2485,6 +2486,7 @@ fn compress_with_params_dfast() {
         min_match: 5,
         target_length: 1,
         search_strength: 4,
+        force_raw_literals: false,
     };
     let compressed = zrip::compress_with_params(&data, &params).unwrap();
     let decompressed = zrip::decompress(&compressed).unwrap();

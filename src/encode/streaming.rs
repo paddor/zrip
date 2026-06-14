@@ -111,14 +111,25 @@ impl<W: Write> FrameEncoder<W> {
                 Strategy::Fast => fast::compress_fast(&chunk, &self.params, &self.rep_offsets),
                 Strategy::DFast => dfast::compress_dfast(&chunk, &self.params, &self.rep_offsets),
             };
-            block_encoder::encode_compressed_block(
-                &chunk,
-                &sequences,
-                &mut self.rep_offsets,
-                last,
-                &mut block_out,
-                &mut self.workspace,
-            );
+            if self.params.force_raw_literals {
+                block_encoder::encode_compressed_block_raw(
+                    &chunk,
+                    &sequences,
+                    &mut self.rep_offsets,
+                    last,
+                    &mut block_out,
+                    &mut self.workspace,
+                );
+            } else {
+                block_encoder::encode_compressed_block(
+                    &chunk,
+                    &sequences,
+                    &mut self.rep_offsets,
+                    last,
+                    &mut block_out,
+                    &mut self.workspace,
+                );
+            }
         }
 
         self.inner.write_all(&block_out)?;

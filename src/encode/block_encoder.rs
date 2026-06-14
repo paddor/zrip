@@ -369,6 +369,114 @@ pub(crate) fn encode_compressed_block(
     output.extend_from_slice(seq_data);
 }
 
+pub(crate) fn encode_compressed_block_raw(
+    src: &[u8],
+    sequences: &[Sequence],
+    rep_offsets: &mut [u32; 3],
+    last: bool,
+    output: &mut Vec<u8>,
+    workspace: &mut BlockEncodeWorkspace,
+) {
+    if sequences.is_empty() {
+        encode_raw_block(src, last, output);
+        return;
+    }
+
+    let n = sequences.len();
+    let total_match: usize = sequences.iter().map(|s| s.match_length as usize).sum();
+    if total_match <= n * 3 {
+        encode_raw_block(src, last, output);
+        return;
+    }
+
+    let saved_rep = *rep_offsets;
+
+    workspace.lit_buf.clear();
+    workspace.lit_buf.reserve(src.len() + 16);
+    workspace.packed_seqs.clear();
+    workspace.packed_seqs.reserve(n);
+    let lit_dst = workspace.lit_buf.as_mut_ptr();
+    let src_ptr = src.as_ptr();
+    let mut lit_pos = 0usize;
+    let mut lit_offset = 0usize;
+
+    for seq in sequences {
+        let ll = seq.literal_length as usize;
+        if lit_offset + ll <= src.len() {
+            unsafe {
+                let s = src_ptr.add(lit_offset);
+                let d = lit_dst.add(lit_pos);
+                if ll <= 16 && lit_offset + 16 <= src.len() {
+                    (d as *mut u64).write_unaligned((s as *const u64).read_unaligned());
+                    (d.add(8) as *mut u64)
+                        .write_unaligned((s.add(8) as *const u64).read_unaligned());
+                } else {
+                    core::ptr::copy_nonoverlapping(s, d, ll);
+                }
+            }
+            lit_pos += ll;
+        }
+        lit_offset += ll + seq.match_length as usize;
+        let ov = compute_offset_value(seq.offset, seq.literal_length, rep_offsets);
+
+        let ll_c = ll_code(seq.literal_length);
+        let ml_c = ml_code(seq.match_length);
+        let of_c = of_code(ov);
+
+        let ll_nb = LL_BITS_TABLE[ll_c as usize];
+        let ml_nb = ML_BITS_TABLE[ml_c as usize];
+        let ll_extra = seq.literal_length - LL_BASELINE_TABLE[ll_c as usize];
+        let ml_extra = seq.match_length - ML_BASELINE_TABLE[ml_c as usize];
+        let of_extra = ov - (1u32 << of_c);
+        let extra_bits = (ll_extra as u64)
+            | ((ml_extra as u64) << ll_nb)
+            | ((of_extra as u64) << (ll_nb + ml_nb));
+        let extra_nbits = ll_nb + ml_nb + of_c;
+
+        workspace.packed_seqs.push(PackedSeq {
+            extra_bits,
+            ll_c,
+            ml_c,
+            of_c,
+            extra_nbits,
+        });
+    }
+    if lit_offset < src.len() {
+        let tail = src.len() - lit_offset;
+        unsafe {
+            core::ptr::copy_nonoverlapping(src_ptr.add(lit_offset), lit_dst.add(lit_pos), tail);
+        }
+        lit_pos += tail;
+    }
+    unsafe {
+        workspace.lit_buf.set_len(lit_pos);
+    }
+
+    workspace.lit_section.clear();
+    encode_raw_literals_section(&workspace.lit_buf, &mut workspace.lit_section);
+
+    encode_seq_predefined(
+        &workspace.packed_seqs,
+        &mut workspace.pred_seq,
+        &mut workspace.pred_writer_buf,
+    );
+
+    let block_len = workspace.lit_section.len() + workspace.pred_seq.len();
+    if block_len >= src.len() {
+        *rep_offsets = saved_rep;
+        encode_raw_block(src, last, output);
+        return;
+    }
+
+    let block_size = block_len as u32;
+    let header = (block_size << 3) | 0x04 | if last { 1 } else { 0 };
+    output.push(header as u8);
+    output.push((header >> 8) as u8);
+    output.push((header >> 16) as u8);
+    output.extend_from_slice(&workspace.lit_section);
+    output.extend_from_slice(&workspace.pred_seq);
+}
+
 fn encode_literals_section(
     lits: &[u8],
     output: &mut Vec<u8>,

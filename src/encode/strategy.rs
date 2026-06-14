@@ -22,6 +22,7 @@ pub struct LevelParams {
     pub min_match: u32,
     pub target_length: u32,
     pub search_strength: u32,
+    pub force_raw_literals: bool,
 }
 
 /// Returns the compression parameters for a given level, or `None` if out of range.
@@ -35,6 +36,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
             min_match: 4,
             target_length: 8,
             search_strength: 7,
+            force_raw_literals: true,
         },
         -6 => LevelParams {
             strategy: Strategy::Fast,
@@ -44,6 +46,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
             min_match: 4,
             target_length: 7,
             search_strength: 7,
+            force_raw_literals: false,
         },
         -5 => LevelParams {
             strategy: Strategy::Fast,
@@ -53,6 +56,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
             min_match: 4,
             target_length: 6,
             search_strength: 7,
+            force_raw_literals: false,
         },
         -4 => LevelParams {
             strategy: Strategy::Fast,
@@ -62,6 +66,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
             min_match: 4,
             target_length: 5,
             search_strength: 7,
+            force_raw_literals: false,
         },
         -3 => LevelParams {
             strategy: Strategy::Fast,
@@ -71,6 +76,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
             min_match: 4,
             target_length: 4,
             search_strength: 7,
+            force_raw_literals: false,
         },
         -2 => LevelParams {
             strategy: Strategy::Fast,
@@ -80,6 +86,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
             min_match: 4,
             target_length: 3,
             search_strength: 7,
+            force_raw_literals: false,
         },
         -1 => LevelParams {
             strategy: Strategy::Fast,
@@ -89,6 +96,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
             min_match: 4,
             target_length: 2,
             search_strength: 7,
+            force_raw_literals: false,
         },
         1 => LevelParams {
             strategy: Strategy::Fast,
@@ -98,6 +106,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
             min_match: 7,
             target_length: 1,
             search_strength: 8,
+            force_raw_literals: false,
         },
         2 => LevelParams {
             strategy: Strategy::Fast,
@@ -107,6 +116,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
             min_match: 6,
             target_length: 1,
             search_strength: 8,
+            force_raw_literals: false,
         },
         3 => LevelParams {
             strategy: Strategy::DFast,
@@ -116,6 +126,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
             min_match: 5,
             target_length: 1,
             search_strength: 4,
+            force_raw_literals: false,
         },
         4 => LevelParams {
             strategy: Strategy::DFast,
@@ -125,6 +136,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
             min_match: 5,
             target_length: 1,
             search_strength: 4,
+            force_raw_literals: false,
         },
         _ => return None,
     })

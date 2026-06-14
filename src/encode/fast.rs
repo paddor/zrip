@@ -38,6 +38,24 @@ pub(crate) fn compress_fast_block(
 ) {
     sequences.clear();
     match params.hash_log {
+        12 => compress_fast_block_impl::<12>(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
+        13 => compress_fast_block_impl::<13>(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
         14 => compress_fast_block_impl::<14>(
             src,
             block_start,
