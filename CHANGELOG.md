@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.3]
+
 ### Changed
 
 - Level 0 now maps to the library default (level 1) instead of returning an
