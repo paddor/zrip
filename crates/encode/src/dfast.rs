@@ -100,6 +100,7 @@ pub(crate) fn compress_dfast_block(
 /// hash tables.  Pipeline: ip0, ip1=ip0+1, ip2=ip0+step, ip3=ip2+1.  Each
 /// iteration probes two positions, reusing hash computations across shifts
 /// and prefetching both hash_short and hash_long for the next position.
+#[allow(unused_assignments, unused_variables)]
 fn compress_dfast_block_impl<const HASH_LOG: u32>(
     src: &[u8],
     block_start: usize,
@@ -137,13 +138,15 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
     let ht_short = hash_short.as_mut_ptr();
     let ht_long = hash_long.as_mut_ptr();
 
-    let mut rep = *rep_offsets;
+    let mut rep0 = rep_offsets[0];
+    let mut rep1 = rep_offsets[1];
+    let mut rep2 = rep_offsets[2];
     let mut anchor = block_start;
     let mut ip0 = block_start;
 
     unsafe {
-        core::hint::assert_unchecked(rep[0] > 0);
-        core::hint::assert_unchecked(rep[1] > 0);
+        core::hint::assert_unchecked(rep0 > 0);
+        core::hint::assert_unchecked(rep1 > 0);
     }
 
     #[inline(always)]
@@ -154,6 +157,101 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
     #[inline(always)]
     unsafe fn rdp64(p: *const u8, pos: usize) -> u64 {
         unsafe { (p.add(pos) as *const u64).read_unaligned() }
+    }
+
+    macro_rules! update_hashes_inline {
+        ($pos:expr) => {{
+            let pos = $pos;
+            if pos + 8 <= src.len() {
+                let hs = h4(unsafe { rdp32(src_ptr, pos) }, hash_log);
+                unsafe {
+                    *ht_short.add(hs) = pos as u32;
+                }
+                let hl = h8(unsafe { rdp64(src_ptr, pos) }, hash_log);
+                unsafe {
+                    *ht_long.add(hl) = pos as u32;
+                }
+            }
+        }};
+    }
+
+    macro_rules! insert_comp_inline {
+        ($match_start:expr, $match_end:expr) => {{
+            let ms = $match_start;
+            let me = $match_end;
+            let step = 1usize << search_log;
+            let safe_end = me.min(src.len().saturating_sub(7));
+            let cap_end = safe_end.min(ms + 2 + step * 4);
+            let mut pos = ms + 2;
+            while pos < cap_end {
+                let hs = h4(unsafe { rdp32(src_ptr, pos) }, hash_log);
+                unsafe {
+                    *ht_short.add(hs) = pos as u32;
+                }
+                let hl = h8(unsafe { rdp64(src_ptr, pos) }, hash_log);
+                unsafe {
+                    *ht_long.add(hl) = pos as u32;
+                }
+                pos += step;
+            }
+            if me >= 2 {
+                let tail = me - 2;
+                if tail < safe_end && tail >= cap_end {
+                    let hs = h4(unsafe { rdp32(src_ptr, tail) }, hash_log);
+                    unsafe {
+                        *ht_short.add(hs) = tail as u32;
+                    }
+                    let hl = h8(unsafe { rdp64(src_ptr, tail) }, hash_log);
+                    unsafe {
+                        *ht_long.add(hl) = tail as u32;
+                    }
+                }
+            }
+        }};
+    }
+
+    macro_rules! rep_match_loop_inline {
+        () => {{
+            loop {
+                if ip0 >= ilimit {
+                    break;
+                }
+                let r0 = rep0 as usize;
+                if (r0 > 0) & (ip0 >= r0)
+                    && unsafe { rdp32(src_ptr, ip0) == rdp32(src_ptr, ip0 - r0) }
+                {
+                    let ml = count_match(src, ip0 + 4, ip0 - r0 + 4, block_end) + 4;
+                    sequences.push(Sequence {
+                        literal_length: 0,
+                        offset: r0 as u32,
+                        match_length: ml as u32,
+                    });
+                    ip0 += ml;
+                    anchor = ip0;
+                    update_hashes_inline!(ip0);
+                    continue;
+                }
+                let r1 = rep1 as usize;
+                if (r1 > 0) & (ip0 >= r1)
+                    && unsafe { rdp32(src_ptr, ip0) == rdp32(src_ptr, ip0 - r1) }
+                {
+                    let tmp = rep0;
+                    rep0 = rep1;
+                    rep1 = tmp;
+                    let ml = count_match(src, ip0 + 4, ip0 - r1 + 4, block_end) + 4;
+                    sequences.push(Sequence {
+                        literal_length: 0,
+                        offset: r1 as u32,
+                        match_length: ml as u32,
+                    });
+                    ip0 += ml;
+                    anchor = ip0;
+                    update_hashes_inline!(ip0);
+                    continue;
+                }
+                break;
+            }
+        }};
     }
 
     'start: loop {
@@ -182,10 +280,10 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
 
             // --- Rep check at step-ahead position ip2 ---
             {
-                let rep0 = rep[0] as usize;
-                if ip2 >= rep0 {
+                let r0 = rep0 as usize;
+                if ip2 >= r0 {
                     let v = unsafe { rdp32(src_ptr, ip2) };
-                    if v == unsafe { rdp32(src_ptr, ip2 - rep0) } {
+                    if v == unsafe { rdp32(src_ptr, ip2 - r0) } {
                         let fill_pos = ip0;
                         unsafe {
                             *ht_short.add(hs1) = ip1 as u32;
@@ -193,35 +291,24 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                         }
                         ip0 = ip2;
                         if ip0 > anchor
-                            && unsafe { *src_ptr.add(ip0 - 1) == *src_ptr.add(ip0 - rep0 - 1) }
+                            && unsafe { *src_ptr.add(ip0 - 1) == *src_ptr.add(ip0 - r0 - 1) }
                         {
                             ip0 -= 1;
                         }
                         let back = ip2 - ip0;
-                        let mlen = count_match(src, ip2 + 4, ip2 - rep0 + 4, block_end) + 4 + back;
+                        let mlen = count_match(src, ip2 + 4, ip2 - r0 + 4, block_end) + 4 + back;
                         total_match_bytes += mlen;
                         sequences.push(Sequence {
                             literal_length: (ip0 - anchor) as u32,
-                            offset: rep0 as u32,
+                            offset: r0 as u32,
                             match_length: mlen as u32,
                         });
                         ip0 += mlen;
                         anchor = ip0;
                         if ip0 <= ilimit {
-                            update_hashes(src, fill_pos + 2, hash_log, hash_short, hash_long);
-                            update_hashes(src, ip0 - 2, hash_log, hash_short, hash_long);
-                            rep_match_loop(
-                                src,
-                                &mut ip0,
-                                &mut anchor,
-                                &mut rep,
-                                hash_log,
-                                hash_short,
-                                hash_long,
-                                sequences,
-                                ilimit,
-                                block_end,
-                            );
+                            update_hashes_inline!(fill_pos + 2);
+                            update_hashes_inline!(ip0 - 2);
+                            rep_match_loop_inline!();
                         }
                         continue 'start;
                     }
@@ -249,39 +336,21 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                 let match_start = ip0 - back;
                 let mlen = count_match(src, ip0 + 8, match_long + 8, block_end) + 8 + back;
                 total_match_bytes += mlen;
-                emit_match(
-                    match_start,
-                    match_long - back,
-                    mlen,
-                    anchor,
-                    sequences,
-                    &mut rep,
-                );
+                let offset = (match_start - (match_long - back)) as u32;
+                sequences.push(Sequence {
+                    literal_length: (match_start - anchor) as u32,
+                    offset,
+                    match_length: mlen as u32,
+                });
+                rep2 = rep1;
+                rep1 = rep0;
+                rep0 = offset;
                 ip0 += mlen - back;
                 anchor = ip0;
                 if ip0 <= ilimit {
-                    insert_complementary(
-                        src,
-                        match_start,
-                        ip0,
-                        search_log,
-                        hash_log,
-                        hash_short,
-                        hash_long,
-                    );
-                    update_hashes(src, ip0, hash_log, hash_short, hash_long);
-                    rep_match_loop(
-                        src,
-                        &mut ip0,
-                        &mut anchor,
-                        &mut rep,
-                        hash_log,
-                        hash_short,
-                        hash_long,
-                        sequences,
-                        ilimit,
-                        block_end,
-                    );
+                    insert_comp_inline!(match_start, ip0);
+                    update_hashes_inline!(ip0);
+                    rep_match_loop_inline!();
                 }
                 continue 'start;
             }
@@ -318,39 +387,21 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                             }
                             let match_start = ip0 - back;
                             total_match_bytes += long_len + back;
-                            emit_match(
-                                match_start,
-                                ml_next - back,
-                                long_len + back,
-                                anchor,
-                                sequences,
-                                &mut rep,
-                            );
+                            let offset = (match_start - (ml_next - back)) as u32;
+                            sequences.push(Sequence {
+                                literal_length: (match_start - anchor) as u32,
+                                offset,
+                                match_length: (long_len + back) as u32,
+                            });
+                            rep2 = rep1;
+                            rep1 = rep0;
+                            rep0 = offset;
                             ip0 += long_len;
                             anchor = ip0;
                             if ip0 <= ilimit {
-                                insert_complementary(
-                                    src,
-                                    match_start,
-                                    ip0,
-                                    search_log,
-                                    hash_log,
-                                    hash_short,
-                                    hash_long,
-                                );
-                                update_hashes(src, ip0, hash_log, hash_short, hash_long);
-                                rep_match_loop(
-                                    src,
-                                    &mut ip0,
-                                    &mut anchor,
-                                    &mut rep,
-                                    hash_log,
-                                    hash_short,
-                                    hash_long,
-                                    sequences,
-                                    ilimit,
-                                    block_end,
-                                );
+                                insert_comp_inline!(match_start, ip0);
+                                update_hashes_inline!(ip0);
+                                rep_match_loop_inline!();
                             }
                             continue 'start;
                         }
@@ -375,39 +426,21 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                 let match_start = ip0 - back;
                 mlen += back;
                 total_match_bytes += mlen;
-                emit_match(
-                    match_start,
-                    match_short - back,
-                    mlen,
-                    anchor,
-                    sequences,
-                    &mut rep,
-                );
+                let offset = (match_start - (match_short - back)) as u32;
+                sequences.push(Sequence {
+                    literal_length: (match_start - anchor) as u32,
+                    offset,
+                    match_length: mlen as u32,
+                });
+                rep2 = rep1;
+                rep1 = rep0;
+                rep0 = offset;
                 ip0 += mlen - back;
                 anchor = ip0;
                 if ip0 <= ilimit {
-                    insert_complementary(
-                        src,
-                        match_start,
-                        ip0,
-                        search_log,
-                        hash_log,
-                        hash_short,
-                        hash_long,
-                    );
-                    update_hashes(src, ip0, hash_log, hash_short, hash_long);
-                    rep_match_loop(
-                        src,
-                        &mut ip0,
-                        &mut anchor,
-                        &mut rep,
-                        hash_log,
-                        hash_short,
-                        hash_long,
-                        sequences,
-                        ilimit,
-                        block_end,
-                    );
+                    insert_comp_inline!(match_start, ip0);
+                    update_hashes_inline!(ip0);
+                    rep_match_loop_inline!();
                 }
                 continue 'start;
             }
@@ -464,39 +497,21 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                 let match_start = ip0 - back;
                 let mlen = count_match(src, ip0 + 8, match_long + 8, block_end) + 8 + back;
                 total_match_bytes += mlen;
-                emit_match(
-                    match_start,
-                    match_long - back,
-                    mlen,
-                    anchor,
-                    sequences,
-                    &mut rep,
-                );
+                let offset = (match_start - (match_long - back)) as u32;
+                sequences.push(Sequence {
+                    literal_length: (match_start - anchor) as u32,
+                    offset,
+                    match_length: mlen as u32,
+                });
+                rep2 = rep1;
+                rep1 = rep0;
+                rep0 = offset;
                 ip0 += mlen - back;
                 anchor = ip0;
                 if ip0 <= ilimit {
-                    insert_complementary(
-                        src,
-                        match_start,
-                        ip0,
-                        search_log,
-                        hash_log,
-                        hash_short,
-                        hash_long,
-                    );
-                    update_hashes(src, ip0, hash_log, hash_short, hash_long);
-                    rep_match_loop(
-                        src,
-                        &mut ip0,
-                        &mut anchor,
-                        &mut rep,
-                        hash_log,
-                        hash_short,
-                        hash_long,
-                        sequences,
-                        ilimit,
-                        block_end,
-                    );
+                    insert_comp_inline!(match_start, ip0);
+                    update_hashes_inline!(ip0);
+                    rep_match_loop_inline!();
                 }
                 continue 'start;
             }
@@ -535,39 +550,21 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                             }
                             let match_start = ip0 - back;
                             total_match_bytes += long_len + back;
-                            emit_match(
-                                match_start,
-                                ml_next - back,
-                                long_len + back,
-                                anchor,
-                                sequences,
-                                &mut rep,
-                            );
+                            let offset = (match_start - (ml_next - back)) as u32;
+                            sequences.push(Sequence {
+                                literal_length: (match_start - anchor) as u32,
+                                offset,
+                                match_length: (long_len + back) as u32,
+                            });
+                            rep2 = rep1;
+                            rep1 = rep0;
+                            rep0 = offset;
                             ip0 += long_len;
                             anchor = ip0;
                             if ip0 <= ilimit {
-                                insert_complementary(
-                                    src,
-                                    match_start,
-                                    ip0,
-                                    search_log,
-                                    hash_log,
-                                    hash_short,
-                                    hash_long,
-                                );
-                                update_hashes(src, ip0, hash_log, hash_short, hash_long);
-                                rep_match_loop(
-                                    src,
-                                    &mut ip0,
-                                    &mut anchor,
-                                    &mut rep,
-                                    hash_log,
-                                    hash_short,
-                                    hash_long,
-                                    sequences,
-                                    ilimit,
-                                    block_end,
-                                );
+                                insert_comp_inline!(match_start, ip0);
+                                update_hashes_inline!(ip0);
+                                rep_match_loop_inline!();
                             }
                             continue 'start;
                         }
@@ -594,39 +591,21 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
                 let match_start = ip0 - back;
                 mlen += back;
                 total_match_bytes += mlen;
-                emit_match(
-                    match_start,
-                    match_short - back,
-                    mlen,
-                    anchor,
-                    sequences,
-                    &mut rep,
-                );
+                let offset = (match_start - (match_short - back)) as u32;
+                sequences.push(Sequence {
+                    literal_length: (match_start - anchor) as u32,
+                    offset,
+                    match_length: mlen as u32,
+                });
+                rep2 = rep1;
+                rep1 = rep0;
+                rep0 = offset;
                 ip0 += mlen - back;
                 anchor = ip0;
                 if ip0 <= ilimit {
-                    insert_complementary(
-                        src,
-                        match_start,
-                        ip0,
-                        search_log,
-                        hash_log,
-                        hash_short,
-                        hash_long,
-                    );
-                    update_hashes(src, ip0, hash_log, hash_short, hash_long);
-                    rep_match_loop(
-                        src,
-                        &mut ip0,
-                        &mut anchor,
-                        &mut rep,
-                        hash_log,
-                        hash_short,
-                        hash_long,
-                        sequences,
-                        ilimit,
-                        block_end,
-                    );
+                    insert_comp_inline!(match_start, ip0);
+                    update_hashes_inline!(ip0);
+                    rep_match_loop_inline!();
                 }
                 continue 'start;
             }
@@ -759,125 +738,6 @@ pub(crate) fn compress_dfast_with_prefix_reuse(
         hash_long,
         sequences,
     );
-}
-
-#[inline(always)]
-fn rep_match_loop(
-    src: &[u8],
-    ip: &mut usize,
-    anchor: &mut usize,
-    rep: &mut [u32; 3],
-    hash_log: u32,
-    hash_short: &mut [u32],
-    hash_long: &mut [u32],
-    sequences: &mut Vec<Sequence>,
-    limit: usize,
-    block_end: usize,
-) {
-    loop {
-        if *ip >= limit {
-            break;
-        }
-        let r0 = rep[0] as usize;
-        if (r0 > 0) & (*ip >= r0) && rd32(src, *ip) == rd32(src, *ip - r0) {
-            let ml = count_match(src, *ip + 4, *ip - r0 + 4, block_end) + 4;
-            sequences.push(Sequence {
-                literal_length: 0,
-                offset: r0 as u32,
-                match_length: ml as u32,
-            });
-            *ip += ml;
-            *anchor = *ip;
-            update_hashes(src, *ip, hash_log, hash_short, hash_long);
-            continue;
-        }
-        let r1 = rep[1] as usize;
-        if (r1 > 0) & (*ip >= r1) && rd32(src, *ip) == rd32(src, *ip - r1) {
-            rep.swap(0, 1);
-            let ml = count_match(src, *ip + 4, *ip - r1 + 4, block_end) + 4;
-            sequences.push(Sequence {
-                literal_length: 0,
-                offset: r1 as u32,
-                match_length: ml as u32,
-            });
-            *ip += ml;
-            *anchor = *ip;
-            update_hashes(src, *ip, hash_log, hash_short, hash_long);
-            continue;
-        }
-        break;
-    }
-}
-
-#[inline(always)]
-fn emit_match(
-    ip: usize,
-    match_pos: usize,
-    match_len: usize,
-    anchor: usize,
-    sequences: &mut Vec<Sequence>,
-    rep: &mut [u32; 3],
-) {
-    let offset = (ip - match_pos) as u32;
-    let lit_len = (ip - anchor) as u32;
-
-    sequences.push(Sequence {
-        literal_length: lit_len,
-        offset,
-        match_length: match_len as u32,
-    });
-
-    rep[2] = rep[1];
-    rep[1] = rep[0];
-    rep[0] = offset;
-}
-
-#[inline(always)]
-fn insert_complementary(
-    src: &[u8],
-    match_start: usize,
-    match_end: usize,
-    search_log: u32,
-    hash_log: u32,
-    hash_short: &mut [u32],
-    hash_long: &mut [u32],
-) {
-    let step = 1usize << search_log;
-    let safe_end = match_end.min(src.len().saturating_sub(7));
-    let cap_end = safe_end.min(match_start + 2 + step * 4);
-    let mut pos = match_start + 2;
-    while pos < cap_end {
-        let hs = h4(rd32(src, pos), hash_log) as usize;
-        hs32(hash_short, hs, pos as u32);
-        let hl = h8(rd64(src, pos), hash_log) as usize;
-        hs32(hash_long, hl, pos as u32);
-        pos += step;
-    }
-    if match_end >= 2 {
-        let tail = match_end - 2;
-        if tail < safe_end && tail >= cap_end {
-            let hs = h4(rd32(src, tail), hash_log) as usize;
-            hs32(hash_short, hs, tail as u32);
-            let hl = h8(rd64(src, tail), hash_log) as usize;
-            hs32(hash_long, hl, tail as u32);
-        }
-    }
-}
-
-#[inline(always)]
-fn update_hashes(
-    src: &[u8],
-    ip: usize,
-    hash_log: u32,
-    hash_short: &mut [u32],
-    hash_long: &mut [u32],
-) {
-    if ip + 8 <= src.len() {
-        let hs = h4(rd32(src, ip), hash_log) as usize;
-        hs32(hash_short, hs, ip as u32);
-        let hl = h8(rd64(src, ip), hash_log) as usize;
-        hs32(hash_long, hl, ip as u32);
-    }
 }
 
 #[inline(always)]
