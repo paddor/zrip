@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::{__m256i, _mm256_loadu_si256, _mm256_storeu_si256};
 
-use crate::sequences::{SequenceDecodeTables, compute_offset};
+use crate::sequences::SequenceDecodeTables;
 use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
 use zrip_core::fse::FseSeqDecodeEntry;
@@ -13,7 +13,7 @@ use zrip_core::hint::{likely, unlikely};
 /// # Safety
 /// AVX2 and BMI2 must be available.
 #[target_feature(enable = "avx2,bmi2")]
-pub unsafe fn decode_execute_avx2(
+unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
     seq_data: &[u8],
     num_sequences: u32,
     tables: &SequenceDecodeTables,
@@ -40,17 +40,14 @@ pub unsafe fn decode_execute_avx2(
     let mut op = unsafe { out_base.add(output.len()) };
     let op_limit = unsafe { out_base.add(output.len() + zrip_core::frame::MAX_BLOCK_SIZE) };
 
-    // Raw pointers: eliminate fat pointer (ptr, len) pairs from live set.
-    // LLVM keeps slice lengths alive even when only get_unchecked is used.
     let of_tbl = tables.of_table.as_ptr();
     let ml_tbl = tables.ml_table.as_ptr();
     let ll_tbl = tables.ll_table.as_ptr();
     let lit_ptr = literals.as_ptr();
     let lit_end = unsafe { lit_ptr.add(literals.len()) };
-    let hist_len = history.len();
+    let hist_len = if HAS_HISTORY { history.len() } else { 0 };
     let mut lit_pos = lit_ptr;
 
-    // Inline bitstream state: raw pointer for bs_ptr eliminates data_ptr from live set.
     let mut bs_container = rev_reader.container;
     let mut bs_consumed = rev_reader.bits_consumed;
     let mut bs_ptr = unsafe { seq_data.as_ptr().add(rev_reader.ptr) };
@@ -58,7 +55,10 @@ pub unsafe fn decode_execute_avx2(
 
     let last_seq = num_sequences - 1;
 
-    // Branchless bit read: (container << (consumed & 63)) >> 1 >> (63 - n)
+    let mut rep0 = rep_offsets[0];
+    let mut rep1 = rep_offsets[1];
+    let mut rep2 = rep_offsets[2];
+
     macro_rules! read_bits {
         ($n:expr) => {{
             let r = ((bs_container << (bs_consumed & 63)) >> 1 >> (63 - $n as u32)) as u32;
@@ -76,6 +76,39 @@ pub unsafe fn decode_execute_avx2(
         }};
     }
 
+    macro_rules! compute_offset_inline {
+        ($offset_value:expr, $literal_length:expr) => {{
+            let ov = $offset_value;
+            if ov > 3 {
+                let offset = ov - 3;
+                rep2 = rep1;
+                rep1 = rep0;
+                rep0 = offset;
+                offset
+            } else {
+                let ll0 = ($literal_length == 0) as u32;
+                let rep_idx = ov - 1 + ll0;
+                let offset = if rep_idx == 0 {
+                    rep0
+                } else if rep_idx == 1 {
+                    rep1
+                } else if rep_idx == 2 {
+                    rep2
+                } else {
+                    rep0.wrapping_sub(1)
+                };
+                if rep_idx >= 2 {
+                    rep2 = rep1;
+                }
+                if rep_idx >= 1 {
+                    rep1 = rep0;
+                }
+                rep0 = offset;
+                offset
+            }
+        }};
+    }
+
     macro_rules! decode_and_update {
         () => {{
             refill_fast!();
@@ -88,7 +121,7 @@ pub unsafe fn decode_execute_avx2(
             let match_length = ml_e.baseline_value + read_bits!(ml_e.extra_bits);
             let literal_length = ll_e.baseline_value + read_bits!(ll_e.extra_bits);
 
-            let offset = compute_offset(offset_value, literal_length, rep_offsets);
+            let offset = compute_offset_inline!(offset_value, literal_length);
 
             refill_fast!();
             ll_state = ll_e.base_line as u32 + read_bits!(ll_e.num_bits);
@@ -102,8 +135,8 @@ pub unsafe fn decode_execute_avx2(
     macro_rules! execute_seq {
         ($literal_length:expr, $match_length:expr, $offset:expr) => {{
             let ll = $literal_length as usize;
-            let ml_pre = $match_length as usize;
-            if unlikely(unsafe { op.add(ll + ml_pre) } > op_limit) {
+            let ml = $match_length as usize;
+            if unlikely(unsafe { op.add(ll + ml) } > op_limit) {
                 return Err(DecompressError::CorruptSequences);
             }
             let lit_remaining = unsafe { lit_end.offset_from(lit_pos) } as usize;
@@ -120,7 +153,6 @@ pub unsafe fn decode_execute_avx2(
                 lit_pos = lit_pos.add(ll);
             }
 
-            let ml = $match_length as usize;
             let offset = $offset;
             if unlikely(offset == 0) {
                 return Err(DecompressError::CorruptSequences);
@@ -131,7 +163,7 @@ pub unsafe fn decode_execute_avx2(
                 return Err(DecompressError::CorruptSequences);
             }
             unsafe {
-                if likely(off <= out_pos) {
+                if !HAS_HISTORY || likely(off <= out_pos) {
                     if off >= 32 {
                         let mut s = op.sub(off);
                         let mut d = op;
@@ -197,7 +229,7 @@ pub unsafe fn decode_execute_avx2(
         let match_length = ml_e.baseline_value + ml_extra;
         let ll_extra = rev_reader.read_bits_branchless(ll_e.extra_bits);
         let literal_length = ll_e.baseline_value + ll_extra;
-        let offset = compute_offset(offset_value, literal_length, rep_offsets);
+        let offset = compute_offset_inline!(offset_value, literal_length);
 
         rev_reader.refill();
         ll_state = ll_e.base_line as u32 + rev_reader.read_bits_branchless(ll_e.num_bits);
@@ -217,9 +249,13 @@ pub unsafe fn decode_execute_avx2(
         let offset_value = of_e.baseline_value + rev_reader.read_bits_branchless(of_e.extra_bits);
         let match_length = ml_e.baseline_value + rev_reader.read_bits_branchless(ml_e.extra_bits);
         let literal_length = ll_e.baseline_value + rev_reader.read_bits_branchless(ll_e.extra_bits);
-        let offset = compute_offset(offset_value, literal_length, rep_offsets);
+        let offset = compute_offset_inline!(offset_value, literal_length);
         execute_seq!(literal_length, match_length, offset);
     }
+
+    rep_offsets[0] = rep0;
+    rep_offsets[1] = rep1;
+    rep_offsets[2] = rep2;
 
     // Trailing literals
     if lit_pos < lit_end {
@@ -235,6 +271,45 @@ pub unsafe fn decode_execute_avx2(
     }
 
     Ok(())
+}
+
+/// # Safety
+/// AVX2 and BMI2 must be available.
+#[target_feature(enable = "avx2,bmi2")]
+pub unsafe fn decode_execute_avx2(
+    seq_data: &[u8],
+    num_sequences: u32,
+    tables: &SequenceDecodeTables,
+    rep_offsets: &mut [u32; 3],
+    literals: &[u8],
+    output: &mut Vec<u8>,
+    history: &[u8],
+) -> Result<(), DecompressError> {
+    if history.is_empty() {
+        unsafe {
+            decode_execute_avx2_inner::<false>(
+                seq_data,
+                num_sequences,
+                tables,
+                rep_offsets,
+                literals,
+                output,
+                history,
+            )
+        }
+    } else {
+        unsafe {
+            decode_execute_avx2_inner::<true>(
+                seq_data,
+                num_sequences,
+                tables,
+                rep_offsets,
+                literals,
+                output,
+                history,
+            )
+        }
+    }
 }
 
 #[inline(always)]
@@ -271,7 +346,6 @@ pub fn decode_execute_avx2_safe(
     output: &mut Vec<u8>,
     history: &[u8],
 ) -> Result<(), DecompressError> {
-    // Safety: caller guarantees AVX2+BMI2 are available (checked via CpuTier)
     unsafe {
         decode_execute_avx2(
             seq_data,
