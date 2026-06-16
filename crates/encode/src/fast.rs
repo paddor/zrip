@@ -131,14 +131,12 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
     'start: loop {
         let mut ip1 = ip0 + 1;
         let mut ip2 = ip0 + step_size;
-        let mut ip3 = ip2 + 1;
 
-        if unlikely(ip3 >= ilimit) {
+        if unlikely(ip2 + 1 >= ilimit) {
             break;
         }
 
         let mut h0 = hash_pos::<HASH_LOG, MLS>(src_ptr, ip0, hash_log);
-        let mut h1 = hash_pos::<HASH_LOG, MLS>(src_ptr, ip1, hash_log);
         let mut match_idx = unsafe { *ht_ptr.add(h0) } as usize;
 
         loop {
@@ -158,6 +156,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
                     {
                         ip0 -= 1;
                     }
+                    let h1 = hash_pos::<HASH_LOG, MLS>(src_ptr, ip1, hash_log);
                     unsafe { *ht_ptr.add(h1) = ip1 as u32 };
                     let back = ip2 - ip0;
                     let mlen = unsafe {
@@ -198,6 +197,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
                 && ip0 - match_idx <= max_distance
                 && unsafe { match_at::<MLS>(src_ptr, ip0, match_idx) }
             {
+                let h1 = hash_pos::<HASH_LOG, MLS>(src_ptr, ip1, hash_log);
                 unsafe { *ht_ptr.add(h1) = ip1 as u32 };
                 let fill_pos = ip0;
                 let mut back = 0usize;
@@ -247,17 +247,18 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
                 continue 'start;
             }
 
-            // First shift: reuse h1 as h0, compute new h1 from ip2
+            // First shift: compute h1 for ip1, reuse as h0
+            let h1 = hash_pos::<HASH_LOG, MLS>(src_ptr, ip1, hash_log);
             match_idx = unsafe { *ht_ptr.add(h1) } as usize;
             h0 = h1;
-            h1 = hash_pos::<HASH_LOG, MLS>(src_ptr, ip2, hash_log);
+            let h_ip2 = hash_pos::<HASH_LOG, MLS>(src_ptr, ip2, hash_log);
             ip0 = ip1;
             ip1 = ip2;
-            ip2 = ip3;
+            ip2 += 1;
 
             unsafe {
                 core::arch::x86_64::_mm_prefetch(
-                    ht_ptr.add(h1) as *const i8,
+                    ht_ptr.add(h_ip2) as *const i8,
                     core::arch::x86_64::_MM_HINT_T0,
                 );
             }
@@ -271,7 +272,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
                 && unsafe { match_at::<MLS>(src_ptr, ip0, match_idx) }
             {
                 if step_size + ((ip0 - anchor) >> search_strength) <= 4 {
-                    unsafe { *ht_ptr.add(h1) = ip1 as u32 };
+                    unsafe { *ht_ptr.add(h_ip2) = ip1 as u32 };
                 }
                 let fill_pos = ip0;
                 let mut back = 0usize;
@@ -322,18 +323,17 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
             }
 
             // Second shift with step gap
-            match_idx = unsafe { *ht_ptr.add(h1) } as usize;
-            h0 = h1;
-            h1 = hash_pos::<HASH_LOG, MLS>(src_ptr, ip2, hash_log);
+            match_idx = unsafe { *ht_ptr.add(h_ip2) } as usize;
+            h0 = h_ip2;
+            let h_next = hash_pos::<HASH_LOG, MLS>(src_ptr, ip2, hash_log);
             ip0 = ip1;
             ip1 = ip2;
             let step = step_size + ((ip0 - anchor) >> search_strength);
             ip2 = ip0 + step;
-            ip3 = ip1 + step;
 
             unsafe {
                 core::arch::x86_64::_mm_prefetch(
-                    ht_ptr.add(h1) as *const i8,
+                    ht_ptr.add(h_next) as *const i8,
                     core::arch::x86_64::_MM_HINT_T0,
                 );
             }
@@ -347,7 +347,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
                 probe_limit = probe_limit.saturating_add(probe_interval).min(block_end);
             }
 
-            if unlikely(ip3 >= ilimit) {
+            if unlikely(ip2 + 1 >= ilimit) {
                 break;
             }
         }
