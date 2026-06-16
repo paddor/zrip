@@ -28,7 +28,7 @@ COLORS = {
 LABELS = {
     "C zstd":          "C zstd 1.5.7 (libzstd)",
     "zrip":            "zrip (safe Rust)",
-    "structured-zstd": "structured-zstd 0.0.37 (unsafe Rust)",
+    "structured-zstd": "structured-zstd 0.0.40 (unsafe Rust)",
     "ruzstd":          "ruzstd 0.8.2 (safe Rust)",
     "lz4rip":          "lz4rip 0.3.1 (safe Rust, LZ4)",
 }
@@ -184,11 +184,16 @@ def generate_svg(data):
 
     svg_h = y - panel_gap + 130
 
-    # shared y-axis scale across all panels
-    y_max = 0
-    for v in stacks.values():
-        y_max = max(y_max, sum(v))
-    y_max *= 1.15
+    # per-panel y-axis scale so panels without ruzstd aren't squashed
+    panel_y_max = {}
+    for level in LEVELS:
+        pmax = 0
+        for g in groups:
+            for c in CODEC_ORDER:
+                v = stacks.get((c, level, g))
+                if v:
+                    pmax = max(pmax, sum(v))
+        panel_y_max[level] = pmax * 1.15
 
     mid_x = (x_left + x_right) / 2
     L = []
@@ -235,13 +240,15 @@ def generate_svg(data):
         if n_codecs == 0:
             continue
 
-        def y(v, _bot=p_bot, _top=p_top):
-            return _bot - (v / y_max) * (_bot - _top)
+        p_y_max = panel_y_max[level]
 
-        # y gridlines + labels (only on leftmost panel row, reuse positions)
-        step = nice_step(y_max, 5)
+        def y(v, _bot=p_bot, _top=p_top, _ymax=p_y_max):
+            return _bot - (v / _ymax) * (_bot - _top)
+
+        # y gridlines + labels
+        step = nice_step(p_y_max, 5)
         v = step
-        while v <= y_max:
+        while v <= p_y_max:
             yy = y(v)
             L.append(
                 f'  <line x1="{x_left}" y1="{yy:.1f}" x2="{x_right}" y2="{yy:.1f}"'
@@ -277,19 +284,19 @@ def generate_svg(data):
                 main_c, xfer_c = COLORS[codec]
 
                 bx = group_x + ci * (bar_w + inner_gap / n_codecs)
-                h_comp = (comp / y_max) * (p_bot - p_top)
+                h_comp = (comp / p_y_max) * (p_bot - p_top)
                 L.append(
                     f'  <rect x="{bx:.1f}" y="{y(comp):.1f}"'
                     f' width="{bar_w:.1f}" height="{h_comp:.1f}"'
                     f' fill="{main_c}" rx="1"/>'
                 )
-                h_transfer = (transfer / y_max) * (p_bot - p_top)
+                h_transfer = (transfer / p_y_max) * (p_bot - p_top)
                 L.append(
                     f'  <rect x="{bx:.1f}" y="{y(comp + transfer):.1f}"'
                     f' width="{bar_w:.1f}" height="{h_transfer:.1f}"'
                     f' fill="{xfer_c}" rx="1"/>'
                 )
-                h_decomp = (decomp / y_max) * (p_bot - p_top)
+                h_decomp = (decomp / p_y_max) * (p_bot - p_top)
                 L.append(
                     f'  <rect x="{bx:.1f}" y="{y(comp + transfer + decomp):.1f}"'
                     f' width="{bar_w:.1f}" height="{h_decomp:.1f}"'
