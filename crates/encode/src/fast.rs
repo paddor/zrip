@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use crate::strategy::LevelParams;
 use zrip_core::Sequence;
 use zrip_core::hash::PRIME32_1;
+use zrip_core::hint::unlikely;
 
 pub(crate) fn compress_fast(
     src: &[u8],
@@ -163,7 +164,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32>(
         let mut ip2 = ip0 + step_size;
         let mut ip3 = ip2 + 1;
 
-        if ip3 >= ilimit {
+        if unlikely(ip3 >= ilimit) {
             break;
         }
 
@@ -360,7 +361,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32>(
                 probe_limit = probe_limit.saturating_add(probe_interval).min(block_end);
             }
 
-            if ip3 >= ilimit {
+            if unlikely(ip3 >= ilimit) {
                 break;
             }
         }

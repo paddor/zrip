@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use crate::sequences::{Sequence, SequenceDecodeTables, compute_offset};
 use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
+use zrip_core::hint::{likely, unlikely};
 
 pub fn execute_sequences(
     sequences: &[Sequence],
@@ -23,10 +24,10 @@ pub fn execute_sequences(
     for seq in sequences {
         let ll = seq.literal_length as usize;
         let ml = seq.match_length as usize;
-        if unsafe { op.add(ll + ml) } > op_limit {
+        if unlikely(unsafe { op.add(ll + ml) } > op_limit) {
             return Err(DecompressError::CorruptSequences);
         }
-        if lit_off + ll > literals.len() {
+        if unlikely(lit_off + ll > literals.len()) {
             return Err(DecompressError::CorruptLiterals);
         }
         unsafe {
@@ -42,17 +43,17 @@ pub fn execute_sequences(
 
         let offset = seq.offset as usize;
 
-        if offset == 0 {
+        if unlikely(offset == 0) {
             return Err(DecompressError::CorruptSequences);
         }
 
         let out_pos = unsafe { op.offset_from(out_base) } as usize;
-        if offset > out_pos + history.len() {
+        if unlikely(offset > out_pos + history.len()) {
             return Err(DecompressError::CorruptSequences);
         }
 
         unsafe {
-            if offset <= out_pos {
+            if likely(offset <= out_pos) {
                 zrip_core::simd::scalar::copy_match(op, offset, ml);
             } else {
                 copy_match_from_history(op, history, offset, out_pos, ml);
@@ -109,10 +110,10 @@ pub fn decode_execute_sequences(
         ($literal_length:expr, $match_length:expr, $offset:expr) => {{
             let ll = $literal_length as usize;
             let ml_check = $match_length as usize;
-            if unsafe { op.add(ll + ml_check) } > op_limit {
+            if unlikely(unsafe { op.add(ll + ml_check) } > op_limit) {
                 return Err(DecompressError::CorruptSequences);
             }
-            if lit_off + ll > literals.len() {
+            if unlikely(lit_off + ll > literals.len()) {
                 return Err(DecompressError::CorruptLiterals);
             }
             unsafe {
@@ -129,15 +130,15 @@ pub fn decode_execute_sequences(
 
             let ml = $match_length as usize;
             let off = $offset as usize;
-            if off == 0 {
+            if unlikely(off == 0) {
                 return Err(DecompressError::CorruptSequences);
             }
             let out_pos = unsafe { op.offset_from(out_base) } as usize;
-            if off > out_pos + history.len() {
+            if unlikely(off > out_pos + history.len()) {
                 return Err(DecompressError::CorruptSequences);
             }
             unsafe {
-                if off <= out_pos {
+                if likely(off <= out_pos) {
                     zrip_core::simd::scalar::copy_match(op, off, ml);
                 } else {
                     copy_match_from_history(op, history, off, out_pos, ml);

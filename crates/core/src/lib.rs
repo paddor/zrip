@@ -5,6 +5,7 @@
 extern crate alloc;
 
 pub mod error;
+pub mod hint;
 
 pub mod bitstream;
 pub mod fse;

@@ -5,6 +5,7 @@ use crate::sequences::{Sequence, SequenceDecodeTables, compute_offset};
 use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
 use zrip_core::fse::FseSeqDecodeEntry;
+use zrip_core::hint::{likely, unlikely};
 
 /// Fused sequence decode + execute with NEON wildcopy.
 /// Uses raw `op` pointer throughout the loop to eliminate per-sequence Vec overhead.
@@ -79,10 +80,10 @@ pub unsafe fn decode_execute_neon(
         ($literal_length:expr, $match_length:expr, $offset:expr) => {{
             let ll = $literal_length as usize;
             let ml_check = $match_length as usize;
-            if unsafe { op.add(ll + ml_check) } > op_limit {
+            if unlikely(unsafe { op.add(ll + ml_check) } > op_limit) {
                 return Err(DecompressError::CorruptSequences);
             }
-            if lit_off + ll > literals.len() {
+            if unlikely(lit_off + ll > literals.len()) {
                 return Err(DecompressError::CorruptLiterals);
             }
             if ll > 0 {
@@ -101,16 +102,16 @@ pub unsafe fn decode_execute_neon(
 
             let ml = $match_length as usize;
             let offset = $offset;
-            if offset == 0 {
+            if unlikely(offset == 0) {
                 return Err(DecompressError::CorruptSequences);
             }
             let off = offset as usize;
             let out_pos = unsafe { op.offset_from(out_base) } as usize;
-            if off > out_pos + history.len() {
+            if unlikely(off > out_pos + history.len()) {
                 return Err(DecompressError::CorruptSequences);
             }
             unsafe {
-                if off <= out_pos {
+                if likely(off <= out_pos) {
                     super::neon::copy_match_neon(op, off, ml);
                 } else {
                     copy_match_from_history(op, history, off, out_pos, ml);

@@ -8,6 +8,7 @@ use crate::sequences::{SequenceDecodeTables, compute_offset};
 use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
 use zrip_core::fse::FseSeqDecodeEntry;
+use zrip_core::hint::{likely, unlikely};
 
 /// # Safety
 /// AVX2 and BMI2 must be available.
@@ -102,11 +103,11 @@ pub unsafe fn decode_execute_avx2(
         ($literal_length:expr, $match_length:expr, $offset:expr) => {{
             let ll = $literal_length as usize;
             let ml_pre = $match_length as usize;
-            if unsafe { op.add(ll + ml_pre) } > op_limit {
+            if unlikely(unsafe { op.add(ll + ml_pre) } > op_limit) {
                 return Err(DecompressError::CorruptSequences);
             }
             let lit_remaining = unsafe { lit_end.offset_from(lit_pos) } as usize;
-            if ll > lit_remaining {
+            if unlikely(ll > lit_remaining) {
                 return Err(DecompressError::CorruptSequences);
             }
             unsafe {
@@ -121,16 +122,16 @@ pub unsafe fn decode_execute_avx2(
 
             let ml = $match_length as usize;
             let offset = $offset;
-            if offset == 0 {
+            if unlikely(offset == 0) {
                 return Err(DecompressError::CorruptSequences);
             }
             let off = offset as usize;
             let out_pos = unsafe { op.offset_from(out_base) } as usize;
-            if off > out_pos + hist_len {
+            if unlikely(off > out_pos + hist_len) {
                 return Err(DecompressError::CorruptSequences);
             }
             unsafe {
-                if off <= out_pos {
+                if likely(off <= out_pos) {
                     if off >= 32 {
                         let mut s = op.sub(off);
                         let mut d = op;
