@@ -2,7 +2,7 @@
 """Generate encode speed vs compression ratio scatter plot from cached bench data.
 
 Reads ~/.cache/zrip/{codec}.jsonl, writes scatter.svg.
-Two panels stacked vertically: Compressible (top), Incompressible (bottom),
+Three panels stacked vertically: High / Medium / Low compressibility,
 each with its own Y-axis scale. X-axis: encode throughput (MB/s, log scale).
 Y-axis: compression ratio. Connected points per codec, each point a level.
 
@@ -39,21 +39,31 @@ LEVEL_FILTER = {
     "ruzstd": {1},
 }
 
-COMPRESSIBLE = {
-    "dickens.txt", "hdfs.json", "nci", "xml_collection.xml", "webster",
-    "samba", "reymont.pdf", "mozilla", "compression_34k.txt",
-    "compression_65k.txt", "compression_66k_JSON.txt", "osdb",
+HIGH_COMPRESSIBILITY = {
+    "hdfs.json", "nci", "xml_collection.xml", "compression_66k_JSON.txt",
+    "samba",
 }
-INCOMPRESSIBLE = {"sao", "x-ray", "mr"}
+MEDIUM_COMPRESSIBILITY = {
+    "reymont.pdf", "webster", "osdb", "mr", "mozilla", "dickens.txt",
+    "compression_34k.txt", "compression_65k.txt",
+}
+LOW_COMPRESSIBILITY = {"sao", "x-ray"}
+
+GROUPS = [
+    ("High compressibility", HIGH_COMPRESSIBILITY),
+    ("Medium compressibility", MEDIUM_COMPRESSIBILITY),
+    ("Low compressibility", LOW_COMPRESSIBILITY),
+]
 
 MIN_FILE_SIZE = 10_000
 
 # Fixed axis ranges so the chart doesn't shift when data changes.
 FIXED_LOG_X_MIN = 1.477  # 10^1.477 ≈ 30 MB/s
-FIXED_LOG_X_MAX = 3.301  # 10^3.301 ≈ 2000 MB/s
+FIXED_LOG_X_MAX = 3.602  # 10^3.602 ≈ 4000 MB/s
 FIXED_Y_RANGES = {
-    "Compressible":   (2.0, 5.0),
-    "Incompressible": (1.0, 2.0),
+    "High compressibility":   (2.5, 10.0),
+    "Medium compressibility": (1.4, 3.2),
+    "Low compressibility":    (0.95, 1.45),
 }
 
 
@@ -122,7 +132,7 @@ def load_all_data():
 
 def compute_points(data):
     """For each (codec, level, group), compute geomean encode MB/s (log scale) and ratio."""
-    groups = [("Compressible", COMPRESSIBLE), ("Incompressible", INCOMPRESSIBLE)]
+    groups = GROUPS
     points = {}
 
     for codec in CODEC_ORDER:
@@ -358,20 +368,15 @@ def generate_svg(data):
 
     svg_w = 850
     top_margin = 55 if hw_label else 45
-    panel_h = 300
-    panel_gap = 55
+    n_panels = len(GROUPS)
+    panel_h = 250
+    panel_gap = 65
     bottom_margin = 80
-    svg_h = top_margin + panel_h * 2 + panel_gap + bottom_margin
+    svg_h = top_margin + panel_h * n_panels + panel_gap * (n_panels - 1) + bottom_margin
 
     xl = 70
     xr = 830
 
-    panel1_top = top_margin
-    panel1_bot = panel1_top + panel_h
-    panel2_top = panel1_bot + panel_gap
-    panel2_bot = panel2_top + panel_h
-
-    # Shared X-axis (log scale) — fixed range
     if not points:
         return "<svg></svg>"
     log_min = FIXED_LOG_X_MIN
@@ -397,16 +402,17 @@ def generate_svg(data):
             f' font-size="10">{hw_label}</text>'
         )
 
-    for group_name, p_top, p_bot in [
-        ("Compressible", panel1_top, panel1_bot),
-        ("Incompressible", panel2_top, panel2_bot),
-    ]:
+    last_bot = top_margin
+    for i, (group_name, _file_set) in enumerate(GROUPS):
+        p_top = top_margin + i * (panel_h + panel_gap)
+        p_bot = p_top + panel_h
         y_lo, y_hi = FIXED_Y_RANGES[group_name]
         render_panel(L, points, data, group_name,
                      xl, xr, p_top, p_bot, log_min, log_max, y_lo, y_hi)
+        last_bot = p_bot
 
-    # Y-axis label (shared, centered between panels)
-    y_mid = (panel1_top + panel2_bot) / 2
+    # Y-axis label (shared, centered across all panels)
+    y_mid = (top_margin + last_bot) / 2
     L.append(
         f'  <text x="16" y="{y_mid}" text-anchor="middle" fill="#e6edf3"'
         f' font-size="11" font-weight="600"'
@@ -414,7 +420,7 @@ def generate_svg(data):
     )
 
     # Legend
-    leg_y = panel2_bot + 40
+    leg_y = last_bot + 40
     legend_items = [(k, LABELS[k]) for k in CODEC_ORDER if k in data]
     item_widths = [len(label) * 6.2 + 24 for _, label in legend_items]
     gap = 12
