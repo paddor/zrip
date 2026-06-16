@@ -1,81 +1,10 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use crate::sequences::{Sequence, SequenceDecodeTables, compute_offset};
+use crate::sequences::{SequenceDecodeTables, compute_offset};
 use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
 use zrip_core::hint::{likely, unlikely};
-
-pub fn execute_sequences(
-    sequences: &[Sequence],
-    literals: &[u8],
-    output: &mut Vec<u8>,
-    history: &[u8],
-) -> Result<(), DecompressError> {
-    const WILDCOPY_OVERLENGTH: usize = 32;
-    output.reserve(zrip_core::frame::MAX_BLOCK_SIZE + WILDCOPY_OVERLENGTH);
-
-    let out_base = output.as_mut_ptr();
-    let mut op = unsafe { out_base.add(output.len()) };
-    let op_limit = unsafe { out_base.add(output.len() + zrip_core::frame::MAX_BLOCK_SIZE) };
-    let lit_ptr = literals.as_ptr();
-    let mut lit_off: usize = 0;
-
-    for seq in sequences {
-        let ll = seq.literal_length as usize;
-        let ml = seq.match_length as usize;
-        if unlikely(unsafe { op.add(ll + ml) } > op_limit) {
-            return Err(DecompressError::CorruptSequences);
-        }
-        if unlikely(lit_off + ll > literals.len()) {
-            return Err(DecompressError::CorruptLiterals);
-        }
-        unsafe {
-            let src = lit_ptr.add(lit_off);
-            (op as *mut u64).write_unaligned((src as *const u64).read_unaligned());
-            (op.add(8) as *mut u64).write_unaligned((src.add(8) as *const u64).read_unaligned());
-            if ll > 16 {
-                core::ptr::copy_nonoverlapping(src.add(16), op.add(16), ll - 16);
-            }
-        }
-        op = unsafe { op.add(ll) };
-        lit_off += ll;
-
-        let offset = seq.offset as usize;
-
-        if unlikely(offset == 0) {
-            return Err(DecompressError::CorruptSequences);
-        }
-
-        let out_pos = unsafe { op.offset_from(out_base) } as usize;
-        if unlikely(offset > out_pos + history.len()) {
-            return Err(DecompressError::CorruptSequences);
-        }
-
-        unsafe {
-            if likely(offset <= out_pos) {
-                zrip_core::simd::scalar::copy_match(op, offset, ml);
-            } else {
-                copy_match_from_history(op, history, offset, out_pos, ml);
-            }
-        }
-        op = unsafe { op.add(ml) };
-    }
-
-    if lit_off < literals.len() {
-        let remaining = literals.len() - lit_off;
-        unsafe {
-            core::ptr::copy_nonoverlapping(lit_ptr.add(lit_off), op, remaining);
-        }
-        op = unsafe { op.add(remaining) };
-    }
-
-    unsafe {
-        output.set_len(op.offset_from(out_base) as usize);
-    }
-
-    Ok(())
-}
 
 pub fn decode_execute_sequences(
     data: &[u8],

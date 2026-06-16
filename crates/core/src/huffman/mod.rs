@@ -1,6 +1,5 @@
 pub mod decode;
 pub mod encode;
-pub(crate) mod unchecked;
 pub mod weights;
 
 pub const MAX_SYMBOL_VALUE: usize = 255;

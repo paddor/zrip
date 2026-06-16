@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 pub mod decode;
 pub mod encode;
 pub mod table_builder;
-pub(crate) mod unchecked;
 
 #[derive(Clone, Copy)]
 pub struct FseDecodeEntry {

@@ -13,7 +13,6 @@ pub(crate) mod ring_buffer;
 pub(crate) mod sequences;
 #[cfg(feature = "std")]
 pub mod streaming;
-pub(crate) mod unchecked;
 
 #[allow(dead_code)]
 pub(crate) mod simd_decode;

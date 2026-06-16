@@ -1,23 +1,19 @@
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 
 use crate::BlockDecodeWorkspace;
 use zrip_core::bitstream::reader::BitReader;
-use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
 use zrip_core::fse::table_builder::{
-    build_decode_table, build_decode_table_from_default, build_decode_table_into,
-    parse_fse_table_description_into,
+    build_decode_table_from_default, build_decode_table_into, parse_fse_table_description_into,
 };
 use zrip_core::fse::{
     FseSeqDecodeEntry, LL_BASELINE_TABLE, LL_BITS_TABLE, LL_DEFAULT_ACCURACY, LL_DEFAULT_DIST,
     ML_BASELINE_TABLE, ML_BITS_TABLE, ML_DEFAULT_ACCURACY, ML_DEFAULT_DIST, OF_DEFAULT_ACCURACY,
     OF_DEFAULT_DIST, promote_ll_table, promote_ml_table, promote_of_table,
 };
-
-pub use zrip_core::Sequence;
 
 pub struct SequenceDecodeTables {
     pub ll_table: Vec<FseSeqDecodeEntry>,
@@ -71,159 +67,6 @@ pub fn parse_sequence_count(data: &[u8]) -> Result<(u32, usize), DecompressError
         let count = (data[1] as u32) + ((data[2] as u32) << 8) + 0x7F00;
         Ok((count, 3))
     }
-}
-
-pub fn parse_sequence_tables(
-    data: &[u8],
-    prev: &mut SequenceDecodeTables,
-) -> Result<usize, DecompressError> {
-    if data.is_empty() {
-        return Err(DecompressError::CorruptSequences);
-    }
-
-    let mode_byte = data[0];
-    let ll_mode = (mode_byte >> 6) & 0x03;
-    let of_mode = (mode_byte >> 4) & 0x03;
-    let ml_mode = (mode_byte >> 2) & 0x03;
-
-    let mut reader = BitReader::new(&data[1..]);
-
-    if ll_mode == 0 {
-        prev.ll_table = promote_ll_table(&build_decode_table_from_default(
-            &LL_DEFAULT_DIST,
-            LL_DEFAULT_ACCURACY,
-        ));
-        prev.ll_accuracy = LL_DEFAULT_ACCURACY;
-    } else if ll_mode == 1 {
-        let sym = reader.read_bits(8)? as usize;
-        if sym >= LL_BITS_TABLE.len() {
-            return Err(DecompressError::CorruptSequences);
-        }
-        prev.ll_table = vec![FseSeqDecodeEntry {
-            base_line: 0,
-            num_bits: 0,
-            extra_bits: LL_BITS_TABLE[sym],
-            baseline_value: LL_BASELINE_TABLE[sym],
-        }];
-        prev.ll_accuracy = 0;
-    } else if ll_mode == 2 {
-        let (dist, acc) =
-            zrip_core::fse::table_builder::parse_fse_table_description(&mut reader, 35)?;
-        prev.ll_table = promote_ll_table(&build_decode_table(&dist, acc)?);
-        prev.ll_accuracy = acc;
-    }
-
-    if of_mode == 0 {
-        prev.of_table = promote_of_table(&build_decode_table_from_default(
-            &OF_DEFAULT_DIST,
-            OF_DEFAULT_ACCURACY,
-        ));
-        prev.of_accuracy = OF_DEFAULT_ACCURACY;
-    } else if of_mode == 1 {
-        let sym = reader.read_bits(8)? as u8;
-        if sym > 31 {
-            return Err(DecompressError::CorruptSequences);
-        }
-        prev.of_table = vec![FseSeqDecodeEntry {
-            base_line: 0,
-            num_bits: 0,
-            extra_bits: sym,
-            baseline_value: 1u32 << sym,
-        }];
-        prev.of_accuracy = 0;
-    } else if of_mode == 2 {
-        let (dist, acc) =
-            zrip_core::fse::table_builder::parse_fse_table_description(&mut reader, 31)?;
-        prev.of_table = promote_of_table(&build_decode_table(&dist, acc)?);
-        prev.of_accuracy = acc;
-    }
-
-    if ml_mode == 0 {
-        prev.ml_table = promote_ml_table(&build_decode_table_from_default(
-            &ML_DEFAULT_DIST,
-            ML_DEFAULT_ACCURACY,
-        ));
-        prev.ml_accuracy = ML_DEFAULT_ACCURACY;
-    } else if ml_mode == 1 {
-        let sym = reader.read_bits(8)? as usize;
-        if sym >= ML_BITS_TABLE.len() {
-            return Err(DecompressError::CorruptSequences);
-        }
-        prev.ml_table = vec![FseSeqDecodeEntry {
-            base_line: 0,
-            num_bits: 0,
-            extra_bits: ML_BITS_TABLE[sym],
-            baseline_value: ML_BASELINE_TABLE[sym],
-        }];
-        prev.ml_accuracy = 0;
-    } else if ml_mode == 2 {
-        let (dist, acc) =
-            zrip_core::fse::table_builder::parse_fse_table_description(&mut reader, 52)?;
-        prev.ml_table = promote_ml_table(&build_decode_table(&dist, acc)?);
-        prev.ml_accuracy = acc;
-    }
-
-    Ok(1 + reader.bytes_consumed())
-}
-
-pub fn decode_sequences(
-    data: &[u8],
-    num_sequences: u32,
-    tables: &SequenceDecodeTables,
-    offsets: &mut [u32; 3],
-) -> Result<Vec<Sequence>, DecompressError> {
-    if data.is_empty() {
-        return Err(DecompressError::CorruptSequences);
-    }
-
-    let mut rev_reader =
-        ReverseBitReader::new(data).map_err(|_| DecompressError::CorruptSequences)?;
-
-    let mut ll_state = rev_reader.read_bits(tables.ll_accuracy)?;
-    let mut of_state = rev_reader.read_bits(tables.of_accuracy)?;
-    let mut ml_state = rev_reader.read_bits(tables.ml_accuracy)?;
-
-    let mut sequences = Vec::with_capacity(num_sequences as usize);
-
-    for i in 0..num_sequences {
-        rev_reader.refill();
-
-        let of_e = tables.of_table[of_state as usize];
-        let ml_e = tables.ml_table[ml_state as usize];
-        let ll_e = tables.ll_table[ll_state as usize];
-
-        let of_extra = rev_reader.read_bits_fast(of_e.extra_bits);
-        let offset_value = of_e.baseline_value + of_extra;
-
-        let ml_extra = rev_reader.read_bits_fast(ml_e.extra_bits);
-        let match_length = ml_e.baseline_value + ml_extra;
-
-        let ll_extra = rev_reader.read_bits_fast(ll_e.extra_bits);
-        let literal_length = ll_e.baseline_value + ll_extra;
-
-        let offset = compute_offset(offset_value, literal_length, offsets);
-
-        sequences.push(Sequence {
-            literal_length,
-            offset,
-            match_length,
-        });
-
-        if i < num_sequences - 1 {
-            rev_reader.refill();
-
-            let ll_entry = tables.ll_table[ll_state as usize];
-            ll_state = ll_entry.base_line as u32 + rev_reader.read_bits_fast(ll_entry.num_bits);
-
-            let ml_entry = tables.ml_table[ml_state as usize];
-            ml_state = ml_entry.base_line as u32 + rev_reader.read_bits_fast(ml_entry.num_bits);
-
-            let of_entry = tables.of_table[of_state as usize];
-            of_state = of_entry.base_line as u32 + rev_reader.read_bits_fast(of_entry.num_bits);
-        }
-    }
-
-    Ok(sequences)
 }
 
 #[inline(always)]

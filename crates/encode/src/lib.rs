@@ -9,12 +9,10 @@ pub(crate) mod block_encoder;
 pub mod context;
 pub(crate) mod dfast;
 pub(crate) mod fast;
-pub(crate) mod literals;
 pub(crate) mod sequences;
 pub mod strategy;
 #[cfg(feature = "std")]
 pub mod streaming;
-pub(crate) mod unchecked;
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;

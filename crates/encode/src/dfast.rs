@@ -903,12 +903,6 @@ fn rd64(src: &[u8], pos: usize) -> u64 {
 }
 
 #[inline(always)]
-fn hl32(table: &[u32], idx: usize) -> u32 {
-    debug_assert!(idx < table.len());
-    unsafe { *table.get_unchecked(idx) }
-}
-
-#[inline(always)]
 fn hs32(table: &mut [u32], idx: usize, val: u32) {
     debug_assert!(idx < table.len());
     unsafe {
