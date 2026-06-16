@@ -59,134 +59,84 @@
 //! - **`nightly`**: `#[optimize]` attributes for hot paths.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(feature = "nightly", feature(optimize_attribute))]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
-pub mod error;
-
-#[allow(dead_code)]
-pub(crate) mod bitstream;
-#[allow(dead_code)]
-pub(crate) mod fse;
-#[allow(dead_code)]
-pub(crate) mod hash;
-#[allow(dead_code)]
-pub(crate) mod huffman;
-#[allow(dead_code)]
-pub(crate) mod xxhash;
-
-#[allow(dead_code)]
-pub(crate) mod block;
-pub mod frame;
-
-#[allow(dead_code)]
-pub mod decode;
-#[allow(dead_code)]
-pub mod encode;
+pub use zrip_core::error;
+pub use zrip_core::frame;
+pub use zrip_core::{CompressError, DecompressError, ZstdError};
 
 #[cfg(feature = "alloc")]
-pub mod dict;
-
-#[allow(dead_code)]
-pub(crate) mod simd;
-
-pub use error::{CompressError, DecompressError, ZstdError};
-
+pub use zrip_core::dict;
 #[cfg(feature = "alloc")]
-pub use dict::Dictionary;
+pub use zrip_core::dict::Dictionary;
 #[cfg(feature = "alloc")]
-pub use encode::strategy::{DEFAULT_LEVEL, LevelParams};
+pub use zrip_encode::strategy::{DEFAULT_LEVEL, LevelParams};
 
-/// Default safety limit for decompressed output.
-///
-/// Applied by [`decompress`] and [`FrameDecoder::new`]. Use
-/// [`DecompressContext::decompress_with_limit`] or [`FrameDecoder::with_limit`]
-/// for explicit control.
 pub const DEFAULT_DECOMPRESS_LIMIT: usize = usize::MAX;
 
-pub(crate) const LARGE_OUTPUT_THRESHOLD: usize = 512 * 1024;
+pub use zrip_decode as decode;
+pub use zrip_encode as encode;
 
-/// Decompresses a zstd-compressed frame (or concatenated frames).
-///
-/// For explicit control over the output size limit, use
-/// [`DecompressContext::decompress_with_limit`].
 #[cfg(feature = "alloc")]
 pub fn decompress(input: &[u8]) -> Result<alloc::vec::Vec<u8>, DecompressError> {
-    decode::decompress(input)
+    zrip_decode::decompress(input)
 }
 
-/// Decompresses a zstd frame compressed with a dictionary.
 #[cfg(feature = "alloc")]
 pub fn decompress_with_dict(
     input: &[u8],
-    dict: &dict::Dictionary,
+    dict: &zrip_core::dict::Dictionary,
 ) -> Result<alloc::vec::Vec<u8>, DecompressError> {
-    decode::decompress_with_dict(input, Some(dict))
+    zrip_decode::decompress_with_dict(input, Some(dict))
 }
 
-/// Decompresses into an existing `Vec`, appending the output. Returns bytes written.
-///
-/// Useful for reusing a pre-allocated buffer across multiple decompressions.
 #[cfg(feature = "alloc")]
 pub fn decompress_into(
     input: &[u8],
     output: &mut alloc::vec::Vec<u8>,
 ) -> Result<usize, DecompressError> {
-    decode::decompress_into(input, output)
+    zrip_decode::decompress_into(input, output)
 }
 
-/// Compresses `input` into a zstd frame at the given level (-7..=4, or 0 for default).
 #[cfg(feature = "alloc")]
 pub fn compress(input: &[u8], level: i32) -> Result<alloc::vec::Vec<u8>, CompressError> {
-    encode::compress(input, level)
+    zrip_encode::compress(input, level)
 }
 
-/// Compresses `input` using explicit [`LevelParams`].
 #[cfg(feature = "alloc")]
 pub fn compress_with_params(
     input: &[u8],
-    params: &encode::strategy::LevelParams,
+    params: &zrip_encode::strategy::LevelParams,
 ) -> Result<alloc::vec::Vec<u8>, CompressError> {
-    encode::compress_with_params(input, params)
+    zrip_encode::compress_with_params(input, params)
 }
 
-/// Compresses `input` at the given level using a pre-trained dictionary.
 #[cfg(feature = "alloc")]
 pub fn compress_with_dict(
     input: &[u8],
     level: i32,
-    dict: &dict::Dictionary,
+    dict: &zrip_core::dict::Dictionary,
 ) -> Result<alloc::vec::Vec<u8>, CompressError> {
-    encode::compress_with_dict(input, level, dict)
+    zrip_encode::compress_with_dict(input, level, dict)
 }
 
-/// Compresses `input` into a caller-provided buffer, returning bytes written.
-///
-/// Use [`compress_bound`] to determine the required buffer size.
 #[cfg(feature = "alloc")]
 pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usize, CompressError> {
-    encode::compress_into(input, output, level)
+    zrip_encode::compress_into(input, output, level)
 }
 
-/// Returns the maximum compressed size for a given input length.
-///
-/// The actual compressed output is almost always smaller. Use this to
-/// pre-allocate the output buffer for [`compress_into`].
 pub fn compress_bound(input_len: usize) -> usize {
-    // Frame header: magic(4) + descriptor(1) + fcs(8 max) + window(1) = 14
-    // Block headers: 3 bytes each
-    // Content checksum: 4 bytes
-    let num_blocks = input_len / frame::MAX_BLOCK_SIZE + 1;
+    let num_blocks = input_len / zrip_core::frame::MAX_BLOCK_SIZE + 1;
     input_len + num_blocks * 3 + 18
 }
 
 #[cfg(feature = "std")]
-pub use decode::context::DecompressContext;
+pub use zrip_decode::context::DecompressContext;
 #[cfg(feature = "std")]
-pub use decode::streaming::FrameDecoder;
+pub use zrip_decode::streaming::FrameDecoder;
 #[cfg(feature = "std")]
-pub use encode::context::CompressContext;
+pub use zrip_encode::context::CompressContext;
 #[cfg(feature = "std")]
-pub use encode::streaming::FrameEncoder;
+pub use zrip_encode::streaming::FrameEncoder;

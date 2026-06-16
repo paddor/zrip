@@ -1,3 +1,6 @@
+[workspace]
+members = ["crates/core", "crates/encode", "crates/decode"]
+
 [package]
 name = "zrip"
 version = "0.1.4"
@@ -11,13 +14,16 @@ keywords = ["zstd", "zstandard", "compression", "decompression"]
 
 [features]
 default = ["std", "frame"]
-std = ["alloc"]
-alloc = []
-frame = ["std"]
-dict_builder = ["std"]
-nightly = []
+std = ["alloc", "zrip-core/std", "zrip-encode/std", "zrip-decode/std"]
+alloc = ["zrip-core/alloc", "zrip-encode/alloc", "zrip-decode/alloc"]
+frame = ["std", "zrip-encode/frame", "zrip-decode/frame"]
+dict_builder = ["std", "zrip-core/dict_builder"]
+nightly = ["zrip-core/nightly", "zrip-encode/nightly", "zrip-decode/nightly"]
 
 [dependencies]
+zrip-core = { path = "crates/core", default-features = false }
+zrip-encode = { path = "crates/encode", default-features = false }
+zrip-decode = { path = "crates/decode", default-features = false }
 
 [dev-dependencies]
 zstd = "0.13"

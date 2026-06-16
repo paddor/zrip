@@ -1,0 +1,18 @@
+[package]
+name = "zrip-encode"
+version = "0.1.4"
+edition = "2024"
+rust-version = "1.85"
+description = "zstd encoder for zrip (internal crate)"
+license = "MIT"
+repository = "https://github.com/paddor/zrip"
+
+[features]
+default = ["std"]
+std = ["zrip-core/std"]
+alloc = ["zrip-core/alloc"]
+frame = ["std"]
+nightly = ["zrip-core/nightly"]
+
+[dependencies]
+zrip-core = { path = "../core", default-features = false }
