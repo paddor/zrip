@@ -5,7 +5,6 @@ use alloc::vec::Vec;
 
 use crate::strategy::LevelParams;
 use zrip_core::Sequence;
-use zrip_core::hash::PRIME32_1;
 use zrip_core::hash::PRIME64_1;
 
 pub(crate) fn compress_dfast(
@@ -163,7 +162,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
         ($pos:expr) => {{
             let pos = $pos;
             if pos + 8 <= src.len() {
-                let hs = h4(unsafe { rdp32(src_ptr, pos) }, hash_log);
+                let hs = h5(unsafe { rdp64(src_ptr, pos) }, hash_log);
                 unsafe {
                     *ht_short.add(hs) = pos as u32;
                 }
@@ -184,7 +183,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
             let cap_end = safe_end.min(ms + 2 + step * 4);
             let mut pos = ms + 2;
             while pos < cap_end {
-                let hs = h4(unsafe { rdp32(src_ptr, pos) }, hash_log);
+                let hs = h5(unsafe { rdp64(src_ptr, pos) }, hash_log);
                 unsafe {
                     *ht_short.add(hs) = pos as u32;
                 }
@@ -197,7 +196,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
             if me >= 2 {
                 let tail = me - 2;
                 if tail < safe_end && tail >= cap_end {
-                    let hs = h4(unsafe { rdp32(src_ptr, tail) }, hash_log);
+                    let hs = h5(unsafe { rdp64(src_ptr, tail) }, hash_log);
                     unsafe {
                         *ht_short.add(hs) = tail as u32;
                     }
@@ -212,33 +211,25 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
 
     macro_rules! rep_match_loop_inline {
         () => {{
+            // Only check rep1 at LL=0 positions (C zstd pattern). With LL=0,
+            // offset_value=1 encodes rep[1], so rep1 matches are rep-codable.
+            // Rep0 at LL=0 has NO rep encoding in the zstd spec; those matches
+            // would waste bits as full offsets. The alternating swap lets the
+            // loop ping-pong between rep0 and rep1 (each becomes the other's
+            // rep1 after the swap), keeping every emitted sequence rep-coded.
             loop {
                 if ip0 >= ilimit {
                     break;
-                }
-                let r0 = rep0 as usize;
-                if (r0 > 0) & (ip0 >= r0)
-                    && unsafe { rdp32(src_ptr, ip0) == rdp32(src_ptr, ip0 - r0) }
-                {
-                    let ml = count_match(src, ip0 + 4, ip0 - r0 + 4, block_end) + 4;
-                    sequences.push(Sequence {
-                        literal_length: 0,
-                        offset: r0 as u32,
-                        match_length: ml as u32,
-                    });
-                    ip0 += ml;
-                    anchor = ip0;
-                    update_hashes_inline!(ip0);
-                    continue;
                 }
                 let r1 = rep1 as usize;
                 if (r1 > 0) & (ip0 >= r1)
                     && unsafe { rdp32(src_ptr, ip0) == rdp32(src_ptr, ip0 - r1) }
                 {
+                    let ml = count_match(src, ip0 + 4, ip0 - r1 + 4, block_end) + 4;
                     let tmp = rep0;
                     rep0 = rep1;
                     rep1 = tmp;
-                    let ml = count_match(src, ip0 + 4, ip0 - r1 + 4, block_end) + 4;
+                    total_match_bytes += ml;
                     sequences.push(Sequence {
                         literal_length: 0,
                         offset: r1 as u32,
@@ -263,9 +254,9 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
             break;
         }
 
-        let mut hs0 = h4(unsafe { rdp32(src_ptr, ip0) }, hash_log);
+        let mut hs0 = h5(unsafe { rdp64(src_ptr, ip0) }, hash_log);
         let mut hl0 = h8(unsafe { rdp64(src_ptr, ip0) }, hash_log);
-        let mut hs1 = h4(unsafe { rdp32(src_ptr, ip1) }, hash_log);
+        let mut hs1 = h5(unsafe { rdp64(src_ptr, ip1) }, hash_log);
         let mut hl1 = h8(unsafe { rdp64(src_ptr, ip1) }, hash_log);
 
         let mut match_short = unsafe { *ht_short.add(hs0) } as usize;
@@ -451,7 +442,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
             hs0 = hs1;
             hl0 = hl1;
 
-            hs1 = h4(unsafe { rdp32(src_ptr, ip2) }, hash_log);
+            hs1 = h5(unsafe { rdp64(src_ptr, ip2) }, hash_log);
             hl1 = h8(unsafe { rdp64(src_ptr, ip2) }, hash_log);
             ip0 = ip1;
             ip1 = ip2;
@@ -616,7 +607,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
             hs0 = hs1;
             hl0 = hl1;
 
-            hs1 = h4(unsafe { rdp32(src_ptr, ip2) }, hash_log);
+            hs1 = h5(unsafe { rdp64(src_ptr, ip2) }, hash_log);
             hl1 = h8(unsafe { rdp64(src_ptr, ip2) }, hash_log);
             ip0 = ip1;
             ip1 = ip2;
@@ -668,7 +659,7 @@ pub(crate) fn prefill_hash_tables(
     let step = (prefix_len / hash_size).max(1);
     let mut i = 0;
     while i + 8 <= prefix_len {
-        let hs = h4(rd32(combined, i), hash_log) as usize;
+        let hs = h5(rd64(combined, i), hash_log) as usize;
         hs32(hash_short, hs, i as u32);
         let hl = h8(rd64(combined, i), hash_log) as usize;
         hs32(hash_long, hl, i as u32);
@@ -676,7 +667,7 @@ pub(crate) fn prefill_hash_tables(
     }
     let tail_start = prefix_len.saturating_sub(64);
     for i in tail_start..prefix_len.saturating_sub(7) {
-        let hs = h4(rd32(combined, i), hash_log) as usize;
+        let hs = h5(rd64(combined, i), hash_log) as usize;
         hs32(hash_short, hs, i as u32);
         let hl = h8(rd64(combined, i), hash_log) as usize;
         hs32(hash_long, hl, i as u32);
@@ -741,19 +732,13 @@ pub(crate) fn compress_dfast_with_prefix_reuse(
 }
 
 #[inline(always)]
-fn h4(val: u32, hash_log: u32) -> usize {
-    (val.wrapping_mul(PRIME32_1) >> (32 - hash_log)) as usize
+fn h5(val: u64, hash_log: u32) -> usize {
+    ((val << 24).wrapping_mul(PRIME64_1) >> (64 - hash_log)) as usize
 }
 
 #[inline(always)]
 fn h8(val: u64, hash_log: u32) -> usize {
     (val.wrapping_mul(PRIME64_1) >> (64 - hash_log)) as usize
-}
-
-#[inline(always)]
-fn rd32(src: &[u8], pos: usize) -> u32 {
-    debug_assert!(pos + 4 <= src.len());
-    unsafe { (src.as_ptr().add(pos) as *const u32).read_unaligned() }
 }
 
 #[inline(always)]
