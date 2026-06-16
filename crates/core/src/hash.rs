@@ -15,6 +15,16 @@ pub fn hash5(value: u64, hash_log: u32) -> u32 {
 }
 
 #[inline]
+pub fn hash6(value: u64, hash_log: u32) -> u32 {
+    ((value << 16).wrapping_mul(PRIME64_1) >> (64 - hash_log)) as u32
+}
+
+#[inline]
+pub fn hash7(value: u64, hash_log: u32) -> u32 {
+    ((value << 8).wrapping_mul(PRIME64_1) >> (64 - hash_log)) as u32
+}
+
+#[inline]
 pub fn hash8(value: u64, hash_log: u32) -> u32 {
     (value.wrapping_mul(PRIME64_1) >> (64 - hash_log)) as u32
 }

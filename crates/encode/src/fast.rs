@@ -52,18 +52,20 @@ pub(crate) fn compress_fast_block(
             )
         };
     }
-    match (params.hash_log, mls >= 5) {
-        (12, false) => dispatch!(12, 4),
-        (12, true) => dispatch!(12, 5),
-        (13, false) => dispatch!(13, 4),
-        (13, true) => dispatch!(13, 5),
-        (14, false) => dispatch!(14, 4),
-        (14, true) => dispatch!(14, 5),
+    match (params.hash_log, mls) {
+        (12, ..5) => dispatch!(12, 4),
+        (12, _) => dispatch!(12, 5),
+        (13, ..5) => dispatch!(13, 4),
+        (13, _) => dispatch!(13, 5),
+        (14, 7..) => dispatch!(14, 7),
+        (14, 5..7) => dispatch!(14, 5),
+        (14, _) => dispatch!(14, 4),
         (16, _) => dispatch!(16, 4),
         (17, _) => dispatch!(17, 4),
         (18, _) => dispatch!(18, 4),
-        (_, false) => dispatch!(0, 4),
-        (_, true) => dispatch!(0, 5),
+        (_, 7..) => dispatch!(0, 7),
+        (_, 5..7) => dispatch!(0, 5),
+        (_, _) => dispatch!(0, 4),
     }
 }
 
@@ -82,6 +84,10 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
     hash_table: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
+    // match_at confirms 5 bytes for MLS>=5, 4 bytes for MLS<5.
+    // MLS only controls the hash function width; match confirmation is capped at 5.
+    let confirm: usize = if MLS >= 5 { 5 } else { MLS };
+
     let block_size = block_end - block_start;
     if block_size < 8 {
         return;
@@ -205,11 +211,11 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
                 let offset = (match_start - (match_idx - back)) as u32;
                 let mlen = unsafe {
                     count_match_raw(
-                        src_ptr.add(ip0 + MLS),
-                        src_ptr.add(match_idx + MLS),
+                        src_ptr.add(ip0 + confirm),
+                        src_ptr.add(match_idx + confirm),
                         src_end,
                     )
-                } + MLS
+                } + confirm
                     + back;
                 total_match_bytes += mlen;
                 let lit_len = (match_start - anchor) as u32;
@@ -279,11 +285,11 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
                 let offset = (match_start - (match_idx - back)) as u32;
                 let mlen = unsafe {
                     count_match_raw(
-                        src_ptr.add(ip0 + MLS),
-                        src_ptr.add(match_idx + MLS),
+                        src_ptr.add(ip0 + confirm),
+                        src_ptr.add(match_idx + confirm),
                         src_end,
                     )
-                } + MLS
+                } + confirm
                     + back;
                 total_match_bytes += mlen;
                 let lit_len = (match_start - anchor) as u32;
@@ -596,6 +602,14 @@ fn hash5_const<const HASH_LOG: u32>(value: u64, hash_log: u32) -> usize {
     (((value << 24).wrapping_mul(PRIME64_1)) >> (64 - hl)) as usize
 }
 
+const PRIME7: u64 = 58295818150454627;
+
+#[inline(always)]
+fn hash7_const<const HASH_LOG: u32>(value: u64, hash_log: u32) -> usize {
+    let hl = if HASH_LOG != 0 { HASH_LOG } else { hash_log };
+    (((value << 8).wrapping_mul(PRIME7)) >> (64 - hl)) as usize
+}
+
 #[inline(always)]
 unsafe fn rd64(p: *const u8, pos: usize) -> u64 {
     unsafe { (p.add(pos) as *const u64).read_unaligned() }
@@ -607,7 +621,9 @@ fn hash_pos<const HASH_LOG: u32, const MLS: usize>(
     pos: usize,
     hash_log: u32,
 ) -> usize {
-    if MLS >= 5 {
+    if MLS >= 7 {
+        hash7_const::<HASH_LOG>(unsafe { rd64(src_ptr, pos) }, hash_log)
+    } else if MLS >= 5 {
         hash5_const::<HASH_LOG>(unsafe { rd64(src_ptr, pos) }, hash_log)
     } else {
         hash4_const::<HASH_LOG>(unsafe { rd32_static(src_ptr, pos) }, hash_log)

@@ -12,9 +12,10 @@ pub(crate) fn compress_dfast(
     params: &LevelParams,
     rep_offsets: &[u32; 3],
 ) -> Vec<Sequence> {
-    let hash_size = 1usize << params.hash_log;
-    let mut hash_short = vec![0u32; hash_size];
-    let mut hash_long = vec![0u32; hash_size];
+    let short_size = 1usize << params.chain_log;
+    let long_size = 1usize << params.hash_log;
+    let mut hash_short = vec![0u32; short_size];
+    let mut hash_long = vec![0u32; long_size];
     let mut sequences = Vec::new();
     compress_dfast_block(
         src,
@@ -39,57 +40,27 @@ pub(crate) fn compress_dfast_block(
     hash_long: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    match params.hash_log {
-        14 => compress_dfast_block_impl::<14>(
-            src,
-            block_start,
-            block_end,
-            params,
-            rep_offsets,
-            hash_short,
-            hash_long,
-            sequences,
-        ),
-        16 => compress_dfast_block_impl::<16>(
-            src,
-            block_start,
-            block_end,
-            params,
-            rep_offsets,
-            hash_short,
-            hash_long,
-            sequences,
-        ),
-        17 => compress_dfast_block_impl::<17>(
-            src,
-            block_start,
-            block_end,
-            params,
-            rep_offsets,
-            hash_short,
-            hash_long,
-            sequences,
-        ),
-        18 => compress_dfast_block_impl::<18>(
-            src,
-            block_start,
-            block_end,
-            params,
-            rep_offsets,
-            hash_short,
-            hash_long,
-            sequences,
-        ),
-        _ => compress_dfast_block_impl::<0>(
-            src,
-            block_start,
-            block_end,
-            params,
-            rep_offsets,
-            hash_short,
-            hash_long,
-            sequences,
-        ),
+    macro_rules! dispatch {
+        ($hl:expr, $sl:expr) => {
+            compress_dfast_block_impl::<$hl, $sl>(
+                src,
+                block_start,
+                block_end,
+                params,
+                rep_offsets,
+                hash_short,
+                hash_long,
+                sequences,
+            )
+        };
+    }
+    match (params.hash_log, params.chain_log) {
+        (17, 16) => dispatch!(17, 16),
+        (17, 17) => dispatch!(17, 17),
+        (18, 18) => dispatch!(18, 18),
+        (14, 14) => dispatch!(14, 14),
+        (16, 16) => dispatch!(16, 16),
+        _ => dispatch!(0, 0),
     }
 }
 
@@ -100,7 +71,7 @@ pub(crate) fn compress_dfast_block(
 /// iteration probes two positions, reusing hash computations across shifts
 /// and prefetching both hash_short and hash_long for the next position.
 #[allow(unused_assignments, unused_variables)]
-fn compress_dfast_block_impl<const HASH_LOG: u32>(
+fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
     src: &[u8],
     block_start: usize,
     block_end: usize,
@@ -132,6 +103,11 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
     } else {
         params.hash_log
     };
+    let short_log = if SHORT_LOG != 0 {
+        SHORT_LOG
+    } else {
+        params.chain_log
+    };
 
     let src_ptr = src.as_ptr();
     let ht_short = hash_short.as_mut_ptr();
@@ -162,7 +138,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
         ($pos:expr) => {{
             let pos = $pos;
             if pos + 8 <= src.len() {
-                let hs = h5(unsafe { rdp64(src_ptr, pos) }, hash_log);
+                let hs = h5(unsafe { rdp64(src_ptr, pos) }, short_log);
                 unsafe {
                     *ht_short.add(hs) = pos as u32;
                 }
@@ -183,7 +159,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
             let cap_end = safe_end.min(ms + 2 + step * 4);
             let mut pos = ms + 2;
             while pos < cap_end {
-                let hs = h5(unsafe { rdp64(src_ptr, pos) }, hash_log);
+                let hs = h5(unsafe { rdp64(src_ptr, pos) }, short_log);
                 unsafe {
                     *ht_short.add(hs) = pos as u32;
                 }
@@ -196,7 +172,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
             if me >= 2 {
                 let tail = me - 2;
                 if tail < safe_end && tail >= cap_end {
-                    let hs = h5(unsafe { rdp64(src_ptr, tail) }, hash_log);
+                    let hs = h5(unsafe { rdp64(src_ptr, tail) }, short_log);
                     unsafe {
                         *ht_short.add(hs) = tail as u32;
                     }
@@ -254,9 +230,9 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
             break;
         }
 
-        let mut hs0 = h5(unsafe { rdp64(src_ptr, ip0) }, hash_log);
+        let mut hs0 = h5(unsafe { rdp64(src_ptr, ip0) }, short_log);
         let mut hl0 = h8(unsafe { rdp64(src_ptr, ip0) }, hash_log);
-        let mut hs1 = h5(unsafe { rdp64(src_ptr, ip1) }, hash_log);
+        let mut hs1 = h5(unsafe { rdp64(src_ptr, ip1) }, short_log);
         let mut hl1 = h8(unsafe { rdp64(src_ptr, ip1) }, hash_log);
 
         let mut match_short = unsafe { *ht_short.add(hs0) } as usize;
@@ -442,7 +418,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
             hs0 = hs1;
             hl0 = hl1;
 
-            hs1 = h5(unsafe { rdp64(src_ptr, ip2) }, hash_log);
+            hs1 = h5(unsafe { rdp64(src_ptr, ip2) }, short_log);
             hl1 = h8(unsafe { rdp64(src_ptr, ip2) }, hash_log);
             ip0 = ip1;
             ip1 = ip2;
@@ -607,7 +583,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32>(
             hs0 = hs1;
             hl0 = hl1;
 
-            hs1 = h5(unsafe { rdp64(src_ptr, ip2) }, hash_log);
+            hs1 = h5(unsafe { rdp64(src_ptr, ip2) }, short_log);
             hl1 = h8(unsafe { rdp64(src_ptr, ip2) }, hash_log);
             ip0 = ip1;
             ip1 = ip2;
@@ -647,6 +623,7 @@ pub(crate) fn prefill_hash_tables(
     combined: &[u8],
     prefix_len: usize,
     hash_log: u32,
+    short_log: u32,
     hash_short: &mut [u32],
     hash_long: &mut [u32],
 ) {
@@ -659,7 +636,7 @@ pub(crate) fn prefill_hash_tables(
     let step = (prefix_len / hash_size).max(1);
     let mut i = 0;
     while i + 8 <= prefix_len {
-        let hs = h5(rd64(combined, i), hash_log) as usize;
+        let hs = h5(rd64(combined, i), short_log) as usize;
         hs32(hash_short, hs, i as u32);
         let hl = h8(rd64(combined, i), hash_log) as usize;
         hs32(hash_long, hl, i as u32);
@@ -667,7 +644,7 @@ pub(crate) fn prefill_hash_tables(
     }
     let tail_start = prefix_len.saturating_sub(64);
     for i in tail_start..prefix_len.saturating_sub(7) {
-        let hs = h5(rd64(combined, i), hash_log) as usize;
+        let hs = h5(rd64(combined, i), short_log) as usize;
         hs32(hash_short, hs, i as u32);
         let hl = h8(rd64(combined, i), hash_log) as usize;
         hs32(hash_long, hl, i as u32);
@@ -683,9 +660,10 @@ pub(crate) fn compress_dfast_with_prefix(
     if prefix.is_empty() {
         return compress_dfast(src, params, rep_offsets);
     }
-    let hash_size = 1usize << params.hash_log;
-    let mut hash_short = vec![0u32; hash_size];
-    let mut hash_long = vec![0u32; hash_size];
+    let short_size = 1usize << params.chain_log;
+    let long_size = 1usize << params.hash_log;
+    let mut hash_short = vec![0u32; short_size];
+    let mut hash_long = vec![0u32; long_size];
     let mut sequences = Vec::new();
     let mut combined = Vec::new();
     compress_dfast_with_prefix_reuse(
@@ -717,7 +695,14 @@ pub(crate) fn compress_dfast_with_prefix_reuse(
     combined.extend_from_slice(src);
 
     let plen = prefix.len();
-    prefill_hash_tables(combined, plen, params.hash_log, hash_short, hash_long);
+    prefill_hash_tables(
+        combined,
+        plen,
+        params.hash_log,
+        params.chain_log,
+        hash_short,
+        hash_long,
+    );
 
     compress_dfast_block(
         combined,

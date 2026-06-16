@@ -46,6 +46,7 @@ pub(crate) fn clamp_params_to_src_size(params: &mut strategy::LevelParams, src_l
     if src_len >= 2 {
         let src_log = 32 - ((src_len as u32) - 1).leading_zeros();
         params.hash_log = params.hash_log.min(src_log);
+        params.chain_log = params.chain_log.min(src_log);
         params.window_log = params.window_log.min(src_log);
     }
 }
@@ -159,8 +160,10 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
                 }
             }
             Strategy::DFast => {
-                let mut hash_short = vec![0u32; hash_size];
-                let mut hash_long = vec![0u32; hash_size];
+                let short_size = 1usize << params.chain_log;
+                let long_size = 1usize << params.hash_log;
+                let mut hash_short = vec![0u32; short_size];
+                let mut hash_long = vec![0u32; long_size];
                 while offset < input.len() {
                     let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                     let block_end = offset + chunk_size;
@@ -342,12 +345,15 @@ pub fn compress_with_dict(
                     }
                 }
                 Strategy::DFast => {
-                    let mut hash_short = vec![0u32; hash_size];
-                    let mut hash_long = vec![0u32; hash_size];
+                    let short_size = 1usize << params.chain_log;
+                    let long_size = 1usize << params.hash_log;
+                    let mut hash_short = vec![0u32; short_size];
+                    let mut hash_long = vec![0u32; long_size];
                     dfast::prefill_hash_tables(
                         &combined,
                         plen,
                         params.hash_log,
+                        params.chain_log,
                         &mut hash_short,
                         &mut hash_long,
                     );

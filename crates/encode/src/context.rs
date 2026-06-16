@@ -42,10 +42,12 @@ impl CompressContext {
     /// Creates a new context for the given compression level (-7..=4).
     pub fn new(level: i32) -> Result<Self, CompressError> {
         let params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
-        let hash_size = 1usize << params.hash_log;
         let (hash_table, hash_long) = match params.strategy {
-            Strategy::Fast => (vec![0u32; hash_size], Vec::new()),
-            Strategy::DFast => (vec![0u32; hash_size], vec![0u32; hash_size]),
+            Strategy::Fast => (vec![0u32; 1usize << params.hash_log], Vec::new()),
+            Strategy::DFast => (
+                vec![0u32; 1usize << params.chain_log],
+                vec![0u32; 1usize << params.hash_log],
+            ),
         };
         Ok(Self {
             params,
@@ -135,7 +137,11 @@ fn compress_core(
 ) -> Result<(), CompressError> {
     let mut params = params;
     clamp_params_to_src_size(&mut params, input.len());
-    let hash_size = 1usize << params.hash_log;
+    let hash_size = match params.strategy {
+        Strategy::Fast => 1usize << params.hash_log,
+        Strategy::DFast => 1usize << params.chain_log,
+    };
+    let long_size = 1usize << params.hash_log;
 
     workspace.prev_huffman = None;
 
@@ -323,8 +329,8 @@ fn compress_core(
                 }
             }
             Strategy::DFast => {
-                if hash_long.len() != hash_size {
-                    hash_long.resize(hash_size, 0);
+                if hash_long.len() != long_size {
+                    hash_long.resize(long_size, 0);
                 }
                 if has_prefix && input.len() <= MAX_BLOCK_SIZE {
                     dfast::compress_dfast_with_prefix_reuse(
@@ -355,6 +361,7 @@ fn compress_core(
                         combined,
                         plen,
                         params.hash_log,
+                        params.chain_log,
                         hash_table,
                         hash_long,
                     );
