@@ -136,6 +136,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32>(
     let mut total_match_bytes: usize = 0;
 
     let src_ptr = src.as_ptr();
+    let src_end = unsafe { src_ptr.add(block_end) };
     let ht_ptr = hash_table.as_mut_ptr();
 
     let mut rep1 = rep_offsets[0] as usize;
@@ -191,7 +192,10 @@ fn compress_fast_block_impl<const HASH_LOG: u32>(
                     }
                     unsafe { *ht_ptr.add(h1) = ip1 as u32 };
                     let back = ip2 - ip0;
-                    let mlen = count_match(src, ip2 + 4, ip2 - rep1 + 4, block_end) + 4 + back;
+                    let mlen = unsafe {
+                        count_match_raw(src_ptr.add(ip2 + 4), src_ptr.add(ip2 - rep1 + 4), src_end)
+                    } + 4
+                        + back;
                     total_match_bytes += mlen;
                     let lit_len = (ip0 - anchor) as u32;
                     sequences.push(Sequence {
@@ -237,7 +241,10 @@ fn compress_fast_block_impl<const HASH_LOG: u32>(
                 }
                 let match_start = ip0 - back;
                 let offset = (match_start - (match_idx - back)) as u32;
-                let mlen = count_match(src, ip0 + 4, match_idx + 4, block_end) + 4 + back;
+                let mlen = unsafe {
+                    count_match_raw(src_ptr.add(ip0 + 4), src_ptr.add(match_idx + 4), src_end)
+                } + 4
+                    + back;
                 total_match_bytes += mlen;
                 let lit_len = (match_start - anchor) as u32;
                 sequences.push(Sequence {
@@ -304,7 +311,10 @@ fn compress_fast_block_impl<const HASH_LOG: u32>(
                 }
                 let match_start = ip0 - back;
                 let offset = (match_start - (match_idx - back)) as u32;
-                let mlen = count_match(src, ip0 + 4, match_idx + 4, block_end) + 4 + back;
+                let mlen = unsafe {
+                    count_match_raw(src_ptr.add(ip0 + 4), src_ptr.add(match_idx + 4), src_end)
+                } + 4
+                    + back;
                 total_match_bytes += mlen;
                 let lit_len = (match_start - anchor) as u32;
                 sequences.push(Sequence {
@@ -394,7 +404,10 @@ fn rep2_match_loop<const HASH_LOG: u32>(
         if val != rval {
             break;
         }
-        let rlen = count_match(src, *ip + 4, *ip - *rep2 + 4, block_end) + 4;
+        let src_end = unsafe { src_ptr.add(block_end) };
+        let rlen =
+            unsafe { count_match_raw(src_ptr.add(*ip + 4), src_ptr.add(*ip - *rep2 + 4), src_end) }
+                + 4;
         core::mem::swap(rep1, rep2);
         insert_hash::<HASH_LOG>(src, *ip, hash_log, hash_table);
         sequences.push(Sequence {
@@ -690,36 +703,40 @@ fn read_u32(src: &[u8], pos: usize) -> u32 {
 }
 
 #[inline(always)]
-fn read_u64(src: &[u8], pos: usize) -> u64 {
-    debug_assert!(pos + 8 <= src.len());
-    unsafe { (src.as_ptr().add(pos) as *const u64).read_unaligned() }
+unsafe fn count_match_raw(
+    mut p_in: *const u8,
+    mut p_match: *const u8,
+    p_in_limit: *const u8,
+) -> usize {
+    let p_start = p_in;
+    let p_in_loop_limit = unsafe { p_in_limit.sub(7) };
+    while p_in < p_in_loop_limit {
+        let diff = unsafe {
+            (p_in as *const u64).read_unaligned() ^ (p_match as *const u64).read_unaligned()
+        };
+        if diff != 0 {
+            return (unsafe { p_in.offset_from(p_start) }) as usize
+                + (diff.trailing_zeros() as usize / 8);
+        }
+        p_in = unsafe { p_in.add(8) };
+        p_match = unsafe { p_match.add(8) };
+    }
+    while p_in < p_in_limit && unsafe { *p_in == *p_match } {
+        p_in = unsafe { p_in.add(1) };
+        p_match = unsafe { p_match.add(1) };
+    }
+    (unsafe { p_in.offset_from(p_start) }) as usize
 }
 
 #[inline(always)]
-fn count_match(src: &[u8], mut p1: usize, mut p2: usize, limit: usize) -> usize {
+fn count_match(src: &[u8], p1: usize, p2: usize, limit: usize) -> usize {
     debug_assert!(p1 <= limit && limit <= src.len());
     debug_assert!(p2 <= src.len());
-    let start = p1;
     let max_len = (limit - p1).min(src.len() - p2);
-    let end8 = start + (max_len & !7);
-    while p1 < end8 {
-        let a = read_u64(src, p1);
-        let b = read_u64(src, p2);
-        let xor = a ^ b;
-        if xor != 0 {
-            return p1 - start + (xor.trailing_zeros() as usize / 8);
-        }
-        p1 += 8;
-        p2 += 8;
+    unsafe {
+        let base = src.as_ptr();
+        count_match_raw(base.add(p1), base.add(p2), base.add(p1 + max_len))
     }
-    while p1 < start + max_len {
-        if unsafe { *src.get_unchecked(p1) != *src.get_unchecked(p2) } {
-            break;
-        }
-        p1 += 1;
-        p2 += 1;
-    }
-    p1 - start
 }
 
 #[inline(always)]

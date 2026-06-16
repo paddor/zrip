@@ -2,7 +2,6 @@
 use alloc::vec::Vec;
 
 use zrip_core::Sequence;
-use zrip_core::frame::MAX_BLOCK_SIZE;
 use zrip_core::fse::table_builder::{
     build_decode_table, normalize_counts, serialize_fse_table_description,
 };
@@ -63,11 +62,14 @@ struct SymbolTT {
 }
 
 struct FseEncodeTable {
-    symbol_tt: Vec<SymbolTT>,
-    state_table: Vec<u16>,
+    symbol_tt: [SymbolTT; MAX_SYMBOLS],
+    state_table: [u16; MAX_TABLE_SIZE],
     table_size: u32,
     table_log: u8,
 }
+
+const MAX_SYMBOLS: usize = 53;
+const MAX_TABLE_SIZE: usize = 512;
 
 impl FseEncodeTable {
     fn build(
@@ -77,29 +79,29 @@ impl FseEncodeTable {
         table_log: u8,
     ) -> Self {
         let num_symbols = max_symbol + 1;
+        debug_assert!(num_symbols <= MAX_SYMBOLS);
+        debug_assert!(table_size <= MAX_TABLE_SIZE);
 
-        let mut count = vec![0u32; num_symbols];
+        let mut count = [0u32; MAX_SYMBOLS];
         for i in 0..table_size {
             count[decode_table[i].symbol as usize] += 1;
         }
 
-        let mut cumul = vec![0u32; num_symbols + 1];
+        let mut cumul = [0u32; MAX_SYMBOLS + 1];
         for s in 0..num_symbols {
             cumul[s + 1] = cumul[s] + count[s];
         }
 
-        let mut symbol_tt = vec![
-            SymbolTT {
-                delta_nb_bits: (table_log as u32 + 1) << 16,
-                delta_find_state: 0
-            };
-            num_symbols
-        ];
+        let default_delta = (table_log as u32 + 1) << 16;
+        let mut symbol_tt = [SymbolTT {
+            delta_nb_bits: default_delta,
+            delta_find_state: 0,
+        }; MAX_SYMBOLS];
         let mut total = 0i32;
         for s in 0..num_symbols {
             let c = count[s];
             if c == 0 {
-                symbol_tt[s].delta_nb_bits = ((table_log as u32 + 1) << 16) | (1u32 << table_log);
+                symbol_tt[s].delta_nb_bits = default_delta | (1u32 << table_log);
                 continue;
             }
             let max_bits_out = if c == 1 {
@@ -113,8 +115,8 @@ impl FseEncodeTable {
             total += c as i32;
         }
 
-        let mut state_table = vec![0u16; table_size];
-        let mut cumul_copy = cumul.clone();
+        let mut state_table = [0u16; MAX_TABLE_SIZE];
+        let mut cumul_copy = cumul;
         for i in 0..table_size {
             let s = decode_table[i].symbol as usize;
             let idx = cumul_copy[s] as usize;
@@ -189,31 +191,6 @@ pub fn encode_raw_block(data: &[u8], last: bool, output: &mut Vec<u8>) {
     output.extend_from_slice(data);
 }
 
-pub fn encode_rle_block(byte: u8, count: usize, last: bool, output: &mut Vec<u8>) {
-    let block_size = count as u32;
-    let header = (block_size << 3) | 0x02 | if last { 1 } else { 0 };
-    output.push(header as u8);
-    output.push((header >> 8) as u8);
-    output.push((header >> 16) as u8);
-    output.push(byte);
-}
-
-pub fn split_into_raw_blocks(data: &[u8], output: &mut Vec<u8>) {
-    if data.is_empty() {
-        encode_raw_block(&[], true, output);
-        return;
-    }
-
-    let mut offset = 0;
-    while offset < data.len() {
-        let remaining = data.len() - offset;
-        let chunk_size = remaining.min(MAX_BLOCK_SIZE);
-        let is_last = offset + chunk_size >= data.len();
-        encode_raw_block(&data[offset..offset + chunk_size], is_last, output);
-        offset += chunk_size;
-    }
-}
-
 pub(crate) fn encode_compressed_block(
     src: &[u8],
     sequences: &[Sequence],
@@ -251,13 +228,23 @@ pub(crate) fn encode_compressed_block(
     let mut of_freq = [0u32; 32];
     let mut total_extra_bits: u64 = 0;
 
-    for seq in sequences {
+    // Local rep offsets: avoids &mut aliasing barrier per iteration
+    let mut rep0 = rep_offsets[0];
+    let mut rep1 = rep_offsets[1];
+    let mut rep2 = rep_offsets[2];
+
+    let packed_ptr = workspace.packed_seqs.as_mut_ptr();
+    let seq_ptr = sequences.as_ptr();
+    let src_len = src.len();
+
+    for i in 0..n {
+        let seq = unsafe { &*seq_ptr.add(i) };
         let ll = seq.literal_length as usize;
-        if lit_offset + ll <= src.len() {
+        if lit_offset + ll <= src_len {
             unsafe {
                 let s = src_ptr.add(lit_offset);
                 let d = lit_dst.add(lit_pos);
-                if ll <= 16 && lit_offset + 16 <= src.len() {
+                if ll <= 16 && lit_offset + 16 <= src_len {
                     (d as *mut u64).write_unaligned((s as *const u64).read_unaligned());
                     (d.add(8) as *mut u64)
                         .write_unaligned((s.add(8) as *const u64).read_unaligned());
@@ -268,7 +255,46 @@ pub(crate) fn encode_compressed_block(
             lit_pos += ll;
         }
         lit_offset += ll + seq.match_length as usize;
-        let ov = compute_offset_value(seq.offset, seq.literal_length, rep_offsets);
+
+        let actual_offset = seq.offset;
+        let ov = if seq.literal_length > 0 {
+            if actual_offset == rep0 {
+                1
+            } else if actual_offset == rep1 {
+                rep1 = rep0;
+                rep0 = actual_offset;
+                2
+            } else if actual_offset == rep2 {
+                rep2 = rep1;
+                rep1 = rep0;
+                rep0 = actual_offset;
+                3
+            } else {
+                rep2 = rep1;
+                rep1 = rep0;
+                rep0 = actual_offset;
+                actual_offset + 3
+            }
+        } else if actual_offset == rep1 {
+            rep1 = rep0;
+            rep0 = actual_offset;
+            1
+        } else if actual_offset == rep2 {
+            rep2 = rep1;
+            rep1 = rep0;
+            rep0 = actual_offset;
+            2
+        } else if rep0 > 1 && actual_offset == rep0 - 1 {
+            rep2 = rep1;
+            rep1 = rep0;
+            rep0 = actual_offset;
+            3
+        } else {
+            rep2 = rep1;
+            rep1 = rep0;
+            rep0 = actual_offset;
+            actual_offset + 3
+        };
 
         let ll_c = ll_code(seq.literal_length);
         let ml_c = ml_code(seq.match_length);
@@ -284,13 +310,15 @@ pub(crate) fn encode_compressed_block(
             | ((of_extra as u64) << (ll_nb + ml_nb));
         let extra_nbits = ll_nb + ml_nb + of_c;
 
-        workspace.packed_seqs.push(PackedSeq {
-            extra_bits,
-            ll_c,
-            ml_c,
-            of_c,
-            extra_nbits,
-        });
+        unsafe {
+            packed_ptr.add(i).write(PackedSeq {
+                extra_bits,
+                ll_c,
+                ml_c,
+                of_c,
+                extra_nbits,
+            });
+        }
 
         if do_codes {
             ll_freq[ll_c as usize] += 1;
@@ -299,8 +327,15 @@ pub(crate) fn encode_compressed_block(
             total_extra_bits += extra_nbits as u64;
         }
     }
-    if lit_offset < src.len() {
-        let tail = src.len() - lit_offset;
+    unsafe {
+        workspace.packed_seqs.set_len(n);
+    }
+    rep_offsets[0] = rep0;
+    rep_offsets[1] = rep1;
+    rep_offsets[2] = rep2;
+
+    if lit_offset < src_len {
+        let tail = src_len - lit_offset;
         unsafe {
             core::ptr::copy_nonoverlapping(src_ptr.add(lit_offset), lit_dst.add(lit_pos), tail);
         }
@@ -400,13 +435,21 @@ pub(crate) fn encode_compressed_block_raw(
     let mut lit_pos = 0usize;
     let mut lit_offset = 0usize;
 
-    for seq in sequences {
+    let mut rep0 = rep_offsets[0];
+    let mut rep1 = rep_offsets[1];
+    let mut rep2 = rep_offsets[2];
+    let packed_ptr = workspace.packed_seqs.as_mut_ptr();
+    let seq_ptr = sequences.as_ptr();
+    let src_len = src.len();
+
+    for i in 0..n {
+        let seq = unsafe { &*seq_ptr.add(i) };
         let ll = seq.literal_length as usize;
-        if lit_offset + ll <= src.len() {
+        if lit_offset + ll <= src_len {
             unsafe {
                 let s = src_ptr.add(lit_offset);
                 let d = lit_dst.add(lit_pos);
-                if ll <= 16 && lit_offset + 16 <= src.len() {
+                if ll <= 16 && lit_offset + 16 <= src_len {
                     (d as *mut u64).write_unaligned((s as *const u64).read_unaligned());
                     (d.add(8) as *mut u64)
                         .write_unaligned((s.add(8) as *const u64).read_unaligned());
@@ -417,7 +460,46 @@ pub(crate) fn encode_compressed_block_raw(
             lit_pos += ll;
         }
         lit_offset += ll + seq.match_length as usize;
-        let ov = compute_offset_value(seq.offset, seq.literal_length, rep_offsets);
+
+        let actual_offset = seq.offset;
+        let ov = if seq.literal_length > 0 {
+            if actual_offset == rep0 {
+                1
+            } else if actual_offset == rep1 {
+                rep1 = rep0;
+                rep0 = actual_offset;
+                2
+            } else if actual_offset == rep2 {
+                rep2 = rep1;
+                rep1 = rep0;
+                rep0 = actual_offset;
+                3
+            } else {
+                rep2 = rep1;
+                rep1 = rep0;
+                rep0 = actual_offset;
+                actual_offset + 3
+            }
+        } else if actual_offset == rep1 {
+            rep1 = rep0;
+            rep0 = actual_offset;
+            1
+        } else if actual_offset == rep2 {
+            rep2 = rep1;
+            rep1 = rep0;
+            rep0 = actual_offset;
+            2
+        } else if rep0 > 1 && actual_offset == rep0 - 1 {
+            rep2 = rep1;
+            rep1 = rep0;
+            rep0 = actual_offset;
+            3
+        } else {
+            rep2 = rep1;
+            rep1 = rep0;
+            rep0 = actual_offset;
+            actual_offset + 3
+        };
 
         let ll_c = ll_code(seq.literal_length);
         let ml_c = ml_code(seq.match_length);
@@ -433,16 +515,25 @@ pub(crate) fn encode_compressed_block_raw(
             | ((of_extra as u64) << (ll_nb + ml_nb));
         let extra_nbits = ll_nb + ml_nb + of_c;
 
-        workspace.packed_seqs.push(PackedSeq {
-            extra_bits,
-            ll_c,
-            ml_c,
-            of_c,
-            extra_nbits,
-        });
+        unsafe {
+            packed_ptr.add(i).write(PackedSeq {
+                extra_bits,
+                ll_c,
+                ml_c,
+                of_c,
+                extra_nbits,
+            });
+        }
     }
-    if lit_offset < src.len() {
-        let tail = src.len() - lit_offset;
+    unsafe {
+        workspace.packed_seqs.set_len(n);
+    }
+    rep_offsets[0] = rep0;
+    rep_offsets[1] = rep1;
+    rep_offsets[2] = rep2;
+
+    if lit_offset < src_len {
+        let tail = src_len - lit_offset;
         unsafe {
             core::ptr::copy_nonoverlapping(src_ptr.add(lit_offset), lit_dst.add(lit_pos), tail);
         }
@@ -1052,47 +1143,6 @@ fn optimal_table_log(max_log: u8, num_seq: usize, max_symbol: usize) -> u8 {
     };
     let target = seq_log.saturating_sub(2) as u8;
     target.max(min_log).max(min_bits_sym).min(max_log)
-}
-
-fn compute_offset_value(actual_offset: u32, literal_length: u32, rep: &mut [u32; 3]) -> u32 {
-    if literal_length > 0 {
-        if actual_offset == rep[0] {
-            return 1;
-        }
-        if actual_offset == rep[1] {
-            rep[1] = rep[0];
-            rep[0] = actual_offset;
-            return 2;
-        }
-        if actual_offset == rep[2] {
-            rep[2] = rep[1];
-            rep[1] = rep[0];
-            rep[0] = actual_offset;
-            return 3;
-        }
-    } else {
-        if actual_offset == rep[1] {
-            rep[1] = rep[0];
-            rep[0] = actual_offset;
-            return 1;
-        }
-        if actual_offset == rep[2] {
-            rep[2] = rep[1];
-            rep[1] = rep[0];
-            rep[0] = actual_offset;
-            return 2;
-        }
-        if rep[0] > 1 && actual_offset == rep[0] - 1 {
-            rep[2] = rep[1];
-            rep[1] = rep[0];
-            rep[0] = actual_offset;
-            return 3;
-        }
-    }
-    rep[2] = rep[1];
-    rep[1] = rep[0];
-    rep[0] = actual_offset;
-    actual_offset + 3
 }
 
 #[rustfmt::skip]
