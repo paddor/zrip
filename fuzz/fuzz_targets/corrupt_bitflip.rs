@@ -31,5 +31,5 @@ fuzz_target!(|data: &[u8]| {
         corrupted[byte_pos] ^= 1 << bit_pos;
     }
 
-    let _ = zrip::decompress(&corrupted, 4 * 1024 * 1024);
+    let _ = zrip::decompress(&corrupted);
 });

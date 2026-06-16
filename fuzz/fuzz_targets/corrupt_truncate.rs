@@ -19,5 +19,5 @@ fuzz_target!(|data: &[u8]| {
     }
 
     let trunc_at = (trunc_byte as usize * compressed.len()) / 256;
-    let _ = zrip::decompress(&compressed[..trunc_at], 4 * 1024 * 1024);
+    let _ = zrip::decompress(&compressed[..trunc_at]);
 });

@@ -33,16 +33,20 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
     let mut of_state = init_state(&tables.of_table, tables.of_accuracy, &mut rev_reader)?;
     let mut ml_state = init_state(&tables.ml_table, tables.ml_accuracy, &mut rev_reader)?;
 
-    const WILDCOPY_OVERLENGTH: usize = 32;
-    output.reserve(zrip_core::frame::MAX_BLOCK_SIZE + WILDCOPY_OVERLENGTH);
+    const WILDCOPY_OVERLENGTH: usize = 64;
+    let max_output = zrip_core::frame::MAX_BLOCK_SIZE;
+    output.reserve(max_output + WILDCOPY_OVERLENGTH);
 
     let out_base = output.as_mut_ptr();
     let mut op = unsafe { out_base.add(output.len()) };
-    let op_limit = unsafe { out_base.add(output.len() + zrip_core::frame::MAX_BLOCK_SIZE) };
+    let op_limit = unsafe { out_base.add(output.capacity() - WILDCOPY_OVERLENGTH) };
 
     let of_tbl = tables.of_table.as_ptr();
     let ml_tbl = tables.ml_table.as_ptr();
     let ll_tbl = tables.ll_table.as_ptr();
+    let of_mask = ((1u32 << tables.of_accuracy) - 1) as usize;
+    let ml_mask = ((1u32 << tables.ml_accuracy) - 1) as usize;
+    let ll_mask = ((1u32 << tables.ll_accuracy) - 1) as usize;
     let lit_ptr = literals.as_ptr();
     let lit_end = unsafe { lit_ptr.add(literals.len()) };
     let hist_len = if HAS_HISTORY { history.len() } else { 0 };
@@ -113,9 +117,9 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
         () => {{
             refill_fast!();
 
-            let of_e = unsafe { *of_tbl.add(of_state as usize) };
-            let ml_e = unsafe { *ml_tbl.add(ml_state as usize) };
-            let ll_e = unsafe { *ll_tbl.add(ll_state as usize) };
+            let of_e = unsafe { *of_tbl.add(of_state as usize & of_mask) };
+            let ml_e = unsafe { *ml_tbl.add(ml_state as usize & ml_mask) };
+            let ll_e = unsafe { *ll_tbl.add(ll_state as usize & ll_mask) };
 
             let offset_value = of_e.baseline_value + read_bits!(of_e.extra_bits);
             let match_length = ml_e.baseline_value + read_bits!(ml_e.extra_bits);
@@ -144,10 +148,14 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
                 return Err(DecompressError::CorruptSequences);
             }
             unsafe {
-                let chunk = _mm256_loadu_si256(lit_pos as *const __m256i);
-                _mm256_storeu_si256(op as *mut __m256i, chunk);
-                if ll > 32 {
-                    core::ptr::copy_nonoverlapping(lit_pos.add(32), op.add(32), ll - 32);
+                if lit_remaining >= 32 && ll >= 32 {
+                    let chunk = _mm256_loadu_si256(lit_pos as *const __m256i);
+                    _mm256_storeu_si256(op as *mut __m256i, chunk);
+                    if ll > 32 {
+                        core::ptr::copy_nonoverlapping(lit_pos.add(32), op.add(32), ll - 32);
+                    }
+                } else if ll > 0 {
+                    core::ptr::copy_nonoverlapping(lit_pos, op, ll);
                 }
                 op = op.add(ll);
                 lit_pos = lit_pos.add(ll);
@@ -162,9 +170,12 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
             if unlikely(off > out_pos + hist_len) {
                 return Err(DecompressError::CorruptSequences);
             }
+            if unlikely(ml == 0) {
+                return Err(DecompressError::CorruptSequences);
+            }
             unsafe {
                 if !HAS_HISTORY || likely(off <= out_pos) {
-                    if off >= 32 {
+                    if off >= 32 && ml >= 32 {
                         let mut s = op.sub(off);
                         let mut d = op;
                         let end = op.add(ml);
@@ -177,7 +188,7 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
                                 break;
                             }
                         }
-                    } else if off >= 8 {
+                    } else if off >= 8 && ml >= 16 {
                         let s = op.sub(off);
                         (op as *mut u64).write_unaligned((s as *const u64).read_unaligned());
                         (op.add(8) as *mut u64)
@@ -219,9 +230,9 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
     while remaining > 0 {
         rev_reader.refill();
 
-        let of_e = unsafe { *of_tbl.add(of_state as usize) };
-        let ml_e = unsafe { *ml_tbl.add(ml_state as usize) };
-        let ll_e = unsafe { *ll_tbl.add(ll_state as usize) };
+        let of_e = unsafe { *of_tbl.add(of_state as usize & of_mask) };
+        let ml_e = unsafe { *ml_tbl.add(ml_state as usize & ml_mask) };
+        let ll_e = unsafe { *ll_tbl.add(ll_state as usize & ll_mask) };
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
@@ -243,9 +254,9 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
     // Last sequence
     if num_sequences > 0 {
         rev_reader.refill();
-        let of_e = unsafe { *of_tbl.add(of_state as usize) };
-        let ml_e = unsafe { *ml_tbl.add(ml_state as usize) };
-        let ll_e = unsafe { *ll_tbl.add(ll_state as usize) };
+        let of_e = unsafe { *of_tbl.add(of_state as usize & of_mask) };
+        let ml_e = unsafe { *ml_tbl.add(ml_state as usize & ml_mask) };
+        let ll_e = unsafe { *ll_tbl.add(ll_state as usize & ll_mask) };
         let offset_value = of_e.baseline_value + rev_reader.read_bits_branchless(of_e.extra_bits);
         let match_length = ml_e.baseline_value + rev_reader.read_bits_branchless(ml_e.extra_bits);
         let literal_length = ll_e.baseline_value + rev_reader.read_bits_branchless(ll_e.extra_bits);
@@ -260,14 +271,21 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
     // Trailing literals
     if lit_pos < lit_end {
         let remaining = unsafe { lit_end.offset_from(lit_pos) } as usize;
+        if unsafe { op.add(remaining) } > unsafe { out_base.add(output.capacity()) } {
+            return Err(DecompressError::CorruptSequences);
+        }
         unsafe {
             core::ptr::copy_nonoverlapping(lit_pos, op, remaining);
             op = op.add(remaining);
         }
     }
 
+    let new_len = unsafe { op.offset_from(out_base) } as usize;
+    if new_len > output.capacity() {
+        return Err(DecompressError::CorruptSequences);
+    }
     unsafe {
-        output.set_len(op.offset_from(out_base) as usize);
+        output.set_len(new_len);
     }
 
     Ok(())

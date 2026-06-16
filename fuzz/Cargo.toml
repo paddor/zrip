@@ -61,3 +61,23 @@ doc = false
 name = "fuzz_corrupt_overwrite"
 path = "fuzz_targets/corrupt_overwrite.rs"
 doc = false
+
+[[bin]]
+name = "fuzz_roundtrip_streaming"
+path = "fuzz_targets/roundtrip_streaming.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_corrupt_zrip_output"
+path = "fuzz_targets/corrupt_zrip_output.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_corrupt_dict"
+path = "fuzz_targets/corrupt_dict.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_corrupt_streaming"
+path = "fuzz_targets/corrupt_streaming.rs"
+doc = false

@@ -292,6 +292,9 @@ pub fn build_decode_table(
 
     for (s, &prob) in distribution.iter().enumerate() {
         if prob == -1 {
+            if high_threshold == 0 {
+                return Err(DecompressError::BadFseTable);
+            }
             table[high_threshold].symbol = s as u8;
             high_threshold -= 1;
             symbol_next[s] = 1;
@@ -358,6 +361,9 @@ pub fn build_decode_table_into(
 
     for (s, &prob) in distribution.iter().enumerate() {
         if prob == -1 {
+            if high_threshold == 0 {
+                return Err(DecompressError::BadFseTable);
+            }
             table[high_threshold].symbol = s as u8;
             high_threshold -= 1;
             symbol_next[s] = 1;

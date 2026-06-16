@@ -96,7 +96,8 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
     let acceleration = params.target_length.max(1) as usize;
     let step_size = acceleration + 1;
     let search_strength = params.search_strength as usize;
-    let ilimit = block_end - MLS;
+    let read_width = if MLS >= 5 { 8 } else { 4 };
+    let ilimit = block_end - read_width;
     let max_distance = 1usize << params.window_log;
 
     let probe_interval = (block_size / 4).max(4096).min(block_size);

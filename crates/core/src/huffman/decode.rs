@@ -207,6 +207,9 @@ fn decode_4_streams_core(
     }
 
     let seg = (output_size + 3) / 4;
+    if seg * 3 >= output_size {
+        return Err(DecompressError::BadHuffmanStream);
+    }
     let remaining = output_size - seg * 3;
 
     let mut r1 = ReverseBitReader::new(&data[s1_start..s2_start])

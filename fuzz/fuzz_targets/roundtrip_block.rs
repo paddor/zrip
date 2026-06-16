@@ -7,7 +7,7 @@ fuzz_target!(|data: &[u8]| {
     }
     for level in [1, 3] {
         if let Ok(compressed) = zrip::compress(data, level) {
-            let decompressed = zrip::decompress(&compressed, data.len() + 1024)
+            let decompressed = zrip::decompress(&compressed)
                 .expect("failed to decompress own output");
             assert_eq!(data, &decompressed[..]);
         }

@@ -27,5 +27,5 @@ fuzz_target!(|data: &[u8]| {
     let mut spliced = comp_a[..mid_a].to_vec();
     spliced.extend_from_slice(&comp_b[mid_b..]);
 
-    let _ = zrip::decompress(&spliced, 4 * 1024 * 1024);
+    let _ = zrip::decompress(&spliced);
 });

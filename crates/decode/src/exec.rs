@@ -26,14 +26,17 @@ pub fn decode_execute_sequences(
     let mut of_state = rev_reader.read_bits(tables.of_accuracy)?;
     let mut ml_state = rev_reader.read_bits(tables.ml_accuracy)?;
 
-    const WILDCOPY_OVERLENGTH: usize = 32;
+    const WILDCOPY_OVERLENGTH: usize = 64;
     output.reserve(zrip_core::frame::MAX_BLOCK_SIZE + WILDCOPY_OVERLENGTH);
 
     let out_base = output.as_mut_ptr();
     let mut op = unsafe { out_base.add(output.len()) };
-    let op_limit = unsafe { out_base.add(output.len() + zrip_core::frame::MAX_BLOCK_SIZE) };
+    let op_limit = unsafe { out_base.add(output.capacity() - WILDCOPY_OVERLENGTH) };
     let lit_ptr = literals.as_ptr();
     let mut lit_off: usize = 0;
+    let of_mask = ((1u32 << tables.of_accuracy) - 1) as usize;
+    let ml_mask = ((1u32 << tables.ml_accuracy) - 1) as usize;
+    let ll_mask = ((1u32 << tables.ll_accuracy) - 1) as usize;
 
     macro_rules! execute_seq {
         ($literal_length:expr, $match_length:expr, $offset:expr) => {{
@@ -47,11 +50,16 @@ pub fn decode_execute_sequences(
             }
             unsafe {
                 let src = lit_ptr.add(lit_off);
-                (op as *mut u64).write_unaligned((src as *const u64).read_unaligned());
-                (op.add(8) as *mut u64)
-                    .write_unaligned((src.add(8) as *const u64).read_unaligned());
-                if ll > 16 {
-                    core::ptr::copy_nonoverlapping(src.add(16), op.add(16), ll - 16);
+                let lit_remaining = literals.len() - lit_off;
+                if lit_remaining >= 16 {
+                    (op as *mut u64).write_unaligned((src as *const u64).read_unaligned());
+                    (op.add(8) as *mut u64)
+                        .write_unaligned((src.add(8) as *const u64).read_unaligned());
+                    if ll > 16 {
+                        core::ptr::copy_nonoverlapping(src.add(16), op.add(16), ll - 16);
+                    }
+                } else {
+                    core::ptr::copy_nonoverlapping(src, op, ll);
                 }
             }
             op = unsafe { op.add(ll) };
@@ -79,9 +87,9 @@ pub fn decode_execute_sequences(
 
     macro_rules! decode_and_execute_update {
         ($rev_reader:expr, $offsets:expr) => {{
-            let of_e = unsafe { *tables.of_table.get_unchecked(of_state as usize) };
-            let ml_e = unsafe { *tables.ml_table.get_unchecked(ml_state as usize) };
-            let ll_e = unsafe { *tables.ll_table.get_unchecked(ll_state as usize) };
+            let of_e = unsafe { *tables.of_table.get_unchecked(of_state as usize & of_mask) };
+            let ml_e = unsafe { *tables.ml_table.get_unchecked(ml_state as usize & ml_mask) };
+            let ll_e = unsafe { *tables.ll_table.get_unchecked(ll_state as usize & ll_mask) };
 
             let of_extra = $rev_reader.read_bits_branchless(of_e.extra_bits);
             let offset_value = of_e.baseline_value + of_extra;
@@ -122,9 +130,9 @@ pub fn decode_execute_sequences(
     }
     while seq_idx < last_seq {
         rev_reader.refill();
-        let of_e = unsafe { *tables.of_table.get_unchecked(of_state as usize) };
-        let ml_e = unsafe { *tables.ml_table.get_unchecked(ml_state as usize) };
-        let ll_e = unsafe { *tables.ll_table.get_unchecked(ll_state as usize) };
+        let of_e = unsafe { *tables.of_table.get_unchecked(of_state as usize & of_mask) };
+        let ml_e = unsafe { *tables.ml_table.get_unchecked(ml_state as usize & ml_mask) };
+        let ll_e = unsafe { *tables.ll_table.get_unchecked(ll_state as usize & ll_mask) };
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
@@ -146,9 +154,9 @@ pub fn decode_execute_sequences(
     // Last sequence: no FSE state update
     {
         rev_reader.refill();
-        let of_e = unsafe { *tables.of_table.get_unchecked(of_state as usize) };
-        let ml_e = unsafe { *tables.ml_table.get_unchecked(ml_state as usize) };
-        let ll_e = unsafe { *tables.ll_table.get_unchecked(ll_state as usize) };
+        let of_e = unsafe { *tables.of_table.get_unchecked(of_state as usize & of_mask) };
+        let ml_e = unsafe { *tables.ml_table.get_unchecked(ml_state as usize & ml_mask) };
+        let ll_e = unsafe { *tables.ll_table.get_unchecked(ll_state as usize & ll_mask) };
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
@@ -163,14 +171,21 @@ pub fn decode_execute_sequences(
 
     if lit_off < literals.len() {
         let remaining = literals.len() - lit_off;
+        if unsafe { op.add(remaining) } > unsafe { out_base.add(output.capacity()) } {
+            return Err(DecompressError::CorruptSequences);
+        }
         unsafe {
             core::ptr::copy_nonoverlapping(lit_ptr.add(lit_off), op, remaining);
         }
         op = unsafe { op.add(remaining) };
     }
 
+    let new_len = unsafe { op.offset_from(out_base) } as usize;
+    if new_len > output.capacity() {
+        return Err(DecompressError::CorruptSequences);
+    }
     unsafe {
-        output.set_len(op.offset_from(out_base) as usize);
+        output.set_len(new_len);
     }
 
     Ok(())

@@ -26,7 +26,7 @@ fuzz_target!(|data: &[u8]| {
 
     for level in [1, 3] {
         if let Ok(compressed) = zrip::compress_with_dict(payload, level, &dict) {
-            let decompressed = zrip::decompress_with_dict(&compressed, payload.len() + 1024, &dict)
+            let decompressed = zrip::decompress_with_dict(&compressed, &dict)
                 .expect("failed to decompress dict-compressed output");
             assert_eq!(payload, &decompressed[..]);
         }
