@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [0.2.0]
+
+### Changed
+
+- Split into workspace crates (zrip-core, zrip-encode, zrip-decode). Public API
+  unchanged.
+- Encode throughput improved 4-17% across all levels:
+  - Reduced instruction count 9.6% via gather loop and stack-allocated FSE
+    tables in the block encoder.
+  - Likely/unlikely branch hints on encode and decode fast paths.
+  - Inlined DFast rep offsets and hash helpers to eliminate aliasing barriers.
+  - Switched DFast short hash to h5 for +5% encode speed.
+  - Fixed DFast `rep_match_loop` to avoid redundant hash lookups.
+  - Reduced match finder register pressure by eliminating ip3 and deferring
+    hash computation.
+- Decode throughput improved 5-24% across all levels:
+  - Reduced decode instruction count via inline rep offsets and no-history
+    specialization.
+  - Likely/unlikely branch hints on decode fast paths.
+- Switched negative levels to 5-byte hash for fewer false collisions.
+- Fixed L1/L2 accidentally using hash5 when min_match >= 5.
+- Removed dead code and unused unchecked modules across workspace.
+- Updated dev-dependency structured-zstd to 0.0.40.
+
 ## [0.1.4]
 
 ### Changed

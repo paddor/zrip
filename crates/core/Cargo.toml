@@ -1,6 +1,6 @@
 [package]
 name = "zrip-core"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Shared types and codecs for zrip (internal crate)"

@@ -5,19 +5,29 @@ Optimized for encode throughput in transfer pipelines that need standard
 zstd frames at high speed.
 
 ```toml
-zrip = "0.1"
+zrip = "0.2"
 ```
 
 ![zstd pipeline benchmark](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/summary.svg)
 
+<details>
+<summary>Encode speed vs compression ratio</summary>
+
 ![encode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/scatter.svg)
+</details>
+
+<details>
+<summary>Per-file encode/decode matrix</summary>
+
+![per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/matrix.svg)
+</details>
 
 ## Why zrip
 
-**Fastest pure-Rust zstd encoder available.** 85% faster encode than
-structured-zstd 0.0.37 at L3, 23% faster at L1. Faster decode than
-structured-zstd at L3 (36%) and L-1 (12%). 3x faster decode than
-ruzstd 0.8.2 at L1.
+**Fastest pure-Rust zstd encoder available.** 72% faster encode than
+structured-zstd 0.0.40 at L3, 33% faster at L1. Faster decode than
+structured-zstd at L3 (40%) and L-1 (21%). 2.9x faster decode than
+ruzstd 0.8 at L1.
 
 **Negative levels (-7..-1) for high-throughput pipelines.** Most zstd
 libraries only expose levels 1+.
@@ -30,7 +40,7 @@ small-message workloads (log lines, JSON records, RPC payloads).
 
 ## Performance
 
-Geomean across a 16-file Silesia + misc corpus on Intel i7-8700B (x86_64,
+Geomean across a 15-file Silesia + misc corpus on Intel i7-8700B (x86_64,
 SSE2/AVX2), performance governor, turbo off. Ratio is `original / compressed`;
 higher is better.
 
@@ -40,29 +50,29 @@ higher is better.
 
 | Level | Strategy | zrip enc | C enc | zrip dec | C dec | zrip ratio | C ratio |
 |------:|:---------|:--------:|------:|:--------:|------:|:----------:|--------:|
-|    -7 | Fast     | 329 MB/s |   479 | 790 MB/s |  1564 |      2.46x |   2.59x |
-|    -6 | Fast     | 269 MB/s |   457 | 729 MB/s |  1517 |      2.87x |   2.71x |
-|    -1 | Fast     | 241 MB/s |   364 | 661 MB/s |  1296 |      3.62x |   3.57x |
-|     1 | Fast     | 238 MB/s |   347 | 631 MB/s |  1185 |      3.89x |   4.33x |
-|     3 | DFast    | 176 MB/s |   237 | 748 MB/s |  1073 |      4.08x |   4.63x |
-|     4 | DFast    | 173 MB/s |   231 | 748 MB/s |  1038 |      4.11x |   4.65x |
+|    -7 | Fast     | 385 MB/s |   485 | 981 MB/s |  1576 |      2.37x |   2.56x |
+|    -6 | Fast     | 323 MB/s |   461 | 885 MB/s |  1528 |      2.69x |   2.68x |
+|    -1 | Fast     | 276 MB/s |   364 | 777 MB/s |  1297 |      3.51x |   3.51x |
+|     1 | Fast     | 247 MB/s |   345 | 614 MB/s |  1180 |      3.87x |   4.32x |
+|     3 | DFast    | 190 MB/s |   233 | 788 MB/s |  1045 |      4.05x |   4.62x |
+|     4 | DFast    | 189 MB/s |   227 | 786 MB/s |  1009 |      4.08x |   4.65x |
 
-Encode is 59-75% of C zstd, decode 48-72%. Ratio trails C zstd by
-~12% at L1-L4. The gap is pure Rust vs hand-tuned C with SIMD assembly.
+Encode is 72-82% of C zstd, decode 52-75%. Ratio trails C zstd by
+~10% at L1-L4. The gap is pure Rust vs hand-tuned C with SIMD assembly.
 
 **Incompressible** (3-file geomean: SAO star catalog, X-ray, MRI)
 
 | Level | Strategy | zrip enc | C enc | zrip dec | C dec | zrip ratio | C ratio |
 |------:|:---------|:--------:|------:|:--------:|------:|:----------:|--------:|
-|    -7 | Fast     | 620 MB/s |  1055 |1380 MB/s |  4372 |      1.23x |   1.23x |
-|    -6 | Fast     | 480 MB/s |   986 |1263 MB/s |  3979 |      1.35x |   1.24x |
-|    -1 | Fast     | 277 MB/s |   622 |1005 MB/s |  3355 |      1.40x |   1.30x |
-|     1 | Fast     | 197 MB/s |   348 | 774 MB/s |  1024 |      1.47x |   1.56x |
-|     3 | DFast    | 114 MB/s |   112 | 752 MB/s |   721 |      1.57x |   1.73x |
-|     4 | DFast    | 110 MB/s |   104 | 710 MB/s |   669 |      1.61x |   1.79x |
+|    -7 | Fast     |1074 MB/s |   990 |2948 MB/s |  3996 |      1.26x |   1.30x |
+|    -6 | Fast     |1060 MB/s |   926 |2974 MB/s |  3669 |      1.30x |   1.30x |
+|    -1 | Fast     | 484 MB/s |   610 |1814 MB/s |  3216 |      1.38x |   1.38x |
+|     1 | Fast     | 236 MB/s |   357 | 978 MB/s |  1023 |      1.49x |   1.58x |
+|     3 | DFast    | 133 MB/s |   116 |1008 MB/s |   778 |      1.54x |   1.74x |
+|     4 | DFast    | 123 MB/s |   108 | 917 MB/s |   724 |      1.58x |   1.80x |
 
-Encode is 45-59% of C zstd at negative levels, closing to parity at
-L3-L4. Decode is 32-76% of C zstd. Both codecs produce near-1.0x
+Encode is 79% of C zstd at negative levels, closing to parity at
+L3-L4. Decode is 74-96% of C zstd. Both codecs produce near-1.0x
 ratios, so throughput is the only differentiator here.
 
 ## API

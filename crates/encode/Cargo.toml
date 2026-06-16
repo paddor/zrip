@@ -1,6 +1,6 @@
 [package]
 name = "zrip-encode"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "zstd encoder for zrip (internal crate)"
