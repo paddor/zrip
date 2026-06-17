@@ -17,7 +17,7 @@ zrip = "0.2"
 </details>
 
 <details>
-<summary>Per-file encode/decode matrix</summary>
+<summary>Encode/decode throughput by level and compressibility</summary>
 
 ![per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/matrix.svg)
 </details>
