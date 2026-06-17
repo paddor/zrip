@@ -70,9 +70,9 @@ impl HuffmanEncodeTable {
         let explicit = &self.weights[..self.max_symbol as usize];
         let num_symbols = explicit.len();
 
-        let mut out = Vec::with_capacity(1 + (num_symbols + 1) / 2);
+        let mut out = Vec::with_capacity(1 + num_symbols.div_ceil(2));
         out.push((num_symbols + 127) as u8);
-        let num_bytes = (num_symbols + 1) / 2;
+        let num_bytes = num_symbols.div_ceil(2);
         for i in 0..num_bytes {
             let hi = explicit.get(i * 2).copied().unwrap_or(0);
             let lo = explicit.get(i * 2 + 1).copied().unwrap_or(0);
@@ -90,7 +90,7 @@ impl HuffmanEncodeTable {
     pub fn encode_single_stream_into(&self, data: &[u8], buf: &mut Vec<u8>) {
         buf.clear();
         let tl = self.table_log as usize;
-        let unroll: usize = if tl > 0 { 32 / tl } else { 1 }.max(2);
+        let unroll: usize = (32usize).checked_div(tl).unwrap_or(1).max(2);
 
         buf.reserve(data.len() + 16);
         let mut bits: u64 = 0;
@@ -163,7 +163,7 @@ impl HuffmanEncodeTable {
     }
 
     pub fn encode_4_streams_into(&self, data: &[u8], out: &mut Vec<u8>, stream_buf: &mut Vec<u8>) {
-        let seg = (data.len() + 3) / 4;
+        let seg = data.len().div_ceil(4);
         let s1 = &data[..seg.min(data.len())];
         let s2 = &data[seg.min(data.len())..(seg * 2).min(data.len())];
         let s3 = &data[(seg * 2).min(data.len())..(seg * 3).min(data.len())];
@@ -226,19 +226,16 @@ fn compute_huffman_weights(freqs: &[u32], num_symbols: usize) -> Option<(Vec<u8>
         heap.push(Reverse((f, i)));
     }
 
-    let mut next_id = n;
-    for _ in 0..n - 1 {
+    for next_id in n..n + (n - 1) {
         let Reverse((f1, n1)) = heap.pop().unwrap();
         let Reverse((f2, n2)) = heap.pop().unwrap();
         parent[n1] = next_id;
         parent[n2] = next_id;
         heap.push(Reverse((f1 + f2, next_id)));
-        next_id += 1;
     }
 
     let mut bit_lengths = vec![0u8; num_symbols];
-    for i in 0..n {
-        let sym = active[i].1;
+    for (i, &(_, sym)) in active.iter().enumerate().take(n) {
         let mut depth = 0u8;
         let mut node = i;
         while parent[node] != usize::MAX {

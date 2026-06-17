@@ -122,6 +122,7 @@ impl CompressContext {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compress_core(
     input: &[u8],
     params: LevelParams,

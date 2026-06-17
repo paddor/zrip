@@ -90,8 +90,8 @@ impl FseEncodeTable {
         // State table stores values in [table_size, 2*table_size),
         // matching C zstd's FSE_buildCTable convention.
         let mut table_symbol_sorted = vec![0u16; table_size];
-        for i in 0..table_size {
-            let s = state_table[i] as usize;
+        for (i, &st) in state_table.iter().enumerate().take(table_size) {
+            let s = st as usize;
             let ns = next_state_number[s];
             table_symbol_sorted[ns as usize] = (table_size + i) as u16;
             next_state_number[s] += 1;

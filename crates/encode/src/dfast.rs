@@ -30,6 +30,7 @@ pub(crate) fn compress_dfast(
     sequences
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compress_dfast_block(
     src: &[u8],
     block_start: usize,
@@ -63,7 +64,7 @@ pub(crate) fn compress_dfast_block(
 /// hash tables.  Pipeline: ip0, ip1=ip0+1, ip2=ip0+step, ip3=ip2+1.  Each
 /// iteration probes two positions, reusing hash computations across shifts
 /// and prefetching both hash_short and hash_long for the next position.
-#[allow(unused_assignments, unused_variables)]
+#[allow(unused_assignments, unused_variables, clippy::too_many_arguments)]
 fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
     src: &[u8],
     block_start: usize,
@@ -195,9 +196,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
                     && unsafe { rdp32(src_ptr, ip0) == rdp32(src_ptr, ip0 - r1) }
                 {
                     let ml = count_match(src, ip0 + 4, ip0 - r1 + 4, block_end) + 4;
-                    let tmp = rep0;
-                    rep0 = rep1;
-                    rep1 = tmp;
+                    core::mem::swap(&mut rep0, &mut rep1);
                     total_match_bytes += ml;
                     sequences.push(Sequence {
                         literal_length: 0,
@@ -629,17 +628,17 @@ pub(crate) fn prefill_hash_tables(
     let step = (prefix_len / hash_size).max(1);
     let mut i = 0;
     while i + 8 <= prefix_len {
-        let hs = h5(rd64(combined, i), short_log) as usize;
+        let hs = h5(rd64(combined, i), short_log);
         hs32(hash_short, hs, i as u32);
-        let hl = h8(rd64(combined, i), hash_log) as usize;
+        let hl = h8(rd64(combined, i), hash_log);
         hs32(hash_long, hl, i as u32);
         i += step;
     }
     let tail_start = prefix_len.saturating_sub(64);
     for i in tail_start..prefix_len.saturating_sub(7) {
-        let hs = h5(rd64(combined, i), short_log) as usize;
+        let hs = h5(rd64(combined, i), short_log);
         hs32(hash_short, hs, i as u32);
-        let hl = h8(rd64(combined, i), hash_log) as usize;
+        let hl = h8(rd64(combined, i), hash_log);
         hs32(hash_long, hl, i as u32);
     }
 }
@@ -672,6 +671,7 @@ pub(crate) fn compress_dfast_with_prefix(
     sequences
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compress_dfast_with_prefix_reuse(
     src: &[u8],
     params: &LevelParams,

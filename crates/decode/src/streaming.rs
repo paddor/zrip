@@ -6,9 +6,11 @@ use crate::BlockDecodeWorkspace;
 use crate::literals::decode_literals_ws;
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
 use zrip_core::block::{BlockType, parse_block_header};
+use zrip_core::dict::Dictionary;
 use zrip_core::error::DecompressError;
 use zrip_core::frame::MAX_BLOCK_SIZE;
 use zrip_core::frame::header::parse_frame_header;
+use zrip_core::fse::{promote_ll_table, promote_ml_table, promote_of_table};
 use zrip_core::xxhash::Xxh64State;
 
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -55,6 +57,7 @@ pub struct FrameDecoder<R: Read> {
     content_checksum: bool,
     max_output: usize,
     bytes_output: usize,
+    dict: Option<Dictionary>,
 }
 
 impl<R: Read> FrameDecoder<R> {
@@ -78,12 +81,53 @@ impl<R: Read> FrameDecoder<R> {
             content_checksum: false,
             max_output,
             bytes_output: 0,
+            dict: None,
+        }
+    }
+
+    /// Creates a decoder with a dictionary and default output limit.
+    pub fn with_dict(reader: R, dict: Dictionary) -> Self {
+        Self::with_dict_and_limit(reader, dict, zrip_core::DEFAULT_DECOMPRESS_LIMIT)
+    }
+
+    /// Creates a decoder with a dictionary and explicit output limit.
+    pub fn with_dict_and_limit(reader: R, dict: Dictionary, max_output: usize) -> Self {
+        Self {
+            inner: reader,
+            state: State::FrameHeader,
+            read_buf: Vec::new(),
+            output_buf: Vec::new(),
+            output_pos: 0,
+            ws: Box::new(BlockDecodeWorkspace::new()),
+            seq_tables: SequenceDecodeTables::new_default(),
+            rep_offsets: [1, 4, 8],
+            hasher: None,
+            content_checksum: false,
+            max_output,
+            bytes_output: 0,
+            dict: Some(dict),
         }
     }
 
     /// Consumes the decoder and returns the underlying reader.
     pub fn into_inner(self) -> R {
         self.inner
+    }
+
+    /// Installs a new reader for the next frame, keeping all internal
+    /// buffers allocated. Returns the previous reader.
+    pub fn reset(&mut self, new_reader: R) -> R {
+        let old = core::mem::replace(&mut self.inner, new_reader);
+        self.state = State::FrameHeader;
+        self.output_buf.clear();
+        self.output_pos = 0;
+        self.rep_offsets = [1, 4, 8];
+        self.seq_tables = SequenceDecodeTables::new_default();
+        self.ws.huf_valid = false;
+        self.hasher = None;
+        self.content_checksum = false;
+        self.bytes_output = 0;
+        old
     }
 
     fn fill_output(&mut self) -> io::Result<()> {
@@ -165,6 +209,27 @@ impl<R: Read> FrameDecoder<R> {
         let header = parse_frame_header(&self.read_buf[..hdr_len])
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
+        if let Some(frame_dict_id) = header.dict_id {
+            match &self.dict {
+                Some(d) if d.id() == frame_dict_id => {}
+                Some(d) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        DecompressError::DictMismatch {
+                            expected: frame_dict_id,
+                            got: d.id(),
+                        },
+                    ));
+                }
+                None => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        DecompressError::DictRequired,
+                    ));
+                }
+            }
+        }
+
         if let Some(fcs) = header.frame_content_size {
             if fcs as usize > self.max_output {
                 return Err(io::Error::new(
@@ -180,8 +245,36 @@ impl<R: Read> FrameDecoder<R> {
         } else {
             None
         };
-        self.rep_offsets = [1, 4, 8];
-        self.ws.huf_valid = false;
+
+        if let Some(ref d) = self.dict {
+            self.rep_offsets = *d.rep_offsets();
+            let mut st = SequenceDecodeTables::new_default();
+            if let Some((t, l)) = d.of_table() {
+                st.of_table = promote_of_table(t);
+                st.of_accuracy = l;
+            }
+            if let Some((t, l)) = d.ml_table() {
+                st.ml_table = promote_ml_table(t);
+                st.ml_accuracy = l;
+            }
+            if let Some((t, l)) = d.ll_table() {
+                st.ll_table = promote_ll_table(t);
+                st.ll_accuracy = l;
+            }
+            self.seq_tables = st;
+            self.ws.huf_valid = false;
+            if let Some((t, l)) = d.huf_table() {
+                self.ws.huf_table.clear();
+                self.ws.huf_table.extend_from_slice(t);
+                self.ws.huf_table_log = l;
+                self.ws.huf_valid = true;
+            }
+        } else {
+            self.rep_offsets = [1, 4, 8];
+            self.seq_tables = SequenceDecodeTables::new_default();
+            self.ws.huf_valid = false;
+        }
+
         self.state = State::BlockHeader;
         Ok(())
     }
@@ -263,6 +356,10 @@ impl<R: Read> FrameDecoder<R> {
     }
 
     fn decode_compressed_block(&mut self, block_size: usize) -> io::Result<()> {
+        let dict_history: &[u8] = match &self.dict {
+            Some(d) => d.content(),
+            None => &[],
+        };
         let block_data = &self.read_buf[..block_size];
 
         let lit_consumed = decode_literals_ws(block_data, &mut self.ws)
@@ -301,7 +398,7 @@ impl<R: Read> FrameDecoder<R> {
                     &mut self.rep_offsets,
                     &self.ws.literal_buf,
                     &mut self.output_buf,
-                    &[],
+                    dict_history,
                 )
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 if self.output_buf.len() - before > MAX_BLOCK_SIZE {
@@ -325,7 +422,7 @@ impl<R: Read> FrameDecoder<R> {
                     &mut self.rep_offsets,
                     &self.ws.literal_buf,
                     &mut self.output_buf,
-                    &[],
+                    dict_history,
                 )
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 if self.output_buf.len() - before > MAX_BLOCK_SIZE {
@@ -346,7 +443,7 @@ impl<R: Read> FrameDecoder<R> {
             &mut self.rep_offsets,
             &self.ws.literal_buf,
             &mut self.output_buf,
-            &[],
+            dict_history,
         )
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         if self.output_buf.len() - before > MAX_BLOCK_SIZE {
@@ -385,9 +482,8 @@ impl<R: Read> FrameDecoder<R> {
 impl<R: Read> Read for FrameDecoder<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.output_pos >= self.output_buf.len() {
-            match &self.state {
-                State::Done => return Ok(0),
-                _ => {}
+            if let State::Done = &self.state {
+                return Ok(0);
             }
 
             self.output_buf.clear();

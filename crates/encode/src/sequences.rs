@@ -57,9 +57,7 @@ pub fn encode_sequences_section(
         })
         .collect();
 
-    for (_i, &(ll_code, ml_code, of_code, of_value, ll_packed, ml_packed)) in
-        encoded.iter().enumerate()
-    {
+    for &(ll_code, ml_code, of_code, of_value, ll_packed, ml_packed) in encoded.iter() {
         let of_bits = of_code;
         if of_bits > 0 {
             let of_extra = of_value & ((1u32 << of_bits) - 1);

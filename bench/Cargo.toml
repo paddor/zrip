@@ -1,0 +1,28 @@
+[package]
+name = "zrip-bench"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[dependencies]
+zrip = { path = "..", features = ["dict_builder"] }
+zstd = "0.13"
+zstd-safe = "7"
+binggan = "0.14"
+lz4rip = "0.3.1"
+ruzstd = "0.8"
+structured-zstd = "0.0.40"
+libc = "0.2"
+
+[[example]]
+name = "zrip_bench"
+
+[[example]]
+name = "ruzstd_compare"
+
+[[example]]
+name = "bench_streaming_dict"
+
+[[bench]]
+name = "binggan_bench"
+harness = false

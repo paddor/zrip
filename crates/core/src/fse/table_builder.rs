@@ -60,9 +60,7 @@ pub fn parse_fse_table_description_into(
         if prob == 0 {
             loop {
                 let repeat = reader.read_bits(2)? as usize;
-                for _ in 0..repeat {
-                    distribution.push(0);
-                }
+                distribution.extend(core::iter::repeat_n(0, repeat));
                 if repeat < 3 {
                     break;
                 }
@@ -137,9 +135,7 @@ pub fn parse_fse_table_description(
         if prob == 0 {
             loop {
                 let repeat = reader.read_bits(2)? as usize;
-                for _ in 0..repeat {
-                    distribution.push(0);
-                }
+                distribution.extend(core::iter::repeat_n(0, repeat));
                 if repeat < 3 {
                     break;
                 }
@@ -322,15 +318,15 @@ pub fn build_decode_table(
         return Err(DecompressError::BadFseTable);
     }
 
-    for i in 0..table_size {
-        let s = table[i].symbol as usize;
+    for entry in table.iter_mut().take(table_size) {
+        let s = entry.symbol as usize;
         let next_state = symbol_next[s] as u32;
         symbol_next[s] += 1;
 
         let nb = accuracy_log as u32 - high_bit(next_state);
         let new_state = (next_state << nb) - table_size as u32;
-        table[i].num_bits = nb as u8;
-        table[i].base_line = new_state as u16;
+        entry.num_bits = nb as u8;
+        entry.base_line = new_state as u16;
     }
 
     Ok(table)
@@ -391,15 +387,15 @@ pub fn build_decode_table_into(
         return Err(DecompressError::BadFseTable);
     }
 
-    for i in 0..table_size {
-        let s = table[i].symbol as usize;
+    for entry in table.iter_mut().take(table_size) {
+        let s = entry.symbol as usize;
         let next_state = symbol_next[s] as u32;
         symbol_next[s] += 1;
 
         let nb = accuracy_log as u32 - high_bit(next_state);
         let new_state = (next_state << nb) - table_size as u32;
-        table[i].num_bits = nb as u8;
-        table[i].base_line = new_state as u16;
+        entry.num_bits = nb as u8;
+        entry.base_line = new_state as u16;
     }
 
     Ok(())

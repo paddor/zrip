@@ -110,6 +110,18 @@ let mut out = String::new();
 dec.read_to_string(&mut out)?;
 ```
 
+`FrameEncoder` and `FrameDecoder` own persistent hash tables and
+workspace buffers. Call `reset()` to start a new frame while reusing
+all allocations:
+
+```rust
+let mut enc = zrip::FrameEncoder::new(Vec::new(), 1)?;
+enc.write_all(b"first frame")?;
+let first  = enc.reset(Vec::new())?;  // finishes frame, keeps buffers
+enc.write_all(b"second frame")?;
+let second = enc.finish()?;
+```
+
 ### Dictionary compression
 
 ```rust
@@ -117,6 +129,21 @@ let dict = zrip::Dictionary::from_bytes(&dict_bytes)?;
 let compressed = zrip::compress_with_dict(input, 1, &dict)?;
 let original   = zrip::decompress_with_dict(&compressed, &dict)?;
 ```
+
+Streaming with a dictionary:
+
+```rust
+let mut enc = zrip::FrameEncoder::with_dict(Vec::new(), 1, dict.clone())?;
+enc.write_all(input)?;
+let compressed = enc.finish()?;
+
+let mut dec = zrip::FrameDecoder::with_dict(&compressed[..], dict);
+let mut output = Vec::new();
+dec.read_to_end(&mut output)?;
+```
+
+`CompressContext::with_dict()` and `DecompressContext::with_dict()`
+provide the same reuse for one-shot compression.
 
 ## Features
 

@@ -348,6 +348,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
 
 /// Post-match rep2 loop (C zstd style): only check rep_offset2, swap on match.
 #[inline(always)]
+#[allow(clippy::too_many_arguments)]
 fn rep2_match_loop<const HASH_LOG: u32, const MLS: usize>(
     src: &[u8],
     ip: &mut usize,
@@ -679,6 +680,7 @@ fn insert_complementary_fast<const HASH_LOG: u32>(
 }
 
 #[inline(always)]
+#[allow(clippy::too_many_arguments)]
 fn rep_match_loop_fast<const HASH_LOG: u32>(
     src: &[u8],
     ip: &mut usize,

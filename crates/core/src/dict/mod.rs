@@ -24,6 +24,7 @@ pub const DICT_MAGIC: u32 = 0xEC30A437;
 /// Load from raw bytes with [`Dictionary::from_bytes`], or train with
 /// [`train_dict_fastcover`] (requires `dict_builder` feature).
 #[cfg(feature = "alloc")]
+#[derive(Clone)]
 pub struct Dictionary {
     id: u32,
     content: Vec<u8>,
@@ -48,6 +49,9 @@ impl Dictionary {
         }
 
         let id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        if id == 0 {
+            return Err(DecompressError::InvalidDictionary);
+        }
         let mut pos = 8;
 
         let huf_table = parse_dict_huffman(&data[pos..])?;
@@ -109,24 +113,29 @@ impl Dictionary {
         &self.rep_offsets
     }
 
+    /// Returns the Huffman decode table and its log2 size, if present.
     pub fn huf_table(&self) -> Option<(&[HuffmanDecodeEntry], u8)> {
         self.huf_table.as_ref().map(|(t, l)| (t.as_slice(), *l))
     }
 
+    /// Returns the offset-code FSE decode table and accuracy log, if present.
     pub fn of_table(&self) -> Option<(&[FseDecodeEntry], u8)> {
         self.of_table.as_ref().map(|(t, l)| (t.as_slice(), *l))
     }
 
+    /// Returns the match-length FSE decode table and accuracy log, if present.
     pub fn ml_table(&self) -> Option<(&[FseDecodeEntry], u8)> {
         self.ml_table.as_ref().map(|(t, l)| (t.as_slice(), *l))
     }
 
+    /// Returns the literal-length FSE decode table and accuracy log, if present.
     pub fn ll_table(&self) -> Option<(&[FseDecodeEntry], u8)> {
         self.ll_table.as_ref().map(|(t, l)| (t.as_slice(), *l))
     }
 }
 
 #[cfg(feature = "alloc")]
+#[allow(clippy::type_complexity)]
 fn parse_dict_huffman(
     data: &[u8],
 ) -> Result<(Option<(Vec<HuffmanDecodeEntry>, u8)>, usize), DecompressError> {
@@ -143,6 +152,7 @@ fn parse_dict_huffman(
 }
 
 #[cfg(feature = "alloc")]
+#[allow(clippy::type_complexity)]
 fn parse_dict_fse(
     data: &[u8],
     max_symbol: u8,

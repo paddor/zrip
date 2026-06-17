@@ -10,6 +10,13 @@ pub struct BitWriter {
 }
 
 #[cfg(feature = "alloc")]
+impl Default for BitWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "alloc")]
 impl BitWriter {
     pub fn new() -> Self {
         Self {

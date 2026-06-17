@@ -71,8 +71,8 @@ mod tests {
             return;
         }
         let mut buf = vec![0u8; 128];
-        for i in 0..32 {
-            buf[i] = (i + 1) as u8;
+        for (i, b) in buf.iter_mut().enumerate().take(32) {
+            *b = (i + 1) as u8;
         }
         unsafe {
             copy_match_sse2(buf.as_mut_ptr().add(32), 32, 32);

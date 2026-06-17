@@ -143,8 +143,8 @@ mod tests {
         unsafe {
             copy_match(buf.as_mut_ptr().add(2), 2, 14);
         }
-        for i in 0..16 {
-            assert_eq!(buf[i], if i % 2 == 0 { 0xAA } else { 0xBB });
+        for (i, &b) in buf.iter().enumerate().take(16) {
+            assert_eq!(b, if i % 2 == 0 { 0xAA } else { 0xBB });
         }
     }
 
@@ -165,8 +165,8 @@ mod tests {
         unsafe {
             copy_match(buf.as_mut_ptr().add(7), 7, 21);
         }
-        for i in 0..28 {
-            assert_eq!(buf[i], (i % 7 + 1) as u8);
+        for (i, &b) in buf.iter().enumerate().take(28) {
+            assert_eq!(b, (i % 7 + 1) as u8);
         }
     }
 
