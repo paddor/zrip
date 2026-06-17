@@ -52,20 +52,10 @@ pub(crate) fn compress_fast_block(
             )
         };
     }
-    match (params.hash_log, mls) {
-        (12, ..5) => dispatch!(12, 4),
-        (12, _) => dispatch!(12, 5),
-        (13, ..5) => dispatch!(13, 4),
-        (13, _) => dispatch!(13, 5),
-        (14, 7..) => dispatch!(14, 7),
-        (14, 5..7) => dispatch!(14, 5),
-        (14, _) => dispatch!(14, 4),
-        (16, _) => dispatch!(16, 4),
-        (17, _) => dispatch!(17, 4),
-        (18, _) => dispatch!(18, 4),
-        (_, 7..) => dispatch!(0, 7),
-        (_, 5..7) => dispatch!(0, 5),
-        (_, _) => dispatch!(0, 4),
+    match mls {
+        7.. => dispatch!(0, 7),
+        5..7 => dispatch!(0, 5),
+        _ => dispatch!(0, 4),
     }
 }
 
@@ -96,8 +86,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
     let acceleration = params.target_length.max(1) as usize;
     let step_size = acceleration + 1;
     let search_strength = params.search_strength as usize;
-    let read_width = if MLS >= 5 { 8 } else { 4 };
-    let ilimit = block_end - read_width;
+    let ilimit = (block_end - MLS).min(src.len() - 8);
     let max_distance = 1usize << params.window_log;
 
     let probe_interval = (block_size / 4).max(4096).min(block_size);

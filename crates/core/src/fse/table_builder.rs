@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use crate::bitstream::reader::BitReader;
 use crate::error::DecompressError;
 use crate::fse::{FseDecodeEntry, MAX_TABLE_LOG};
+use crate::hint::unlikely;
 
 pub fn parse_fse_table_description_into(
     reader: &mut BitReader,
@@ -292,7 +293,7 @@ pub fn build_decode_table(
 
     for (s, &prob) in distribution.iter().enumerate() {
         if prob == -1 {
-            if high_threshold == 0 {
+            if unlikely(high_threshold == 0) {
                 return Err(DecompressError::BadFseTable);
             }
             table[high_threshold].symbol = s as u8;
@@ -361,7 +362,7 @@ pub fn build_decode_table_into(
 
     for (s, &prob) in distribution.iter().enumerate() {
         if prob == -1 {
-            if high_threshold == 0 {
+            if unlikely(high_threshold == 0) {
                 return Err(DecompressError::BadFseTable);
             }
             table[high_threshold].symbol = s as u8;

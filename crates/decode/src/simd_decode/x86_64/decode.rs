@@ -148,7 +148,7 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
                 return Err(DecompressError::CorruptSequences);
             }
             unsafe {
-                if lit_remaining >= 32 && ll >= 32 {
+                if lit_remaining >= 32 {
                     let chunk = _mm256_loadu_si256(lit_pos as *const __m256i);
                     _mm256_storeu_si256(op as *mut __m256i, chunk);
                     if ll > 32 {
@@ -175,7 +175,7 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
             }
             unsafe {
                 if !HAS_HISTORY || likely(off <= out_pos) {
-                    if off >= 32 && ml >= 32 {
+                    if off >= 32 {
                         let mut s = op.sub(off);
                         let mut d = op;
                         let end = op.add(ml);
@@ -188,7 +188,7 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
                                 break;
                             }
                         }
-                    } else if off >= 8 && ml >= 16 {
+                    } else if off >= 8 {
                         let s = op.sub(off);
                         (op as *mut u64).write_unaligned((s as *const u64).read_unaligned());
                         (op.add(8) as *mut u64)

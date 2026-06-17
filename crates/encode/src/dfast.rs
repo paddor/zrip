@@ -54,14 +54,7 @@ pub(crate) fn compress_dfast_block(
             )
         };
     }
-    match (params.hash_log, params.chain_log) {
-        (17, 16) => dispatch!(17, 16),
-        (17, 17) => dispatch!(17, 17),
-        (18, 18) => dispatch!(18, 18),
-        (14, 14) => dispatch!(14, 14),
-        (16, 16) => dispatch!(16, 16),
-        _ => dispatch!(0, 0),
-    }
+    dispatch!(0, 0)
 }
 
 /// 4-cursor DFast match finder with prefetch pipeline.
