@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.2.1]
+
+### Fixed
+
+- Sub-crate feature flags: `std` now correctly enables `alloc` in zrip-encode
+  and zrip-decode, fixing compilation when published to crates.io.
+- Added version specifiers to workspace path dependencies for crates.io
+  publishing.
+
 ## [0.2.0]
 
 ### Changed

@@ -4,7 +4,7 @@ exclude = ["fuzz"]
 
 [package]
 name = "zrip"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Pure Rust zstd codec: Fast/DFast strategies (levels -7..4), COVER/FastCOVER dict builder"
@@ -23,8 +23,8 @@ nightly = ["zrip-core/nightly", "zrip-encode/nightly", "zrip-decode/nightly"]
 
 [dependencies]
 zrip-core = { version = "0.2.0", path = "crates/core", default-features = false }
-zrip-encode = { version = "0.2.0", path = "crates/encode", default-features = false }
-zrip-decode = { version = "0.2.0", path = "crates/decode", default-features = false }
+zrip-encode = { version = "0.2.1", path = "crates/encode", default-features = false }
+zrip-decode = { version = "0.2.1", path = "crates/decode", default-features = false }
 
 [dev-dependencies]
 zstd = "0.13"
