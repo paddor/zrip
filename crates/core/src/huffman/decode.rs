@@ -67,8 +67,9 @@ pub fn decode_single_stream_vec(
     output: &mut Vec<u8>,
 ) -> Result<(), DecompressError> {
     output.clear();
-    output.reserve(output_size);
+    #[allow(clippy::uninit_vec)]
     unsafe {
+        output.reserve(output_size);
         output.set_len(output_size);
     }
     #[cfg(target_arch = "x86_64")]
@@ -154,8 +155,9 @@ pub fn decode_4_streams_into(
     output: &mut Vec<u8>,
 ) -> Result<(), DecompressError> {
     output.clear();
-    output.reserve(output_size);
+    #[allow(clippy::uninit_vec)]
     unsafe {
+        output.reserve(output_size);
         output.set_len(output_size);
     }
     #[cfg(target_arch = "x86_64")]
