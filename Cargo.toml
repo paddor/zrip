@@ -22,9 +22,9 @@ dict_builder = ["std", "zrip-core/dict_builder"]
 nightly = ["zrip-core/nightly", "zrip-encode/nightly", "zrip-decode/nightly"]
 
 [dependencies]
-zrip-core = { path = "crates/core", default-features = false }
-zrip-encode = { path = "crates/encode", default-features = false }
-zrip-decode = { path = "crates/decode", default-features = false }
+zrip-core = { version = "0.2.0", path = "crates/core", default-features = false }
+zrip-encode = { version = "0.2.0", path = "crates/encode", default-features = false }
+zrip-decode = { version = "0.2.0", path = "crates/decode", default-features = false }
 
 [dev-dependencies]
 zstd = "0.13"
