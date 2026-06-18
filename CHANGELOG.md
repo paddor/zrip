@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.3.0]
+
+### Added
+
+- Streaming dictionary compression: `FrameEncoder::with_dict()`,
+  `FrameDecoder::with_dict()`, and `reset_with_dict()` for buffer-reusing
+  streaming with trained dictionaries.
+- `CompressContext::with_dict()` and `DecompressContext::with_dict()` for
+  reusable one-shot dictionary compression.
+
+### Changed
+
+- Encapsulated all unsafe behind `primitives.rs` modules with safe
+  `pub(crate)` signatures. Every algorithm module now enforces
+  `#![forbid(unsafe_code)]`. Unsafe confined to primitives, SIMD intrinsics,
+  and the 4-stream Huffman decoder.
+
 ## [0.2.1]
 
 ### Fixed

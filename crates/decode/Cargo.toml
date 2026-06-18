@@ -1,6 +1,6 @@
 [package]
 name = "zrip-decode"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 description = "zstd decoder for zrip (internal crate)"
@@ -15,4 +15,4 @@ frame = ["std"]
 nightly = ["zrip-core/nightly"]
 
 [dependencies]
-zrip-core = { version = "0.2.0", path = "../core", default-features = false }
+zrip-core = { version = "0.3.0", path = "../core", default-features = false }
