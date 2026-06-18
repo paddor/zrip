@@ -4,10 +4,6 @@ Pure Rust zstd codec. Levels -7 through 4 (Fast and DFast strategies).
 Optimized for encode throughput in transfer pipelines that need standard
 zstd frames at high speed.
 
-```toml
-zrip = "0.2"
-```
-
 ![zstd pipeline benchmark](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/summary.svg)
 
 <details>

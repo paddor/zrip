@@ -54,8 +54,9 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
 
     let mut bs_container = rev_reader.container;
     let mut bs_consumed = rev_reader.bits_consumed;
-    let mut bs_ptr = unsafe { seq_data.as_ptr().add(rev_reader.ptr) };
-    let bs_fast_limit = unsafe { seq_data.as_ptr().add(rev_reader.limit_ptr + 16) };
+    let seq_base = seq_data.as_ptr();
+    let mut bs_ptr = unsafe { seq_base.add(rev_reader.ptr) };
+    let bs_fast_limit_off = rev_reader.limit_ptr.saturating_add(16);
 
     let last_seq = num_sequences - 1;
 
@@ -216,7 +217,7 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
     }
 
     let mut remaining = last_seq;
-    while remaining > 0 && bs_ptr >= bs_fast_limit {
+    while remaining > 0 && unsafe { bs_ptr.offset_from(seq_base) } as usize >= bs_fast_limit_off {
         let (ll, ml, off) = decode_and_update!();
         execute_seq!(ll, ml, off);
         remaining -= 1;

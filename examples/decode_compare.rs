@@ -93,7 +93,7 @@ fn main() {
         zrip_c_ns as f64 / 1e3,
         100.0 * c_c_ns as f64 / zrip_c_ns as f64
     );
-    eprintln!("");
+    eprintln!();
     eprintln!("--- zrip-compressed input ---");
     eprintln!(
         "zrip:    {:>7.1} MB/s  ({:.0} µs)",
