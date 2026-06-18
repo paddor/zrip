@@ -117,8 +117,8 @@ impl FseEncodeTable {
 
         let mut state_table = [0u16; MAX_TABLE_SIZE];
         let mut cumul_copy = cumul;
-        for i in 0..table_size {
-            let s = decode_table[i].symbol as usize;
+        for (i, entry) in decode_table.iter().enumerate().take(table_size) {
+            let s = entry.symbol as usize;
             let idx = cumul_copy[s] as usize;
             state_table[idx] = (table_size + i) as u16;
             cumul_copy[s] += 1;
@@ -142,8 +142,19 @@ impl FseEncodeTable {
     }
 }
 
+#[cfg(feature = "std")]
 static PREDEFINED_TABLES: std::sync::LazyLock<PredefinedEncodeTables> =
     std::sync::LazyLock::new(PredefinedEncodeTables::build);
+
+#[cfg(feature = "std")]
+fn predefined_tables() -> &'static PredefinedEncodeTables {
+    &PREDEFINED_TABLES
+}
+
+#[cfg(not(feature = "std"))]
+fn predefined_tables() -> PredefinedEncodeTables {
+    PredefinedEncodeTables::build()
+}
 
 struct PredefinedEncodeTables {
     ll: FseEncodeTable,
@@ -708,7 +719,7 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
 
     output.push(0x00);
 
-    let tables = &*PREDEFINED_TABLES;
+    let tables = predefined_tables();
     let last = unsafe { packed.get_unchecked(n - 1) };
 
     let max_out = n * 18 + 16;
@@ -789,6 +800,7 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     output.extend_from_slice(writer_buf);
 }
 
+#[allow(clippy::large_enum_variant)]
 enum TableEnc {
     Compressed {
         enc_table: FseEncodeTable,
@@ -820,6 +832,7 @@ fn build_table_enc(freqs: &[u32], max_sym: usize, max_log: u8, n: usize) -> Opti
     Some(TableEnc::Compressed { enc_table, header })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_seq_custom(
     packed: &[PackedSeq],
     ll_freq: &[u32; 36],
@@ -840,7 +853,7 @@ fn encode_seq_custom(
         + estimate_fse_bits(&ml_freq[..=ml_max], n)
         + estimate_fse_bits(&of_freq[..=of_max], n);
     let estimated_header = 20;
-    let estimated_bytes = (estimated_bits + 7) / 8 + estimated_header + 4;
+    let estimated_bytes = estimated_bits.div_ceil(8) + estimated_header + 4;
     if estimated_bytes >= pred_size {
         return false;
     }
@@ -1104,7 +1117,7 @@ fn estimate_predefined_cost(
         fse_cost_256 += f as u64 * OF_PRED_COST_256[c] as u64;
     }
 
-    let total_bits = (fse_cost_256 + 255) / 256 + extra_bits;
+    let total_bits = fse_cost_256.div_ceil(256) + extra_bits;
     let header_bytes = if n < 128 {
         2
     } else if n < 0x7F00 {
@@ -1119,12 +1132,17 @@ fn estimate_fse_bits(freqs: &[u32], total: usize) -> usize {
     if total == 0 {
         return 0;
     }
-    let t = total as f64;
-    let mut bits = 0.0f64;
+    // Integer-only Shannon entropy estimate using fixed-point log2.
+    // For each symbol with frequency f: contribution = f * log2(total/f)
+    //   = f * (log2(total) - log2(f))
+    // We use 32 - leading_zeros as an integer log2 approximation.
+    let log2_total = (usize::BITS).saturating_sub(total.leading_zeros());
+    let mut bits: u64 = 0;
     for &f in freqs {
         if f > 0 {
-            let p = f as f64 / t;
-            bits -= f as f64 * p.log2();
+            let log2_f = (u32::BITS).saturating_sub(f.leading_zeros());
+            let cost = log2_total.saturating_sub(log2_f);
+            bits += f as u64 * cost as u64;
         }
     }
     bits as usize

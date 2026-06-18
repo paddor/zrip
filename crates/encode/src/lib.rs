@@ -15,6 +15,8 @@ pub mod strategy;
 pub mod streaming;
 
 #[cfg(feature = "alloc")]
+use alloc::vec;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 use crate::strategy::Strategy;

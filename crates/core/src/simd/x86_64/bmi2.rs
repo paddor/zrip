@@ -8,9 +8,10 @@ use core::arch::x86_64::*;
 /// BMI2 must be available.
 #[target_feature(enable = "bmi2")]
 #[inline]
+#[allow(unused_unsafe)]
 pub unsafe fn bzhi(val: u64, n: u32) -> u64 {
     debug_assert!(n <= 64);
-    _bzhi_u64(val, n)
+    unsafe { _bzhi_u64(val, n) }
 }
 
 /// Parallel bit extract using BMI2 `_pext_u64`.
@@ -21,8 +22,9 @@ pub unsafe fn bzhi(val: u64, n: u32) -> u64 {
 /// BMI2 must be available.
 #[target_feature(enable = "bmi2")]
 #[inline]
+#[allow(unused_unsafe)]
 pub unsafe fn pext(val: u64, mask: u64) -> u64 {
-    _pext_u64(val, mask)
+    unsafe { _pext_u64(val, mask) }
 }
 
 /// Parallel bit deposit using BMI2 `_pdep_u64`.
@@ -32,8 +34,9 @@ pub unsafe fn pext(val: u64, mask: u64) -> u64 {
 /// BMI2 must be available.
 #[target_feature(enable = "bmi2")]
 #[inline]
+#[allow(unused_unsafe)]
 pub unsafe fn pdep(val: u64, mask: u64) -> u64 {
-    _pdep_u64(val, mask)
+    unsafe { _pdep_u64(val, mask) }
 }
 
 #[cfg(all(test, feature = "std"))]

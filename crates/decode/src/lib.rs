@@ -301,6 +301,7 @@ pub(crate) fn decompress_frame(
     Ok(offset)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn decode_compressed_block(
     data: &[u8],
     output: &mut Vec<u8>,

@@ -104,8 +104,8 @@ pub fn select_segments(samples: &[&[u8]], dict_size: usize, params: &FastCoverPa
         for i in best_pos..best_pos + seg_dmers {
             freqs[hashes[i] as usize] = 0;
         }
-        for i in best_pos..best_pos + k {
-            used[i] = true;
+        for u in &mut used[best_pos..best_pos + k] {
+            *u = true;
         }
 
         collected += k;

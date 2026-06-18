@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/core", "crates/encode", "crates/decode"]
-exclude = ["fuzz"]
+exclude = ["fuzz", "bench"]
 
 [package]
 name = "zrip"
@@ -29,25 +29,11 @@ zrip-decode = { version = "0.2.1", path = "crates/decode", default-features = fa
 [dev-dependencies]
 zstd = "0.13"
 zstd-safe = "7"
-binggan = "0.14"
 proptest = "1"
 libc = "0.2"
-lz4rip = "0.3.1"
-ruzstd = "0.8"
-structured-zstd = "0.0.40"
-
-[[bench]]
-name = "binggan_bench"
-harness = false
-
-[[example]]
-name = "zrip_bench"
 
 [[example]]
 name = "quickstart"
-
-[[example]]
-name = "ruzstd_compare"
 
 [profile.release]
 lto = "thin"

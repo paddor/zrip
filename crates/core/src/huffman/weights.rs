@@ -27,7 +27,7 @@ pub fn parse_huffman_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompress
 
 fn parse_direct_weights(data: &[u8]) -> Result<(Vec<u8>, usize), DecompressError> {
     let num_symbols = (data[0] as usize) - 127;
-    let num_bytes = (num_symbols + 1) / 2;
+    let num_bytes = num_symbols.div_ceil(2);
 
     if data.len() < 1 + num_bytes {
         return Err(DecompressError::BadHuffmanWeights);

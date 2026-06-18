@@ -86,7 +86,7 @@ fn compute_rep_offsets(content: &[u8], samples: &[&[u8]]) -> [u32; 3] {
         }
     }
 
-    offset_scores.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    offset_scores.sort_unstable_by_key(|e| core::cmp::Reverse(e.1));
 
     let mut rep = [1u32, 4, 8];
     let mut found = 0usize;

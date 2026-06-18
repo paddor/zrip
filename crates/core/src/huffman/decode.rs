@@ -208,7 +208,7 @@ fn decode_4_streams_core(
         return Err(DecompressError::BadHuffmanStream);
     }
 
-    let seg = (output_size + 3) / 4;
+    let seg = output_size.div_ceil(4);
     if seg * 3 >= output_size {
         return Err(DecompressError::BadHuffmanStream);
     }

@@ -1,5 +1,3 @@
-use zrip;
-
 // ===== Encoder round-trip (zrip compress -> C decompress) =====
 
 #[test]
@@ -378,7 +376,7 @@ fn decompress_c_alternating_compressible_incompressible() {
     let mut original = Vec::with_capacity(50_000);
     for i in 0..100 {
         if i % 2 == 0 {
-            original.extend(std::iter::repeat(0x42u8).take(250));
+            original.extend(std::iter::repeat_n(0x42u8, 250));
         } else {
             original.extend((0..250u32).map(|j| ((j + i).wrapping_mul(2654435761) >> 24) as u8));
         }
@@ -984,14 +982,14 @@ fn fastcover_large_dict() {
     // Large dictionary (32KB)
     let samples: Vec<Vec<u8>> = (0..200)
         .map(|i| {
-            let mut s = format!(
+            format!(
                 r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","bio":"{}"}}"#,
                 i,
                 i,
                 i,
                 "x".repeat(100 + (i % 50)),
-            );
-            s.into_bytes()
+            )
+            .into_bytes()
         })
         .collect();
     let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
@@ -1360,7 +1358,7 @@ fn decompress_c_long_literal_lengths() {
             (0..500u32).map(|j| ((j.wrapping_add(i * 500).wrapping_mul(2654435761)) >> 16) as u8),
         );
         // 500 bytes of repetitive (will compress = match)
-        data.extend(std::iter::repeat(0x42u8).take(500));
+        data.extend(std::iter::repeat_n(0x42u8, 500));
     }
     for level in [1, 3, 9] {
         let compressed = zstd::encode_all(&data[..], level).unwrap();
@@ -1379,7 +1377,8 @@ fn decompress_c_long_match_lengths() {
     }
     // Now repeat the first 100 bytes many times (long match at offset 100)
     for _ in 0..500 {
-        data.extend_from_slice(&data[..100].to_vec());
+        let chunk = data[..100].to_vec();
+        data.extend_from_slice(&chunk);
     }
     for level in [1, 3, 9] {
         let compressed = zstd::encode_all(&data[..], level).unwrap();
@@ -1416,10 +1415,10 @@ fn decompress_c_offset_1_rle_like() {
     let mut data = Vec::with_capacity(50_000);
     // Start with a byte, then repeat it (offset=1 match)
     data.push(0xAB);
-    data.extend(std::iter::repeat(0xAB).take(10_000));
+    data.extend(std::iter::repeat_n(0xAB, 10_000));
     // Switch to a different byte
     data.push(0xCD);
-    data.extend(std::iter::repeat(0xCD).take(10_000));
+    data.extend(std::iter::repeat_n(0xCD, 10_000));
     // Mix
     data.extend(vec![0xAB, 0xCD].into_iter().cycle().take(10_000));
     for level in [1, 3, 9] {
@@ -1632,7 +1631,7 @@ fn roundtrip_exact_block_fill() {
     // Data that compresses to exactly one full block (128KB compressed)
     // Can't control compressed size, but test uncompressed sizes near 128KB
     for delta in [-2i32, -1, 0, 1, 2] {
-        let size = (128 * 1024) as i32 + delta;
+        let size = 128 * 1024 + delta;
         if size <= 0 {
             continue;
         }
@@ -1677,7 +1676,7 @@ fn roundtrip_mixed_compressible_incompressible() {
     let mut data = Vec::with_capacity(100_000);
     for i in 0u64..200 {
         if i % 2 == 0 {
-            data.extend(std::iter::repeat(((i * 7) & 0xFF) as u8).take(250));
+            data.extend(std::iter::repeat_n(((i * 7) & 0xFF) as u8, 250));
         } else {
             data.extend((0..250u64).map(|j| {
                 let x = (i * 1000 + j)
@@ -2435,6 +2434,471 @@ fn frame_decoder_with_limit_allows_within_limit() {
     let mut output = Vec::new();
     decoder.read_to_end(&mut output).unwrap();
     assert_eq!(output, data);
+}
+
+fn make_dict_samples() -> (Vec<Vec<u8>>, Vec<u8>) {
+    let samples: Vec<Vec<u8>> = (0..100)
+        .map(|i| {
+            format!(
+                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
+                i, i, i
+            )
+            .into_bytes()
+        })
+        .collect();
+
+    let mut concat = Vec::new();
+    let mut sizes = Vec::new();
+    for s in &samples {
+        concat.extend_from_slice(s);
+        sizes.push(s.len());
+    }
+
+    let mut dict_buf = vec![0u8; 16384];
+    let dict_size =
+        zstd_safe::train_from_buffer(&mut dict_buf, &concat, &sizes).expect("training failed");
+    dict_buf.truncate(dict_size);
+    (samples, dict_buf)
+}
+
+#[test]
+fn streaming_encoder_dict_c_decompress() {
+    use std::io::Write;
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let c_dict = zstd::dict::DecoderDictionary::copy(&dict_data);
+
+    for level in [-1, 1, 3, 4] {
+        for sample in &samples[..10] {
+            let mut encoder =
+                zrip::FrameEncoder::with_dict(Vec::new(), level, dict.clone()).unwrap();
+            encoder.write_all(sample).unwrap();
+            let compressed = encoder.finish().unwrap();
+
+            let mut decoder =
+                zstd::Decoder::with_prepared_dictionary(compressed.as_slice(), &c_dict).unwrap();
+            let mut decompressed = Vec::new();
+            std::io::Read::read_to_end(&mut decoder, &mut decompressed).unwrap();
+            assert_eq!(
+                &decompressed, sample,
+                "L{level} streaming encoder dict -> C decompress mismatch"
+            );
+        }
+    }
+}
+
+#[test]
+fn c_compress_dict_streaming_decoder() {
+    use std::io::Read;
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let c_dict = zstd::dict::EncoderDictionary::copy(&dict_data, 1);
+
+    for sample in &samples[..10] {
+        let mut encoder = zstd::Encoder::with_prepared_dictionary(Vec::new(), &c_dict).unwrap();
+        std::io::Write::write_all(&mut encoder, sample).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut decoder = zrip::FrameDecoder::with_dict(compressed.as_slice(), dict.clone());
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed).unwrap();
+        assert_eq!(&decompressed, sample);
+    }
+}
+
+#[test]
+fn streaming_dict_roundtrip() {
+    use std::io::{Read, Write};
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+
+    for level in [-1, 1, 3, 4] {
+        for sample in &samples[..10] {
+            let mut encoder =
+                zrip::FrameEncoder::with_dict(Vec::new(), level, dict.clone()).unwrap();
+            encoder.write_all(sample).unwrap();
+            let compressed = encoder.finish().unwrap();
+
+            let mut decoder = zrip::FrameDecoder::with_dict(compressed.as_slice(), dict.clone());
+            let mut decompressed = Vec::new();
+            decoder.read_to_end(&mut decompressed).unwrap();
+            assert_eq!(
+                &decompressed, sample,
+                "L{level} streaming dict roundtrip mismatch"
+            );
+        }
+    }
+}
+
+#[test]
+fn streaming_dict_multiblock() {
+    use std::io::Write;
+    let (_, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let c_dict = zstd::dict::DecoderDictionary::copy(&dict_data);
+
+    // Data larger than MAX_BLOCK_SIZE (128 KiB) to force multiple blocks
+    let data: Vec<u8> = (0..200_000)
+        .map(|i| {
+            let pattern = b"{\"id\":1234,\"name\":\"user_test\",\"email\":\"test@example.com\"}";
+            pattern[i % pattern.len()]
+        })
+        .collect();
+
+    for level in [1, 3] {
+        let mut encoder = zrip::FrameEncoder::with_dict(Vec::new(), level, dict.clone()).unwrap();
+        encoder.write_all(&data).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut decoder =
+            zstd::Decoder::with_prepared_dictionary(compressed.as_slice(), &c_dict).unwrap();
+        let mut decompressed = Vec::new();
+        std::io::Read::read_to_end(&mut decoder, &mut decompressed).unwrap();
+        assert_eq!(
+            decompressed.len(),
+            data.len(),
+            "L{level} multiblock size mismatch"
+        );
+        assert_eq!(decompressed, data, "L{level} multiblock content mismatch");
+    }
+}
+
+#[test]
+fn streaming_decoder_dict_mismatch() {
+    use std::io::Read;
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+
+    let compressed = zrip::compress_with_dict(&samples[0], 1, &dict).unwrap();
+
+    // Try to decode with no dict
+    let mut decoder = zrip::FrameDecoder::new(compressed.as_slice());
+    let mut out = Vec::new();
+    let err = decoder.read_to_end(&mut out).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+
+    // Train a different dict to get a different dict_id
+    let other_samples: Vec<Vec<u8>> = (0..100)
+        .map(|i| format!("completely different data pattern {i} abcdefghijk").into_bytes())
+        .collect();
+    let mut concat2 = Vec::new();
+    let mut sizes2 = Vec::new();
+    for s in &other_samples {
+        concat2.extend_from_slice(s);
+        sizes2.push(s.len());
+    }
+    let mut dict_buf2 = vec![0u8; 16384];
+    let dict_size2 =
+        zstd_safe::train_from_buffer(&mut dict_buf2, &concat2, &sizes2).expect("training failed");
+    let other_dict = zrip::dict::Dictionary::from_bytes(&dict_buf2[..dict_size2]).unwrap();
+
+    if other_dict.id() != dict.id() {
+        let mut decoder2 = zrip::FrameDecoder::with_dict(compressed.as_slice(), other_dict);
+        let mut out2 = Vec::new();
+        let err2 = decoder2.read_to_end(&mut out2).unwrap_err();
+        assert_eq!(err2.kind(), std::io::ErrorKind::InvalidData);
+    }
+}
+
+#[test]
+fn streaming_decoder_multiframe_seq_tables_reset() {
+    use std::io::Read;
+
+    // Frame 1: C zstd at level 9 (generates custom FSE tables)
+    let data1 = b"The quick brown fox jumps over the lazy dog. ".repeat(500);
+    let compressed1 = zstd::encode_all(data1.as_slice(), 9).unwrap();
+
+    // Frame 2: C zstd at level 1 (likely predefined tables)
+    let data2 = b"Simple data repeated many times for testing. ".repeat(100);
+    let compressed2 = zstd::encode_all(data2.as_slice(), 1).unwrap();
+
+    // Concatenate two frames
+    let mut multi = compressed1.clone();
+    multi.extend_from_slice(&compressed2);
+
+    let mut decoder = zrip::FrameDecoder::new(multi.as_slice());
+    let mut output = Vec::new();
+    decoder.read_to_end(&mut output).unwrap();
+
+    let mut expected = data1.to_vec();
+    expected.extend_from_slice(&data2);
+    assert_eq!(output, expected);
+}
+
+#[test]
+fn streaming_encoder_reset_reuses_buffers() {
+    use std::io::Write;
+    let data1 = b"first frame data repeated enough to compress well ".repeat(50);
+    let data2 = b"second frame different content also repeated lots ".repeat(50);
+
+    let mut encoder = zrip::FrameEncoder::new(Vec::new(), 1).unwrap();
+    encoder.write_all(&data1).unwrap();
+    let out1 = encoder.reset(Vec::new()).unwrap();
+
+    encoder.write_all(&data2).unwrap();
+    let out2 = encoder.finish().unwrap();
+
+    assert_eq!(zrip::decompress(&out1).unwrap(), data1);
+    assert_eq!(zrip::decompress(&out2).unwrap(), data2);
+}
+
+#[test]
+fn streaming_encoder_reset_with_dict() {
+    use std::io::Write;
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+
+    let mut encoder = zrip::FrameEncoder::with_dict(Vec::new(), 1, dict.clone()).unwrap();
+
+    for sample in &samples[..5] {
+        encoder.write_all(sample).unwrap();
+        let compressed = encoder.reset(Vec::new()).unwrap();
+        let decompressed = zrip::decompress_with_dict(&compressed, &dict).unwrap();
+        assert_eq!(&decompressed, sample);
+    }
+
+    encoder.write_all(&samples[5]).unwrap();
+    let compressed = encoder.finish().unwrap();
+    assert_eq!(
+        zrip::decompress_with_dict(&compressed, &dict).unwrap(),
+        samples[5]
+    );
+}
+
+#[test]
+fn streaming_decoder_reset() {
+    use std::io::Read;
+    let data1 = b"decoder reset test frame one ".repeat(100);
+    let data2 = b"decoder reset test frame two ".repeat(100);
+    let c1 = zrip::compress(&data1, 1).unwrap();
+    let c2 = zrip::compress(&data2, 1).unwrap();
+
+    let mut decoder = zrip::FrameDecoder::new(c1.as_slice());
+    let mut out1 = Vec::new();
+    decoder.read_to_end(&mut out1).unwrap();
+    assert_eq!(out1, data1);
+
+    decoder.reset(c2.as_slice());
+    let mut out2 = Vec::new();
+    decoder.read_to_end(&mut out2).unwrap();
+    assert_eq!(out2, data2);
+}
+
+#[test]
+fn streaming_decoder_reset_with_dict() {
+    use std::io::Read;
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+
+    let compressed: Vec<Vec<u8>> = samples[..5]
+        .iter()
+        .map(|s| zrip::compress_with_dict(s, 1, &dict).unwrap())
+        .collect();
+
+    let mut decoder = zrip::FrameDecoder::with_dict(compressed[0].as_slice(), dict.clone());
+
+    for (i, sample) in samples[..5].iter().enumerate() {
+        if i > 0 {
+            decoder.reset(compressed[i].as_slice());
+        }
+        let mut out = Vec::new();
+        decoder.read_to_end(&mut out).unwrap();
+        assert_eq!(&out, sample);
+    }
+}
+
+#[test]
+fn streaming_encoder_reset_empty_frame() {
+    use std::io::Write;
+    let mut encoder = zrip::FrameEncoder::new(Vec::new(), 1).unwrap();
+    let out1 = encoder.reset(Vec::new()).unwrap();
+    assert_eq!(zrip::decompress(&out1).unwrap(), b"");
+
+    encoder.write_all(b"after empty").unwrap();
+    let out2 = encoder.finish().unwrap();
+    assert_eq!(zrip::decompress(&out2).unwrap(), b"after empty");
+}
+
+#[test]
+fn streaming_encoder_reset_multiple_nodict() {
+    use std::io::Write;
+    let mut encoder = zrip::FrameEncoder::new(Vec::new(), 3).unwrap();
+    for i in 0..5 {
+        let data = format!("frame {i} with some repeated content to compress ").repeat(20);
+        encoder.write_all(data.as_bytes()).unwrap();
+        let out = encoder.reset(Vec::new()).unwrap();
+        assert_eq!(zrip::decompress(&out).unwrap(), data.as_bytes());
+    }
+    encoder.write_all(b"final").unwrap();
+    let out = encoder.finish().unwrap();
+    assert_eq!(zrip::decompress(&out).unwrap(), b"final");
+}
+
+#[test]
+fn streaming_dict_multiblock_reset() {
+    use std::io::Write;
+    let (_, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let c_dict = zstd::dict::DecoderDictionary::copy(&dict_data);
+
+    let data: Vec<u8> = (0..200_000)
+        .map(|i| {
+            let pattern = b"{\"id\":1234,\"name\":\"user_test\",\"email\":\"test@example.com\"}";
+            pattern[i % pattern.len()]
+        })
+        .collect();
+
+    let mut encoder = zrip::FrameEncoder::with_dict(Vec::new(), 1, dict.clone()).unwrap();
+    for _ in 0..3 {
+        encoder.write_all(&data).unwrap();
+        let compressed = encoder.reset(Vec::new()).unwrap();
+        let mut c_dec =
+            zstd::Decoder::with_prepared_dictionary(compressed.as_slice(), &c_dict).unwrap();
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(&mut c_dec, &mut out).unwrap();
+        assert_eq!(out, data);
+    }
+}
+
+#[test]
+fn streaming_encoder_reset_c_zstd_interop() {
+    use std::io::Write;
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let c_dict = zstd::dict::DecoderDictionary::copy(&dict_data);
+
+    let mut encoder = zrip::FrameEncoder::with_dict(Vec::new(), 1, dict).unwrap();
+    for sample in &samples[..5] {
+        encoder.write_all(sample).unwrap();
+        let compressed = encoder.reset(Vec::new()).unwrap();
+        let mut c_dec =
+            zstd::Decoder::with_prepared_dictionary(compressed.as_slice(), &c_dict).unwrap();
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(&mut c_dec, &mut out).unwrap();
+        assert_eq!(&out, sample);
+    }
+}
+
+#[test]
+fn streaming_decoder_with_dict_on_nodict_frame() {
+    use std::io::Read;
+    let (_, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let data = b"plain frame with no dictionary".repeat(10);
+    let compressed = zrip::compress(&data, 1).unwrap();
+
+    let mut decoder = zrip::FrameDecoder::with_dict(compressed.as_slice(), dict);
+    let mut out = Vec::new();
+    decoder.read_to_end(&mut out).unwrap();
+    assert_eq!(out, data);
+}
+
+#[cfg(feature = "dict_builder")]
+#[test]
+fn streaming_dict_zrip_trained_roundtrip() {
+    use std::io::{Read, Write};
+
+    let samples: Vec<Vec<u8>> = (0..100)
+        .map(|i| {
+            format!(
+                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
+                i, i, i
+            )
+            .into_bytes()
+        })
+        .collect();
+    let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
+    let dict = zrip::dict::train_dict_fastcover(
+        &sample_refs,
+        4096,
+        zrip::dict::fastcover::FastCoverParams::default(),
+    );
+
+    for level in [-1, 1, 3, 4] {
+        for sample in &samples[..10] {
+            let mut encoder =
+                zrip::FrameEncoder::with_dict(Vec::new(), level, dict.clone()).unwrap();
+            encoder.write_all(sample).unwrap();
+            let compressed = encoder.finish().unwrap();
+
+            let mut decoder = zrip::FrameDecoder::with_dict(compressed.as_slice(), dict.clone());
+            let mut decompressed = Vec::new();
+            decoder.read_to_end(&mut decompressed).unwrap();
+            assert_eq!(
+                &decompressed, sample,
+                "L{level} zrip-trained streaming dict roundtrip mismatch"
+            );
+
+            let oneshot = zrip::decompress_with_dict(&compressed, &dict).unwrap();
+            assert_eq!(&oneshot, sample);
+        }
+    }
+}
+
+#[cfg(feature = "dict_builder")]
+#[test]
+fn streaming_dict_empty_input() {
+    use std::io::{Read, Write};
+
+    let samples: Vec<Vec<u8>> = (0..50)
+        .map(|i| format!("sample data item {i} with some repeated content").into_bytes())
+        .collect();
+    let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
+    let dict = zrip::dict::train_dict_fastcover(
+        &sample_refs,
+        4096,
+        zrip::dict::fastcover::FastCoverParams::default(),
+    );
+
+    let mut encoder = zrip::FrameEncoder::with_dict(Vec::new(), 1, dict.clone()).unwrap();
+    encoder.write_all(b"").unwrap();
+    let compressed = encoder.finish().unwrap();
+
+    let mut decoder = zrip::FrameDecoder::with_dict(compressed.as_slice(), dict.clone());
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed).unwrap();
+    assert!(decompressed.is_empty());
+}
+
+#[cfg(feature = "dict_builder")]
+#[test]
+fn streaming_dict_single_byte_writes() {
+    use std::io::{Read, Write};
+
+    let samples: Vec<Vec<u8>> = (0..100)
+        .map(|i| {
+            format!(
+                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
+                i, i, i
+            )
+            .into_bytes()
+        })
+        .collect();
+    let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
+    let dict = zrip::dict::train_dict_fastcover(
+        &sample_refs,
+        4096,
+        zrip::dict::fastcover::FastCoverParams::default(),
+    );
+
+    let data = &samples[50];
+    let mut encoder = zrip::FrameEncoder::with_dict(Vec::new(), 1, dict.clone()).unwrap();
+    for &b in data.iter() {
+        encoder.write_all(&[b]).unwrap();
+    }
+    let compressed = encoder.finish().unwrap();
+
+    let mut decoder = zrip::FrameDecoder::with_dict(compressed.as_slice(), dict.clone());
+    let mut decompressed = Vec::new();
+    let mut buf = [0u8; 1];
+    loop {
+        match decoder.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => decompressed.extend_from_slice(&buf[..n]),
+            Err(e) => panic!("decode failed: {e}"),
+        }
+    }
+    assert_eq!(&decompressed, data);
 }
 
 #[test]

@@ -81,3 +81,13 @@ doc = false
 name = "fuzz_corrupt_streaming"
 path = "fuzz_targets/corrupt_streaming.rs"
 doc = false
+
+[[bin]]
+name = "fuzz_roundtrip_streaming_dict"
+path = "fuzz_targets/roundtrip_streaming_dict.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_corrupt_streaming_dict"
+path = "fuzz_targets/corrupt_streaming_dict.rs"
+doc = false

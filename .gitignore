@@ -3,6 +3,7 @@
 /fuzz/target/
 /fuzz/corpus/
 /fuzz/artifacts/
-/corpus/
+/bench/corpus/
+/bench/target/
 /doc/charts/
 Cargo.lock
