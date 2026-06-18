@@ -1,5 +1,7 @@
 pub mod decode;
+pub(crate) mod decode_4stream;
 pub mod encode;
+pub(crate) mod primitives;
 pub mod weights;
 
 pub const MAX_SYMBOL_VALUE: usize = 255;

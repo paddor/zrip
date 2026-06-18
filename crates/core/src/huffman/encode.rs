@@ -1,8 +1,11 @@
+#![forbid(unsafe_code)]
+
 #[cfg(feature = "alloc")]
 use alloc::vec;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
+use super::primitives;
 use crate::huffman::{MAX_BITS, MAX_SYMBOL_VALUE};
 
 pub struct HuffmanEncodeTable {
@@ -35,8 +38,6 @@ impl HuffmanEncodeTable {
             return None;
         }
 
-        // Direct weight encoding supports at most 128 explicit symbols.
-        // Fall back to raw literals for blocks with more distinct values.
         if max_sym as usize > 128 {
             return None;
         }
@@ -96,25 +97,18 @@ impl HuffmanEncodeTable {
         let mut bits: u64 = 0;
         let mut bits_used: u8 = 0;
         let mut wpos: usize = 0;
-        let codes = self.codes.as_ptr();
-        let nbits = self.num_bits.as_ptr();
 
         macro_rules! flush_bits {
             () => {
                 if wpos + 8 > buf.capacity() {
-                    unsafe {
-                        buf.set_len(wpos);
-                    }
+                    primitives::set_vec_len(buf, wpos);
                     buf.reserve(64);
                 }
-                unsafe {
-                    let ptr = buf.as_mut_ptr().add(wpos);
-                    (ptr as *mut u64).write_unaligned(bits.to_le());
-                    let nb = (bits_used >> 3) as usize;
-                    wpos += nb;
-                    bits >>= nb << 3;
-                    bits_used &= 7;
-                }
+                primitives::bitstream_flush_vec(buf, wpos, bits);
+                let nb = (bits_used >> 3) as usize;
+                wpos += nb;
+                bits >>= nb << 3;
+                bits_used &= 7;
             };
         }
 
@@ -122,9 +116,9 @@ impl HuffmanEncodeTable {
         while pos >= unroll {
             pos -= unroll;
             for j in 0..unroll {
-                let b = unsafe { *data.get_unchecked(pos + (unroll - 1 - j)) };
-                let c = unsafe { *codes.add(b as usize) } as u64;
-                let n = unsafe { *nbits.add(b as usize) };
+                let b = primitives::get_unchecked_byte(data, pos + (unroll - 1 - j));
+                let c = primitives::get_unchecked_u16(&self.codes, b as usize) as u64;
+                let n = primitives::get_unchecked_u8_arr(&self.num_bits, b as usize);
                 bits |= c << bits_used;
                 bits_used += n;
             }
@@ -134,9 +128,9 @@ impl HuffmanEncodeTable {
         }
         while pos > 0 {
             pos -= 1;
-            let b = unsafe { *data.get_unchecked(pos) };
-            let c = unsafe { *codes.add(b as usize) } as u64;
-            let n = unsafe { *nbits.add(b as usize) };
+            let b = primitives::get_unchecked_byte(data, pos);
+            let c = primitives::get_unchecked_u16(&self.codes, b as usize) as u64;
+            let n = primitives::get_unchecked_u8_arr(&self.num_bits, b as usize);
             bits |= c << bits_used;
             bits_used += n;
             if bits_used >= 32 {
@@ -144,9 +138,7 @@ impl HuffmanEncodeTable {
             }
         }
 
-        unsafe {
-            buf.set_len(wpos);
-        }
+        primitives::set_vec_len(buf, wpos);
         bits |= 1u64 << bits_used;
         bits_used += 1;
         while bits_used > 0 {

@@ -1,6 +1,9 @@
+#![forbid(unsafe_code)]
+
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
+use crate::primitives;
 use crate::sequences::{SequenceDecodeTables, compute_offset};
 use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
@@ -30,8 +33,8 @@ pub fn decode_execute_sequences(
     output.reserve(zrip_core::frame::MAX_BLOCK_SIZE + WILDCOPY_OVERLENGTH);
 
     let out_base = output.as_mut_ptr();
-    let mut op = unsafe { out_base.add(output.len()) };
-    let op_limit = unsafe { out_base.add(output.capacity() - WILDCOPY_OVERLENGTH) };
+    let mut op = primitives::ptr_add_mut(out_base, output.len());
+    let op_limit = primitives::ptr_add_mut(out_base, output.capacity() - WILDCOPY_OVERLENGTH);
     let lit_ptr = literals.as_ptr();
     let mut lit_off: usize = 0;
     let of_mask = ((1u32 << tables.of_accuracy) - 1) as usize;
@@ -42,27 +45,30 @@ pub fn decode_execute_sequences(
         ($literal_length:expr, $match_length:expr, $offset:expr) => {{
             let ll = $literal_length as usize;
             let ml_check = $match_length as usize;
-            if unlikely(unsafe { op.add(ll + ml_check) } > op_limit) {
+            if unlikely(primitives::ptr_gt(
+                primitives::ptr_add_mut(op, ll + ml_check) as *const u8,
+                op_limit as *const u8,
+            )) {
                 return Err(DecompressError::CorruptSequences);
             }
             if unlikely(lit_off + ll > literals.len()) {
                 return Err(DecompressError::CorruptLiterals);
             }
-            unsafe {
-                let src = lit_ptr.add(lit_off);
-                let lit_remaining = literals.len() - lit_off;
-                if lit_remaining >= 16 {
-                    (op as *mut u64).write_unaligned((src as *const u64).read_unaligned());
-                    (op.add(8) as *mut u64)
-                        .write_unaligned((src.add(8) as *const u64).read_unaligned());
-                    if ll > 16 {
-                        core::ptr::copy_nonoverlapping(src.add(16), op.add(16), ll - 16);
-                    }
-                } else {
-                    core::ptr::copy_nonoverlapping(src, op, ll);
+            let src = primitives::ptr_add_const(lit_ptr, lit_off);
+            let lit_remaining = literals.len() - lit_off;
+            if lit_remaining >= 16 {
+                primitives::output_write_16(op, src);
+                if ll > 16 {
+                    primitives::output_copy(
+                        primitives::ptr_add_const(src, 16),
+                        primitives::ptr_add_mut(op, 16),
+                        ll - 16,
+                    );
                 }
+            } else {
+                primitives::output_copy(src, op, ll);
             }
-            op = unsafe { op.add(ll) };
+            op = primitives::ptr_add_mut(op, ll);
             lit_off += ll;
 
             let ml = $match_length as usize;
@@ -70,26 +76,24 @@ pub fn decode_execute_sequences(
             if unlikely(off == 0) {
                 return Err(DecompressError::CorruptSequences);
             }
-            let out_pos = unsafe { op.offset_from(out_base) } as usize;
+            let out_pos = primitives::ptr_offset_from_mut(op, out_base);
             if unlikely(off > out_pos + history.len()) {
                 return Err(DecompressError::CorruptSequences);
             }
-            unsafe {
-                if likely(off <= out_pos) {
-                    zrip_core::simd::scalar::copy_match(op, off, ml);
-                } else {
-                    copy_match_from_history(op, history, off, out_pos, ml);
-                }
+            if likely(off <= out_pos) {
+                primitives::copy_match_inbuf(op, off, ml);
+            } else {
+                primitives::copy_match_from_history(op, history, off, out_pos, ml);
             }
-            op = unsafe { op.add(ml) };
+            op = primitives::ptr_add_mut(op, ml);
         }};
     }
 
     macro_rules! decode_and_execute_update {
         ($rev_reader:expr, $offsets:expr) => {{
-            let of_e = unsafe { *tables.of_table.get_unchecked(of_state as usize & of_mask) };
-            let ml_e = unsafe { *tables.ml_table.get_unchecked(ml_state as usize & ml_mask) };
-            let ll_e = unsafe { *tables.ll_table.get_unchecked(ll_state as usize & ll_mask) };
+            let of_e = primitives::fse_table_lookup(&tables.of_table, of_state as usize & of_mask);
+            let ml_e = primitives::fse_table_lookup(&tables.ml_table, ml_state as usize & ml_mask);
+            let ll_e = primitives::fse_table_lookup(&tables.ll_table, ll_state as usize & ll_mask);
 
             let of_extra = $rev_reader.read_bits_branchless(of_e.extra_bits);
             let offset_value = of_e.baseline_value + of_extra;
@@ -130,9 +134,9 @@ pub fn decode_execute_sequences(
     }
     while seq_idx < last_seq {
         rev_reader.refill();
-        let of_e = unsafe { *tables.of_table.get_unchecked(of_state as usize & of_mask) };
-        let ml_e = unsafe { *tables.ml_table.get_unchecked(ml_state as usize & ml_mask) };
-        let ll_e = unsafe { *tables.ll_table.get_unchecked(ll_state as usize & ll_mask) };
+        let of_e = primitives::fse_table_lookup(&tables.of_table, of_state as usize & of_mask);
+        let ml_e = primitives::fse_table_lookup(&tables.ml_table, ml_state as usize & ml_mask);
+        let ll_e = primitives::fse_table_lookup(&tables.ll_table, ll_state as usize & ll_mask);
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
@@ -154,9 +158,9 @@ pub fn decode_execute_sequences(
     // Last sequence: no FSE state update
     {
         rev_reader.refill();
-        let of_e = unsafe { *tables.of_table.get_unchecked(of_state as usize & of_mask) };
-        let ml_e = unsafe { *tables.ml_table.get_unchecked(ml_state as usize & ml_mask) };
-        let ll_e = unsafe { *tables.ll_table.get_unchecked(ll_state as usize & ll_mask) };
+        let of_e = primitives::fse_table_lookup(&tables.of_table, of_state as usize & of_mask);
+        let ml_e = primitives::fse_table_lookup(&tables.ml_table, ml_state as usize & ml_mask);
+        let ll_e = primitives::fse_table_lookup(&tables.ll_table, ll_state as usize & ll_mask);
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
@@ -171,44 +175,21 @@ pub fn decode_execute_sequences(
 
     if lit_off < literals.len() {
         let remaining = literals.len() - lit_off;
-        if unsafe { op.add(remaining) } > unsafe { out_base.add(output.capacity()) } {
+        if primitives::ptr_gt(
+            primitives::ptr_add_mut(op, remaining) as *const u8,
+            primitives::ptr_add_mut(out_base, output.capacity()) as *const u8,
+        ) {
             return Err(DecompressError::CorruptSequences);
         }
-        unsafe {
-            core::ptr::copy_nonoverlapping(lit_ptr.add(lit_off), op, remaining);
-        }
-        op = unsafe { op.add(remaining) };
+        primitives::output_copy(primitives::ptr_add_const(lit_ptr, lit_off), op, remaining);
+        op = primitives::ptr_add_mut(op, remaining);
     }
 
-    let new_len = unsafe { op.offset_from(out_base) } as usize;
+    let new_len = primitives::ptr_offset_from_mut(op, out_base);
     if new_len > output.capacity() {
         return Err(DecompressError::CorruptSequences);
     }
-    unsafe {
-        output.set_len(new_len);
-    }
+    primitives::set_output_len(output, new_len);
 
     Ok(())
-}
-
-#[inline(always)]
-unsafe fn copy_match_from_history(
-    op: *mut u8,
-    history: &[u8],
-    offset: usize,
-    out_pos: usize,
-    match_length: usize,
-) {
-    let history_reach = offset - out_pos;
-    let history_start = history.len() - history_reach;
-    let from_history = history_reach.min(match_length);
-    unsafe {
-        core::ptr::copy_nonoverlapping(history.as_ptr().add(history_start), op, from_history);
-    }
-    let remaining = match_length - from_history;
-    if remaining > 0 {
-        unsafe {
-            zrip_core::simd::scalar::copy_match(op.add(from_history), offset, remaining);
-        }
-    }
 }

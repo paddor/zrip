@@ -9,6 +9,7 @@ pub(crate) mod block_encoder;
 pub mod context;
 pub(crate) mod dfast;
 pub(crate) mod fast;
+pub(crate) mod primitives;
 pub(crate) mod sequences;
 pub mod strategy;
 #[cfg(feature = "std")]

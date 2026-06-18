@@ -9,6 +9,7 @@ pub(crate) mod block_decoder;
 pub mod context;
 pub(crate) mod exec;
 pub(crate) mod literals;
+pub(crate) mod primitives;
 pub(crate) mod ring_buffer;
 pub(crate) mod sequences;
 #[cfg(feature = "std")]
