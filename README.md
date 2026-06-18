@@ -157,15 +157,17 @@ provide the same reuse for one-shot compression.
 
 ## Safety
 
-All compression and decompression logic is `#![forbid(unsafe_code)]`. Unsafe
-is confined to two places:
+zrip uses unsafe for performance, not a zero-unsafe codebase. All algorithm
+and control-flow code is `#![forbid(unsafe_code)]`. Unsafe is confined to
+small, auditable leaf modules:
 
-- `unchecked.rs` modules inside `bitstream/`, `decode/`, `encode/`, `fse/`,
-  `huffman/`: small `unsafe fn` wrappers (`get_unchecked`, `read_unaligned`)
-  with `debug_assert!` guards, called only after block-level bounds checks.
-- `simd/`: intrinsics and raw pointer arithmetic for wildcopy, copy-match,
-  and the SIMD sequence decoder. Dispatch happens at block boundaries, not
-  per-sequence.
+- `primitives.rs` modules in `bitstream/`, `huffman/`, `encode/`, `decode/`:
+  `#[inline(always)]` wrappers around `get_unchecked`, `read_unaligned`,
+  `set_len`, and `copy_nonoverlapping` with `debug_assert!` guards.
+- `simd/` and `simd_decode/`: intrinsics and raw pointer arithmetic for
+  wildcopy, copy-match, and the fused SIMD sequence decoder.
+- `huffman/decode_4stream.rs`: pointer-based interleaved 4-stream Huffman
+  decoder.
 
 ## Levels
 

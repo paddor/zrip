@@ -1,20 +1,10 @@
+mod primitives;
+
 const PRIME64_1: u64 = 0x9E3779B185EBCA87;
 const PRIME64_2: u64 = 0xC2B2AE3D27D4EB4F;
 const PRIME64_3: u64 = 0x165667B19E3779F9;
 const PRIME64_4: u64 = 0x85EBCA77C2B2AE63;
 const PRIME64_5: u64 = 0x27D4EB2F165667C5;
-
-#[inline(always)]
-fn read_u32_le(data: &[u8], offset: usize) -> u32 {
-    debug_assert!(offset + 4 <= data.len());
-    u32::from_le(unsafe { (data.as_ptr().add(offset) as *const u32).read_unaligned() })
-}
-
-#[inline(always)]
-fn read_u64_le(data: &[u8], offset: usize) -> u64 {
-    debug_assert!(offset + 8 <= data.len());
-    u64::from_le(unsafe { (data.as_ptr().add(offset) as *const u64).read_unaligned() })
-}
 
 #[inline]
 fn xxh64_round(mut acc: u64, input: u64) -> u64 {
@@ -41,43 +31,7 @@ pub fn xxh64(data: &[u8], seed: u64) -> u64 {
         let mut v3 = seed;
         let mut v4 = seed.wrapping_sub(PRIME64_1);
 
-        unsafe {
-            let mut p = data.as_ptr();
-            let bulk_end = data.as_ptr().add(len & !31);
-            let unroll_end = data.as_ptr().add(len & !127);
-
-            while p < unroll_end {
-                v1 = xxh64_round(v1, (p as *const u64).read_unaligned().to_le());
-                v2 = xxh64_round(v2, (p.add(8) as *const u64).read_unaligned().to_le());
-                v3 = xxh64_round(v3, (p.add(16) as *const u64).read_unaligned().to_le());
-                v4 = xxh64_round(v4, (p.add(24) as *const u64).read_unaligned().to_le());
-
-                v1 = xxh64_round(v1, (p.add(32) as *const u64).read_unaligned().to_le());
-                v2 = xxh64_round(v2, (p.add(40) as *const u64).read_unaligned().to_le());
-                v3 = xxh64_round(v3, (p.add(48) as *const u64).read_unaligned().to_le());
-                v4 = xxh64_round(v4, (p.add(56) as *const u64).read_unaligned().to_le());
-
-                v1 = xxh64_round(v1, (p.add(64) as *const u64).read_unaligned().to_le());
-                v2 = xxh64_round(v2, (p.add(72) as *const u64).read_unaligned().to_le());
-                v3 = xxh64_round(v3, (p.add(80) as *const u64).read_unaligned().to_le());
-                v4 = xxh64_round(v4, (p.add(88) as *const u64).read_unaligned().to_le());
-
-                v1 = xxh64_round(v1, (p.add(96) as *const u64).read_unaligned().to_le());
-                v2 = xxh64_round(v2, (p.add(104) as *const u64).read_unaligned().to_le());
-                v3 = xxh64_round(v3, (p.add(112) as *const u64).read_unaligned().to_le());
-                v4 = xxh64_round(v4, (p.add(120) as *const u64).read_unaligned().to_le());
-
-                p = p.add(128);
-            }
-
-            while p < bulk_end {
-                v1 = xxh64_round(v1, (p as *const u64).read_unaligned().to_le());
-                v2 = xxh64_round(v2, (p.add(8) as *const u64).read_unaligned().to_le());
-                v3 = xxh64_round(v3, (p.add(16) as *const u64).read_unaligned().to_le());
-                v4 = xxh64_round(v4, (p.add(24) as *const u64).read_unaligned().to_le());
-                p = p.add(32);
-            }
-        }
+        primitives::bulk_rounds(data, &mut v1, &mut v2, &mut v3, &mut v4);
 
         h64 = v1
             .rotate_left(1)
@@ -98,7 +52,7 @@ pub fn xxh64(data: &[u8], seed: u64) -> u64 {
     let tail = &data[len & !31..];
     let mut remaining = tail;
     while remaining.len() >= 8 {
-        let k1 = xxh64_round(0, read_u64_le(remaining, 0));
+        let k1 = xxh64_round(0, primitives::read_u64_le(remaining, 0));
         h64 ^= k1;
         h64 = h64
             .rotate_left(27)
@@ -108,7 +62,7 @@ pub fn xxh64(data: &[u8], seed: u64) -> u64 {
     }
 
     while remaining.len() >= 4 {
-        h64 ^= (read_u32_le(remaining, 0) as u64).wrapping_mul(PRIME64_1);
+        h64 ^= (primitives::read_u32_le(remaining, 0) as u64).wrapping_mul(PRIME64_1);
         h64 = h64
             .rotate_left(23)
             .wrapping_mul(PRIME64_2)
@@ -171,65 +125,17 @@ impl Xxh64State {
             self.buf[self.buf_used..32].copy_from_slice(&data[..fill]);
             data = &data[fill..];
 
-            self.v1 = xxh64_round(self.v1, read_u64_le(&self.buf, 0));
-            self.v2 = xxh64_round(self.v2, read_u64_le(&self.buf, 8));
-            self.v3 = xxh64_round(self.v3, read_u64_le(&self.buf, 16));
-            self.v4 = xxh64_round(self.v4, read_u64_le(&self.buf, 24));
+            self.v1 = xxh64_round(self.v1, primitives::read_u64_le(&self.buf, 0));
+            self.v2 = xxh64_round(self.v2, primitives::read_u64_le(&self.buf, 8));
+            self.v3 = xxh64_round(self.v3, primitives::read_u64_le(&self.buf, 16));
+            self.v4 = xxh64_round(self.v4, primitives::read_u64_le(&self.buf, 24));
             self.buf_used = 0;
             self.large = true;
         }
 
         if data.len() >= 32 {
             self.large = true;
-
-            let mut v1 = self.v1;
-            let mut v2 = self.v2;
-            let mut v3 = self.v3;
-            let mut v4 = self.v4;
-
-            unsafe {
-                let mut p = data.as_ptr();
-                let bulk_end = data.as_ptr().add(data.len() & !31);
-                let unroll_end = data.as_ptr().add(data.len() & !127);
-
-                while p < unroll_end {
-                    v1 = xxh64_round(v1, (p as *const u64).read_unaligned().to_le());
-                    v2 = xxh64_round(v2, (p.add(8) as *const u64).read_unaligned().to_le());
-                    v3 = xxh64_round(v3, (p.add(16) as *const u64).read_unaligned().to_le());
-                    v4 = xxh64_round(v4, (p.add(24) as *const u64).read_unaligned().to_le());
-
-                    v1 = xxh64_round(v1, (p.add(32) as *const u64).read_unaligned().to_le());
-                    v2 = xxh64_round(v2, (p.add(40) as *const u64).read_unaligned().to_le());
-                    v3 = xxh64_round(v3, (p.add(48) as *const u64).read_unaligned().to_le());
-                    v4 = xxh64_round(v4, (p.add(56) as *const u64).read_unaligned().to_le());
-
-                    v1 = xxh64_round(v1, (p.add(64) as *const u64).read_unaligned().to_le());
-                    v2 = xxh64_round(v2, (p.add(72) as *const u64).read_unaligned().to_le());
-                    v3 = xxh64_round(v3, (p.add(80) as *const u64).read_unaligned().to_le());
-                    v4 = xxh64_round(v4, (p.add(88) as *const u64).read_unaligned().to_le());
-
-                    v1 = xxh64_round(v1, (p.add(96) as *const u64).read_unaligned().to_le());
-                    v2 = xxh64_round(v2, (p.add(104) as *const u64).read_unaligned().to_le());
-                    v3 = xxh64_round(v3, (p.add(112) as *const u64).read_unaligned().to_le());
-                    v4 = xxh64_round(v4, (p.add(120) as *const u64).read_unaligned().to_le());
-
-                    p = p.add(128);
-                }
-
-                while p < bulk_end {
-                    v1 = xxh64_round(v1, (p as *const u64).read_unaligned().to_le());
-                    v2 = xxh64_round(v2, (p.add(8) as *const u64).read_unaligned().to_le());
-                    v3 = xxh64_round(v3, (p.add(16) as *const u64).read_unaligned().to_le());
-                    v4 = xxh64_round(v4, (p.add(24) as *const u64).read_unaligned().to_le());
-                    p = p.add(32);
-                }
-            }
-
-            self.v1 = v1;
-            self.v2 = v2;
-            self.v3 = v3;
-            self.v4 = v4;
-
+            primitives::bulk_rounds(data, &mut self.v1, &mut self.v2, &mut self.v3, &mut self.v4);
             let consumed = data.len() & !31;
             data = &data[consumed..];
         }
@@ -266,7 +172,7 @@ impl Xxh64State {
         let mut offset = 0;
 
         while offset + 8 <= len {
-            let k1 = xxh64_round(0, read_u64_le(data, offset));
+            let k1 = xxh64_round(0, primitives::read_u64_le(data, offset));
             h64 ^= k1;
             h64 = h64
                 .rotate_left(27)
@@ -276,7 +182,7 @@ impl Xxh64State {
         }
 
         while offset + 4 <= len {
-            h64 ^= (read_u32_le(data, offset) as u64).wrapping_mul(PRIME64_1);
+            h64 ^= (primitives::read_u32_le(data, offset) as u64).wrapping_mul(PRIME64_1);
             h64 = h64
                 .rotate_left(23)
                 .wrapping_mul(PRIME64_2)
@@ -317,7 +223,6 @@ mod tests {
     fn large_input() {
         let data: Vec<u8> = (0u8..=255).cycle().take(1000).collect();
         let h = xxh64(&data, 0);
-        // Verify streaming produces the same result
         let mut state = Xxh64State::new(0);
         state.update(&data);
         assert_eq!(state.finish(), h);

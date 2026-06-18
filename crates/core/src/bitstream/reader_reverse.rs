@@ -1,3 +1,6 @@
+#![forbid(unsafe_code)]
+
+use crate::bitstream::primitives;
 use crate::error::DecompressError;
 
 /// Reverse bitstream reader using C zstd's bitsConsumed model.
@@ -30,7 +33,7 @@ impl<'a> ReverseBitReader<'a> {
         let ptr = if data.len() >= 8 { data.len() - 8 } else { 0 };
 
         let container = if data.len() >= 8 {
-            unsafe { u64::from_le((data.as_ptr().add(ptr) as *const u64).read_unaligned()) }
+            primitives::read_u64_le_unaligned(data, ptr)
         } else {
             let mut val = 0u64;
             for (i, &b) in data.iter().enumerate() {
@@ -66,14 +69,12 @@ impl<'a> ReverseBitReader<'a> {
         self.ptr -= actual_shift;
         self.bits_consumed -= (actual_shift as u32) * 8;
         if self.ptr + 8 <= self.data.len() {
-            self.container = unsafe {
-                u64::from_le((self.data.as_ptr().add(self.ptr) as *const u64).read_unaligned())
-            };
+            self.container = primitives::read_u64_le_unaligned(self.data, self.ptr);
         } else {
             let mut val = 0u64;
             let avail = self.data.len() - self.ptr;
             for i in 0..avail {
-                val |= (unsafe { *self.data.get_unchecked(self.ptr + i) } as u64) << (i * 8);
+                val |= (primitives::get_byte_unchecked(self.data, self.ptr + i) as u64) << (i * 8);
             }
             self.container = val;
         }
@@ -140,9 +141,7 @@ impl<'a> ReverseBitReader<'a> {
         let byte_shift = (self.bits_consumed >> 3) as usize;
         self.ptr -= byte_shift;
         self.bits_consumed -= (byte_shift as u32) * 8;
-        self.container = unsafe {
-            u64::from_le((self.data.as_ptr().add(self.ptr) as *const u64).read_unaligned())
-        };
+        self.container = primitives::read_u64_le_unaligned(self.data, self.ptr);
     }
 
     #[inline]

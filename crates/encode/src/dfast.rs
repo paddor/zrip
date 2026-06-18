@@ -1,8 +1,11 @@
+#![forbid(unsafe_code)]
+
 #[cfg(feature = "alloc")]
 use alloc::vec;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
+use crate::primitives;
 use crate::strategy::LevelParams;
 use zrip_core::Sequence;
 use zrip_core::hash::PRIME64_1;
@@ -103,43 +106,22 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
         params.chain_log
     };
 
-    let src_ptr = src.as_ptr();
-    let ht_short = hash_short.as_mut_ptr();
-    let ht_long = hash_long.as_mut_ptr();
-
     let mut rep0 = rep_offsets[0];
     let mut rep1 = rep_offsets[1];
     let mut rep2 = rep_offsets[2];
     let mut anchor = block_start;
     let mut ip0 = block_start;
 
-    unsafe {
-        core::hint::assert_unchecked(rep0 > 0);
-        core::hint::assert_unchecked(rep1 > 0);
-    }
-
-    #[inline(always)]
-    unsafe fn rdp32(p: *const u8, pos: usize) -> u32 {
-        unsafe { (p.add(pos) as *const u32).read_unaligned() }
-    }
-
-    #[inline(always)]
-    unsafe fn rdp64(p: *const u8, pos: usize) -> u64 {
-        unsafe { (p.add(pos) as *const u64).read_unaligned() }
-    }
+    primitives::assert_rep_valid(rep0, rep1);
 
     macro_rules! update_hashes_inline {
         ($pos:expr) => {{
             let pos = $pos;
             if pos + 8 <= src.len() {
-                let hs = h5(unsafe { rdp64(src_ptr, pos) }, short_log);
-                unsafe {
-                    *ht_short.add(hs) = pos as u32;
-                }
-                let hl = h8(unsafe { rdp64(src_ptr, pos) }, hash_log);
-                unsafe {
-                    *ht_long.add(hl) = pos as u32;
-                }
+                let hs = h5(primitives::rd64(src, pos), short_log);
+                primitives::hash_store(hash_short, hs, pos as u32);
+                let hl = h8(primitives::rd64(src, pos), hash_log);
+                primitives::hash_store(hash_long, hl, pos as u32);
             }
         }};
     }
@@ -153,27 +135,19 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
             let cap_end = safe_end.min(ms + 2 + step * 4);
             let mut pos = ms + 2;
             while pos < cap_end {
-                let hs = h5(unsafe { rdp64(src_ptr, pos) }, short_log);
-                unsafe {
-                    *ht_short.add(hs) = pos as u32;
-                }
-                let hl = h8(unsafe { rdp64(src_ptr, pos) }, hash_log);
-                unsafe {
-                    *ht_long.add(hl) = pos as u32;
-                }
+                let hs = h5(primitives::rd64(src, pos), short_log);
+                primitives::hash_store(hash_short, hs, pos as u32);
+                let hl = h8(primitives::rd64(src, pos), hash_log);
+                primitives::hash_store(hash_long, hl, pos as u32);
                 pos += step;
             }
             if me >= 2 {
                 let tail = me - 2;
                 if tail < safe_end && tail >= cap_end {
-                    let hs = h5(unsafe { rdp64(src_ptr, tail) }, short_log);
-                    unsafe {
-                        *ht_short.add(hs) = tail as u32;
-                    }
-                    let hl = h8(unsafe { rdp64(src_ptr, tail) }, hash_log);
-                    unsafe {
-                        *ht_long.add(hl) = tail as u32;
-                    }
+                    let hs = h5(primitives::rd64(src, tail), short_log);
+                    primitives::hash_store(hash_short, hs, tail as u32);
+                    let hl = h8(primitives::rd64(src, tail), hash_log);
+                    primitives::hash_store(hash_long, hl, tail as u32);
                 }
             }
         }};
@@ -181,21 +155,15 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
 
     macro_rules! rep_match_loop_inline {
         () => {{
-            // Only check rep1 at LL=0 positions (C zstd pattern). With LL=0,
-            // offset_value=1 encodes rep[1], so rep1 matches are rep-codable.
-            // Rep0 at LL=0 has NO rep encoding in the zstd spec; those matches
-            // would waste bits as full offsets. The alternating swap lets the
-            // loop ping-pong between rep0 and rep1 (each becomes the other's
-            // rep1 after the swap), keeping every emitted sequence rep-coded.
             loop {
                 if ip0 >= ilimit {
                     break;
                 }
                 let r1 = rep1 as usize;
                 if (r1 > 0) & (ip0 >= r1)
-                    && unsafe { rdp32(src_ptr, ip0) == rdp32(src_ptr, ip0 - r1) }
+                    && primitives::rd32(src, ip0) == primitives::rd32(src, ip0 - r1)
                 {
-                    let ml = count_match(src, ip0 + 4, ip0 - r1 + 4, block_end) + 4;
+                    let ml = primitives::count_match(src, ip0 + 4, ip0 - r1 + 4, block_end) + 4;
                     core::mem::swap(&mut rep0, &mut rep1);
                     total_match_bytes += ml;
                     sequences.push(Sequence {
@@ -222,40 +190,39 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
             break;
         }
 
-        let mut hs0 = h5(unsafe { rdp64(src_ptr, ip0) }, short_log);
-        let mut hl0 = h8(unsafe { rdp64(src_ptr, ip0) }, hash_log);
-        let mut hs1 = h5(unsafe { rdp64(src_ptr, ip1) }, short_log);
-        let mut hl1 = h8(unsafe { rdp64(src_ptr, ip1) }, hash_log);
+        let mut hs0 = h5(primitives::rd64(src, ip0), short_log);
+        let mut hl0 = h8(primitives::rd64(src, ip0), hash_log);
+        let mut hs1 = h5(primitives::rd64(src, ip1), short_log);
+        let mut hl1 = h8(primitives::rd64(src, ip1), hash_log);
 
-        let mut match_short = unsafe { *ht_short.add(hs0) } as usize;
-        let mut match_long = unsafe { *ht_long.add(hl0) } as usize;
+        let mut match_short = primitives::hash_load(hash_short, hs0) as usize;
+        let mut match_long = primitives::hash_load(hash_long, hl0) as usize;
 
         loop {
             // --- Store hashes for ip0 ---
-            unsafe {
-                *ht_short.add(hs0) = ip0 as u32;
-                *ht_long.add(hl0) = ip0 as u32;
-            }
+            primitives::hash_store(hash_short, hs0, ip0 as u32);
+            primitives::hash_store(hash_long, hl0, ip0 as u32);
 
             // --- Rep check at step-ahead position ip2 ---
             {
                 let r0 = rep0 as usize;
                 if ip2 >= r0 {
-                    let v = unsafe { rdp32(src_ptr, ip2) };
-                    if v == unsafe { rdp32(src_ptr, ip2 - r0) } {
+                    let v = primitives::rd32(src, ip2);
+                    if v == primitives::rd32(src, ip2 - r0) {
                         let fill_pos = ip0;
-                        unsafe {
-                            *ht_short.add(hs1) = ip1 as u32;
-                            *ht_long.add(hl1) = ip1 as u32;
-                        }
+                        primitives::hash_store(hash_short, hs1, ip1 as u32);
+                        primitives::hash_store(hash_long, hl1, ip1 as u32);
                         ip0 = ip2;
                         if ip0 > anchor
-                            && unsafe { *src_ptr.add(ip0 - 1) == *src_ptr.add(ip0 - r0 - 1) }
+                            && primitives::src_byte(src, ip0 - 1)
+                                == primitives::src_byte(src, ip0 - r0 - 1)
                         {
                             ip0 -= 1;
                         }
                         let back = ip2 - ip0;
-                        let mlen = count_match(src, ip2 + 4, ip2 - r0 + 4, block_end) + 4 + back;
+                        let mlen = primitives::count_match(src, ip2 + 4, ip2 - r0 + 4, block_end)
+                            + 4
+                            + back;
                         total_match_bytes += mlen;
                         sequences.push(Sequence {
                             literal_length: (ip0 - anchor) as u32,
@@ -277,23 +244,21 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
             // --- Long match check at ip0 ---
             if match_long < ip0
                 && ip0 - match_long <= max_distance
-                && unsafe { rdp64(src_ptr, ip0) == rdp64(src_ptr, match_long) }
+                && primitives::rd64(src, ip0) == primitives::rd64(src, match_long)
             {
-                unsafe {
-                    *ht_short.add(hs1) = ip1 as u32;
-                    *ht_long.add(hl1) = ip1 as u32;
-                }
+                primitives::hash_store(hash_short, hs1, ip1 as u32);
+                primitives::hash_store(hash_long, hl1, ip1 as u32);
                 let mut back = 0usize;
                 while ip0 > anchor + back
                     && match_long > back + block_start
-                    && unsafe {
-                        *src_ptr.add(ip0 - back - 1) == *src_ptr.add(match_long - back - 1)
-                    }
+                    && primitives::src_byte(src, ip0 - back - 1)
+                        == primitives::src_byte(src, match_long - back - 1)
                 {
                     back += 1;
                 }
                 let match_start = ip0 - back;
-                let mlen = count_match(src, ip0 + 8, match_long + 8, block_end) + 8 + back;
+                let mlen =
+                    primitives::count_match(src, ip0 + 8, match_long + 8, block_end) + 8 + back;
                 total_match_bytes += mlen;
                 let offset = (match_start - (match_long - back)) as u32;
                 sequences.push(Sequence {
@@ -317,30 +282,29 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
             // --- Short match check at ip0 ---
             if match_short < ip0
                 && ip0 - match_short <= max_distance
-                && unsafe { rdp32(src_ptr, ip0) == rdp32(src_ptr, match_short) }
+                && primitives::rd32(src, ip0) == primitives::rd32(src, match_short)
             {
                 // ip+1 lookahead: prefer long match at ip1 if significantly better
                 if ip1 < ilimit {
-                    let ml_next = unsafe { *ht_long.add(hl1) } as usize;
+                    let ml_next = primitives::hash_load(hash_long, hl1) as usize;
                     if ml_next < ip1
                         && ip1 - ml_next <= max_distance
-                        && unsafe { rdp64(src_ptr, ip1) == rdp64(src_ptr, ml_next) }
+                        && primitives::rd64(src, ip1) == primitives::rd64(src, ml_next)
                     {
-                        let long_len = count_match(src, ip1 + 8, ml_next + 8, block_end) + 8;
-                        let short_len = count_match(src, ip0 + 4, match_short + 4, block_end) + 4;
+                        let long_len =
+                            primitives::count_match(src, ip1 + 8, ml_next + 8, block_end) + 8;
+                        let short_len =
+                            primitives::count_match(src, ip0 + 4, match_short + 4, block_end) + 4;
 
                         if long_len > short_len + 1 {
-                            unsafe {
-                                *ht_short.add(hs1) = ip1 as u32;
-                                *ht_long.add(hl1) = ip1 as u32;
-                            }
+                            primitives::hash_store(hash_short, hs1, ip1 as u32);
+                            primitives::hash_store(hash_long, hl1, ip1 as u32);
                             ip0 = ip1;
                             let mut back = 0usize;
                             while ip0 > anchor + back
                                 && ml_next > back + block_start
-                                && unsafe {
-                                    *src_ptr.add(ip0 - back - 1) == *src_ptr.add(ml_next - back - 1)
-                                }
+                                && primitives::src_byte(src, ip0 - back - 1)
+                                    == primitives::src_byte(src, ml_next - back - 1)
                             {
                                 back += 1;
                             }
@@ -368,17 +332,15 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
                 }
 
                 // Take short match at ip0
-                unsafe {
-                    *ht_short.add(hs1) = ip1 as u32;
-                    *ht_long.add(hl1) = ip1 as u32;
-                }
-                let mut mlen = count_match(src, ip0 + 4, match_short + 4, block_end) + 4;
+                primitives::hash_store(hash_short, hs1, ip1 as u32);
+                primitives::hash_store(hash_long, hl1, ip1 as u32);
+                let mut mlen =
+                    primitives::count_match(src, ip0 + 4, match_short + 4, block_end) + 4;
                 let mut back = 0usize;
                 while ip0 > anchor + back
                     && match_short > back + block_start
-                    && unsafe {
-                        *src_ptr.add(ip0 - back - 1) == *src_ptr.add(match_short - back - 1)
-                    }
+                    && primitives::src_byte(src, ip0 - back - 1)
+                        == primitives::src_byte(src, match_short - back - 1)
                 {
                     back += 1;
                 }
@@ -405,56 +367,47 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
             }
 
             // === First shift ===
-            match_short = unsafe { *ht_short.add(hs1) } as usize;
-            match_long = unsafe { *ht_long.add(hl1) } as usize;
+            match_short = primitives::hash_load(hash_short, hs1) as usize;
+            match_long = primitives::hash_load(hash_long, hl1) as usize;
             hs0 = hs1;
             hl0 = hl1;
 
-            hs1 = h5(unsafe { rdp64(src_ptr, ip2) }, short_log);
-            hl1 = h8(unsafe { rdp64(src_ptr, ip2) }, hash_log);
+            hs1 = h5(primitives::rd64(src, ip2), short_log);
+            hl1 = h8(primitives::rd64(src, ip2), hash_log);
             ip0 = ip1;
             ip1 = ip2;
             ip2 = ip3;
 
-            unsafe {
-                core::arch::x86_64::_mm_prefetch(
-                    ht_short.add(hs1) as *const i8,
-                    core::arch::x86_64::_MM_HINT_T0,
-                );
-                core::arch::x86_64::_mm_prefetch(
-                    ht_long.add(hl1) as *const i8,
-                    core::arch::x86_64::_MM_HINT_T0,
-                );
+            #[cfg(target_arch = "x86_64")]
+            {
+                primitives::prefetch_ht(hash_short, hs1);
+                primitives::prefetch_ht(hash_long, hl1);
             }
 
             // --- Store hashes for shifted ip0 ---
-            unsafe {
-                *ht_short.add(hs0) = ip0 as u32;
-                *ht_long.add(hl0) = ip0 as u32;
-            }
+            primitives::hash_store(hash_short, hs0, ip0 as u32);
+            primitives::hash_store(hash_long, hl0, ip0 as u32);
 
             // --- Long match check at shifted ip0 ---
             if match_long < ip0
                 && ip0 - match_long <= max_distance
-                && unsafe { rdp64(src_ptr, ip0) == rdp64(src_ptr, match_long) }
+                && primitives::rd64(src, ip0) == primitives::rd64(src, match_long)
             {
                 if step_size + ((ip0 - anchor) >> search_strength) <= 4 {
-                    unsafe {
-                        *ht_short.add(hs1) = ip1 as u32;
-                        *ht_long.add(hl1) = ip1 as u32;
-                    }
+                    primitives::hash_store(hash_short, hs1, ip1 as u32);
+                    primitives::hash_store(hash_long, hl1, ip1 as u32);
                 }
                 let mut back = 0usize;
                 while ip0 > anchor + back
                     && match_long > back + block_start
-                    && unsafe {
-                        *src_ptr.add(ip0 - back - 1) == *src_ptr.add(match_long - back - 1)
-                    }
+                    && primitives::src_byte(src, ip0 - back - 1)
+                        == primitives::src_byte(src, match_long - back - 1)
                 {
                     back += 1;
                 }
                 let match_start = ip0 - back;
-                let mlen = count_match(src, ip0 + 8, match_long + 8, block_end) + 8 + back;
+                let mlen =
+                    primitives::count_match(src, ip0 + 8, match_long + 8, block_end) + 8 + back;
                 total_match_bytes += mlen;
                 let offset = (match_start - (match_long - back)) as u32;
                 sequences.push(Sequence {
@@ -478,32 +431,31 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
             // --- Short match check at shifted ip0 ---
             if match_short < ip0
                 && ip0 - match_short <= max_distance
-                && unsafe { rdp32(src_ptr, ip0) == rdp32(src_ptr, match_short) }
+                && primitives::rd32(src, ip0) == primitives::rd32(src, match_short)
             {
                 // ip+1 lookahead (hash_long[hl1] was prefetched in the shift)
                 if ip1 < ilimit {
-                    let ml_next = unsafe { *ht_long.add(hl1) } as usize;
+                    let ml_next = primitives::hash_load(hash_long, hl1) as usize;
                     if ml_next < ip1
                         && ip1 - ml_next <= max_distance
-                        && unsafe { rdp64(src_ptr, ip1) == rdp64(src_ptr, ml_next) }
+                        && primitives::rd64(src, ip1) == primitives::rd64(src, ml_next)
                     {
-                        let long_len = count_match(src, ip1 + 8, ml_next + 8, block_end) + 8;
-                        let short_len = count_match(src, ip0 + 4, match_short + 4, block_end) + 4;
+                        let long_len =
+                            primitives::count_match(src, ip1 + 8, ml_next + 8, block_end) + 8;
+                        let short_len =
+                            primitives::count_match(src, ip0 + 4, match_short + 4, block_end) + 4;
 
                         if long_len > short_len + 1 {
                             if step_size + ((ip0 - anchor) >> search_strength) <= 4 {
-                                unsafe {
-                                    *ht_short.add(hs1) = ip1 as u32;
-                                    *ht_long.add(hl1) = ip1 as u32;
-                                }
+                                primitives::hash_store(hash_short, hs1, ip1 as u32);
+                                primitives::hash_store(hash_long, hl1, ip1 as u32);
                             }
                             ip0 = ip1;
                             let mut back = 0usize;
                             while ip0 > anchor + back
                                 && ml_next > back + block_start
-                                && unsafe {
-                                    *src_ptr.add(ip0 - back - 1) == *src_ptr.add(ml_next - back - 1)
-                                }
+                                && primitives::src_byte(src, ip0 - back - 1)
+                                    == primitives::src_byte(src, ml_next - back - 1)
                             {
                                 back += 1;
                             }
@@ -532,18 +484,16 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
 
                 // Take short match
                 if step_size + ((ip0 - anchor) >> search_strength) <= 4 {
-                    unsafe {
-                        *ht_short.add(hs1) = ip1 as u32;
-                        *ht_long.add(hl1) = ip1 as u32;
-                    }
+                    primitives::hash_store(hash_short, hs1, ip1 as u32);
+                    primitives::hash_store(hash_long, hl1, ip1 as u32);
                 }
-                let mut mlen = count_match(src, ip0 + 4, match_short + 4, block_end) + 4;
+                let mut mlen =
+                    primitives::count_match(src, ip0 + 4, match_short + 4, block_end) + 4;
                 let mut back = 0usize;
                 while ip0 > anchor + back
                     && match_short > back + block_start
-                    && unsafe {
-                        *src_ptr.add(ip0 - back - 1) == *src_ptr.add(match_short - back - 1)
-                    }
+                    && primitives::src_byte(src, ip0 - back - 1)
+                        == primitives::src_byte(src, match_short - back - 1)
                 {
                     back += 1;
                 }
@@ -570,28 +520,23 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
             }
 
             // === Second shift with step gap ===
-            match_short = unsafe { *ht_short.add(hs1) } as usize;
-            match_long = unsafe { *ht_long.add(hl1) } as usize;
+            match_short = primitives::hash_load(hash_short, hs1) as usize;
+            match_long = primitives::hash_load(hash_long, hl1) as usize;
             hs0 = hs1;
             hl0 = hl1;
 
-            hs1 = h5(unsafe { rdp64(src_ptr, ip2) }, short_log);
-            hl1 = h8(unsafe { rdp64(src_ptr, ip2) }, hash_log);
+            hs1 = h5(primitives::rd64(src, ip2), short_log);
+            hl1 = h8(primitives::rd64(src, ip2), hash_log);
             ip0 = ip1;
             ip1 = ip2;
             let step = step_size + ((ip0 - anchor) >> search_strength);
             ip2 = ip0 + step;
             ip3 = ip1 + step;
 
-            unsafe {
-                core::arch::x86_64::_mm_prefetch(
-                    ht_short.add(hs1) as *const i8,
-                    core::arch::x86_64::_MM_HINT_T0,
-                );
-                core::arch::x86_64::_mm_prefetch(
-                    ht_long.add(hl1) as *const i8,
-                    core::arch::x86_64::_MM_HINT_T0,
-                );
+            #[cfg(target_arch = "x86_64")]
+            {
+                primitives::prefetch_ht(hash_short, hs1);
+                primitives::prefetch_ht(hash_long, hl1);
             }
 
             if ip0 >= probe_limit {
@@ -628,18 +573,18 @@ pub(crate) fn prefill_hash_tables(
     let step = (prefix_len / hash_size).max(1);
     let mut i = 0;
     while i + 8 <= prefix_len {
-        let hs = h5(rd64(combined, i), short_log);
-        hs32(hash_short, hs, i as u32);
-        let hl = h8(rd64(combined, i), hash_log);
-        hs32(hash_long, hl, i as u32);
+        let hs = h5(primitives::rd64(combined, i), short_log);
+        primitives::hash_store(hash_short, hs, i as u32);
+        let hl = h8(primitives::rd64(combined, i), hash_log);
+        primitives::hash_store(hash_long, hl, i as u32);
         i += step;
     }
     let tail_start = prefix_len.saturating_sub(64);
     for i in tail_start..prefix_len.saturating_sub(7) {
-        let hs = h5(rd64(combined, i), short_log);
-        hs32(hash_short, hs, i as u32);
-        let hl = h8(rd64(combined, i), hash_log);
-        hs32(hash_long, hl, i as u32);
+        let hs = h5(primitives::rd64(combined, i), short_log);
+        primitives::hash_store(hash_short, hs, i as u32);
+        let hl = h8(primitives::rd64(combined, i), hash_log);
+        primitives::hash_store(hash_long, hl, i as u32);
     }
 }
 
@@ -717,45 +662,4 @@ fn h5(val: u64, hash_log: u32) -> usize {
 #[inline(always)]
 fn h8(val: u64, hash_log: u32) -> usize {
     (val.wrapping_mul(PRIME64_1) >> (64 - hash_log)) as usize
-}
-
-#[inline(always)]
-fn rd64(src: &[u8], pos: usize) -> u64 {
-    debug_assert!(pos + 8 <= src.len());
-    unsafe { (src.as_ptr().add(pos) as *const u64).read_unaligned() }
-}
-
-#[inline(always)]
-fn hs32(table: &mut [u32], idx: usize, val: u32) {
-    debug_assert!(idx < table.len());
-    unsafe {
-        *table.get_unchecked_mut(idx) = val;
-    }
-}
-
-#[inline(always)]
-fn count_match(src: &[u8], mut p1: usize, mut p2: usize, limit: usize) -> usize {
-    debug_assert!(p1 <= limit && limit <= src.len());
-    debug_assert!(p2 <= src.len());
-    let start = p1;
-    let max_len = (limit - p1).min(src.len() - p2);
-    let end8 = start + (max_len & !7);
-    while p1 < end8 {
-        let a = rd64(src, p1);
-        let b = rd64(src, p2);
-        let xor = a ^ b;
-        if xor != 0 {
-            return p1 - start + (xor.trailing_zeros() as usize / 8);
-        }
-        p1 += 8;
-        p2 += 8;
-    }
-    while p1 < start + max_len {
-        if unsafe { *src.get_unchecked(p1) != *src.get_unchecked(p2) } {
-            break;
-        }
-        p1 += 1;
-        p2 += 1;
-    }
-    p1 - start
 }

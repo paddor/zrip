@@ -1,6 +1,9 @@
+#![forbid(unsafe_code)]
+
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
+use crate::primitives;
 use zrip_core::Sequence;
 use zrip_core::fse::table_builder::{
     build_decode_table, normalize_counts, serialize_fse_table_description,
@@ -134,11 +137,11 @@ impl FseEncodeTable {
 
     #[inline]
     fn init_state(&self, symbol: u8) -> u32 {
-        let tt = unsafe { self.symbol_tt.get_unchecked(symbol as usize) };
+        let tt = primitives::slice_get_ref(&self.symbol_tt, symbol as usize);
         let nb_bits_out = tt.delta_nb_bits.wrapping_add(1 << 15) >> 16;
         let base_state = (nb_bits_out << 16).wrapping_sub(tt.delta_nb_bits);
         let idx = (base_state >> nb_bits_out) as i32 + tt.delta_find_state;
-        (unsafe { *self.state_table.get_unchecked(idx as usize) }) as u32
+        primitives::slice_get(&self.state_table, idx as usize) as u32
     }
 }
 
@@ -224,137 +227,7 @@ pub(crate) fn encode_compressed_block(
 
     let saved_rep = *rep_offsets;
 
-    workspace.lit_buf.clear();
-    workspace.lit_buf.reserve(src.len() + 16);
-    workspace.packed_seqs.clear();
-    workspace.packed_seqs.reserve(n);
-    let lit_dst = workspace.lit_buf.as_mut_ptr();
-    let src_ptr = src.as_ptr();
-    let mut lit_pos = 0usize;
-    let mut lit_offset = 0usize;
-
-    let do_codes = n >= 64;
-    let mut ll_freq = [0u32; 36];
-    let mut ml_freq = [0u32; 53];
-    let mut of_freq = [0u32; 32];
-    let mut total_extra_bits: u64 = 0;
-
-    // Local rep offsets: avoids &mut aliasing barrier per iteration
-    let mut rep0 = rep_offsets[0];
-    let mut rep1 = rep_offsets[1];
-    let mut rep2 = rep_offsets[2];
-
-    let packed_ptr = workspace.packed_seqs.as_mut_ptr();
-    let seq_ptr = sequences.as_ptr();
-    let src_len = src.len();
-
-    for i in 0..n {
-        let seq = unsafe { &*seq_ptr.add(i) };
-        let ll = seq.literal_length as usize;
-        if lit_offset + ll <= src_len {
-            unsafe {
-                let s = src_ptr.add(lit_offset);
-                let d = lit_dst.add(lit_pos);
-                if ll <= 16 && lit_offset + 16 <= src_len {
-                    (d as *mut u64).write_unaligned((s as *const u64).read_unaligned());
-                    (d.add(8) as *mut u64)
-                        .write_unaligned((s.add(8) as *const u64).read_unaligned());
-                } else {
-                    core::ptr::copy_nonoverlapping(s, d, ll);
-                }
-            }
-            lit_pos += ll;
-        }
-        lit_offset += ll + seq.match_length as usize;
-
-        let actual_offset = seq.offset;
-        let ov = if seq.literal_length > 0 {
-            if actual_offset == rep0 {
-                1
-            } else if actual_offset == rep1 {
-                rep1 = rep0;
-                rep0 = actual_offset;
-                2
-            } else if actual_offset == rep2 {
-                rep2 = rep1;
-                rep1 = rep0;
-                rep0 = actual_offset;
-                3
-            } else {
-                rep2 = rep1;
-                rep1 = rep0;
-                rep0 = actual_offset;
-                actual_offset + 3
-            }
-        } else if actual_offset == rep1 {
-            rep1 = rep0;
-            rep0 = actual_offset;
-            1
-        } else if actual_offset == rep2 {
-            rep2 = rep1;
-            rep1 = rep0;
-            rep0 = actual_offset;
-            2
-        } else if rep0 > 1 && actual_offset == rep0 - 1 {
-            rep2 = rep1;
-            rep1 = rep0;
-            rep0 = actual_offset;
-            3
-        } else {
-            rep2 = rep1;
-            rep1 = rep0;
-            rep0 = actual_offset;
-            actual_offset + 3
-        };
-
-        let ll_c = ll_code(seq.literal_length);
-        let ml_c = ml_code(seq.match_length);
-        let of_c = of_code(ov);
-
-        let ll_nb = LL_BITS_TABLE[ll_c as usize];
-        let ml_nb = ML_BITS_TABLE[ml_c as usize];
-        let ll_extra = seq.literal_length - LL_BASELINE_TABLE[ll_c as usize];
-        let ml_extra = seq.match_length - ML_BASELINE_TABLE[ml_c as usize];
-        let of_extra = ov - (1u32 << of_c);
-        let extra_bits = (ll_extra as u64)
-            | ((ml_extra as u64) << ll_nb)
-            | ((of_extra as u64) << (ll_nb + ml_nb));
-        let extra_nbits = ll_nb + ml_nb + of_c;
-
-        unsafe {
-            packed_ptr.add(i).write(PackedSeq {
-                extra_bits,
-                ll_c,
-                ml_c,
-                of_c,
-                extra_nbits,
-            });
-        }
-
-        if do_codes {
-            ll_freq[ll_c as usize] += 1;
-            ml_freq[ml_c as usize] += 1;
-            of_freq[of_c as usize] += 1;
-            total_extra_bits += extra_nbits as u64;
-        }
-    }
-    unsafe {
-        workspace.packed_seqs.set_len(n);
-    }
-    rep_offsets[0] = rep0;
-    rep_offsets[1] = rep1;
-    rep_offsets[2] = rep2;
-
-    if lit_offset < src_len {
-        let tail = src_len - lit_offset;
-        unsafe {
-            core::ptr::copy_nonoverlapping(src_ptr.add(lit_offset), lit_dst.add(lit_pos), tail);
-        }
-        lit_pos += tail;
-    }
-    unsafe {
-        workspace.lit_buf.set_len(lit_pos);
-    }
+    pack_sequences_and_literals(src, sequences, rep_offsets, workspace);
 
     encode_literals_section(
         &workspace.lit_buf,
@@ -364,7 +237,10 @@ pub(crate) fn encode_compressed_block(
         &mut workspace.prev_huffman,
     );
 
+    let do_codes = n >= 64;
     let seq_data = if do_codes {
+        let (ll_freq, ml_freq, of_freq, total_extra_bits) =
+            compute_frequencies(&workspace.packed_seqs);
         let pred_est = estimate_predefined_cost(&ll_freq, &ml_freq, &of_freq, total_extra_bits, n);
         let use_custom = encode_seq_custom(
             &workspace.packed_seqs,
@@ -437,37 +313,58 @@ pub(crate) fn encode_compressed_block_raw(
 
     let saved_rep = *rep_offsets;
 
+    pack_sequences_and_literals(src, sequences, rep_offsets, workspace);
+
+    workspace.lit_section.clear();
+    encode_raw_literals_section(&workspace.lit_buf, &mut workspace.lit_section);
+
+    encode_seq_predefined(
+        &workspace.packed_seqs,
+        &mut workspace.pred_seq,
+        &mut workspace.pred_writer_buf,
+    );
+
+    let block_len = workspace.lit_section.len() + workspace.pred_seq.len();
+    if block_len >= src.len() {
+        *rep_offsets = saved_rep;
+        encode_raw_block(src, last, output);
+        return;
+    }
+
+    let block_size = block_len as u32;
+    let header = (block_size << 3) | 0x04 | if last { 1 } else { 0 };
+    output.push(header as u8);
+    output.push((header >> 8) as u8);
+    output.push((header >> 16) as u8);
+    output.extend_from_slice(&workspace.lit_section);
+    output.extend_from_slice(&workspace.pred_seq);
+}
+
+fn pack_sequences_and_literals(
+    src: &[u8],
+    sequences: &[Sequence],
+    rep_offsets: &mut [u32; 3],
+    workspace: &mut BlockEncodeWorkspace,
+) {
+    let n = sequences.len();
+    let src_len = src.len();
+
     workspace.lit_buf.clear();
-    workspace.lit_buf.reserve(src.len() + 16);
+    workspace.lit_buf.reserve(src_len + 16);
     workspace.packed_seqs.clear();
     workspace.packed_seqs.reserve(n);
-    let lit_dst = workspace.lit_buf.as_mut_ptr();
-    let src_ptr = src.as_ptr();
+
     let mut lit_pos = 0usize;
     let mut lit_offset = 0usize;
 
     let mut rep0 = rep_offsets[0];
     let mut rep1 = rep_offsets[1];
     let mut rep2 = rep_offsets[2];
-    let packed_ptr = workspace.packed_seqs.as_mut_ptr();
-    let seq_ptr = sequences.as_ptr();
-    let src_len = src.len();
 
-    for i in 0..n {
-        let seq = unsafe { &*seq_ptr.add(i) };
+    for seq in &sequences[..n] {
         let ll = seq.literal_length as usize;
         if lit_offset + ll <= src_len {
-            unsafe {
-                let s = src_ptr.add(lit_offset);
-                let d = lit_dst.add(lit_pos);
-                if ll <= 16 && lit_offset + 16 <= src_len {
-                    (d as *mut u64).write_unaligned((s as *const u64).read_unaligned());
-                    (d.add(8) as *mut u64)
-                        .write_unaligned((s.add(8) as *const u64).read_unaligned());
-                } else {
-                    core::ptr::copy_nonoverlapping(s, d, ll);
-                }
-            }
+            primitives::copy_literals_fast(src, lit_offset, &mut workspace.lit_buf, lit_pos, ll);
             lit_pos += ll;
         }
         lit_offset += ll + seq.match_length as usize;
@@ -526,18 +423,13 @@ pub(crate) fn encode_compressed_block_raw(
             | ((of_extra as u64) << (ll_nb + ml_nb));
         let extra_nbits = ll_nb + ml_nb + of_c;
 
-        unsafe {
-            packed_ptr.add(i).write(PackedSeq {
-                extra_bits,
-                ll_c,
-                ml_c,
-                of_c,
-                extra_nbits,
-            });
-        }
-    }
-    unsafe {
-        workspace.packed_seqs.set_len(n);
+        workspace.packed_seqs.push(PackedSeq {
+            extra_bits,
+            ll_c,
+            ml_c,
+            of_c,
+            extra_nbits,
+        });
     }
     rep_offsets[0] = rep0;
     rep_offsets[1] = rep1;
@@ -545,38 +437,24 @@ pub(crate) fn encode_compressed_block_raw(
 
     if lit_offset < src_len {
         let tail = src_len - lit_offset;
-        unsafe {
-            core::ptr::copy_nonoverlapping(src_ptr.add(lit_offset), lit_dst.add(lit_pos), tail);
-        }
+        primitives::copy_literals_fast(src, lit_offset, &mut workspace.lit_buf, lit_pos, tail);
         lit_pos += tail;
     }
-    unsafe {
-        workspace.lit_buf.set_len(lit_pos);
+    primitives::set_vec_len(&mut workspace.lit_buf, lit_pos);
+}
+
+fn compute_frequencies(packed: &[PackedSeq]) -> ([u32; 36], [u32; 53], [u32; 32], u64) {
+    let mut ll_freq = [0u32; 36];
+    let mut ml_freq = [0u32; 53];
+    let mut of_freq = [0u32; 32];
+    let mut total_extra_bits: u64 = 0;
+    for p in packed {
+        ll_freq[p.ll_c as usize] += 1;
+        ml_freq[p.ml_c as usize] += 1;
+        of_freq[p.of_c as usize] += 1;
+        total_extra_bits += p.extra_nbits as u64;
     }
-
-    workspace.lit_section.clear();
-    encode_raw_literals_section(&workspace.lit_buf, &mut workspace.lit_section);
-
-    encode_seq_predefined(
-        &workspace.packed_seqs,
-        &mut workspace.pred_seq,
-        &mut workspace.pred_writer_buf,
-    );
-
-    let block_len = workspace.lit_section.len() + workspace.pred_seq.len();
-    if block_len >= src.len() {
-        *rep_offsets = saved_rep;
-        encode_raw_block(src, last, output);
-        return;
-    }
-
-    let block_size = block_len as u32;
-    let header = (block_size << 3) | 0x04 | if last { 1 } else { 0 };
-    output.push(header as u8);
-    output.push((header >> 8) as u8);
-    output.push((header >> 16) as u8);
-    output.extend_from_slice(&workspace.lit_section);
-    output.extend_from_slice(&workspace.pred_seq);
+    (ll_freq, ml_freq, of_freq, total_extra_bits)
 }
 
 fn encode_literals_section(
@@ -590,7 +468,6 @@ fn encode_literals_section(
 
     let use_4_streams = lits.len() >= 1024;
 
-    // Try reusing the previous Huffman table (treeless block)
     if let Some(prev) = prev_huffman.as_ref() {
         if prev.can_encode(lits) {
             if use_4_streams {
@@ -720,7 +597,7 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     output.push(0x00);
 
     let tables = predefined_tables();
-    let last = unsafe { packed.get_unchecked(n - 1) };
+    let last = primitives::slice_get_ref(packed, n - 1);
 
     let max_out = n * 18 + 16;
     writer_buf.clear();
@@ -730,7 +607,6 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     let mut of_state = tables.of.init_state(last.of_c);
     let mut ml_state = tables.ml.init_state(last.ml_c);
 
-    let buf_ptr = writer_buf.as_mut_ptr();
     let mut pos: usize = 0;
     let mut bits: u64 = 0;
     let mut bits_used: u32 = 0;
@@ -743,9 +619,7 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     }
     macro_rules! flush_fast {
         () => {
-            unsafe {
-                (buf_ptr.add(pos) as *mut u64).write_unaligned(bits.to_le());
-            }
+            primitives::bitstream_flush(writer_buf, pos, bits);
             let nb = (bits_used >> 3) as usize;
             pos += nb;
             bits >>= (nb << 3) as u64;
@@ -754,18 +628,18 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     }
     macro_rules! encode_transition {
         ($table:expr, $symbol:expr, $state:expr) => {{
-            let tt = unsafe { $table.symbol_tt.get_unchecked($symbol as usize) };
+            let tt = primitives::slice_get_ref(&$table.symbol_tt, $symbol as usize);
             let nb = (tt.delta_nb_bits.wrapping_add($state)) >> 16;
             add_bits!($state & ((1u32 << nb) - 1), nb);
             let idx = ($state >> nb) as i32 + tt.delta_find_state;
-            $state = unsafe { *$table.state_table.get_unchecked(idx as usize) } as u32;
+            $state = primitives::slice_get(&$table.state_table, idx as usize) as u32;
         }};
     }
 
     add_bits!(last.extra_bits, last.extra_nbits);
 
     for k in (0..n - 1).rev() {
-        let p = unsafe { packed.get_unchecked(k) };
+        let p = primitives::slice_get_ref(packed, k);
 
         flush_fast!();
         encode_transition!(tables.of, p.of_c, of_state);
@@ -787,16 +661,12 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     add_bits!(1u32, 1u8);
     flush_fast!();
     while bits_used > 0 {
-        unsafe {
-            *buf_ptr.add(pos) = bits as u8;
-        }
+        primitives::bitstream_write_byte(writer_buf, pos, bits as u8);
         bits >>= 8;
         bits_used = bits_used.saturating_sub(8);
         pos += 1;
     }
-    unsafe {
-        writer_buf.set_len(pos);
-    }
+    primitives::set_vec_len(writer_buf, pos);
     output.extend_from_slice(writer_buf);
 }
 
@@ -919,7 +789,6 @@ fn encode_seq_custom(
     let max_out = n * 18 + 16;
     writer_buf.clear();
     writer_buf.reserve(max_out);
-    let buf_ptr = writer_buf.as_mut_ptr();
     let mut pos: usize = 0;
     let mut bits: u64 = 0;
     let mut bits_used: u32 = 0;
@@ -932,9 +801,7 @@ fn encode_seq_custom(
     }
     macro_rules! flush_fast {
         () => {
-            unsafe {
-                (buf_ptr.add(pos) as *mut u64).write_unaligned(bits.to_le());
-            }
+            primitives::bitstream_flush(writer_buf, pos, bits);
             let nb = (bits_used >> 3) as usize;
             pos += nb;
             bits >>= (nb << 3) as u64;
@@ -961,29 +828,29 @@ fn encode_seq_custom(
             let mut ml_s = ml_t.init_state(last.ml_c);
 
             for k in (0..n - 1).rev() {
-                let p = unsafe { packed.get_unchecked(k) };
+                let p = primitives::slice_get_ref(packed, k);
 
                 flush_fast!();
                 {
-                    let tt = unsafe { of_t.symbol_tt.get_unchecked(p.of_c as usize) };
+                    let tt = primitives::slice_get_ref(&of_t.symbol_tt, p.of_c as usize);
                     let nb = (tt.delta_nb_bits.wrapping_add(of_s)) >> 16;
                     add_bits!(of_s & ((1u32 << nb) - 1), nb);
                     let idx = (of_s >> nb) as i32 + tt.delta_find_state;
-                    of_s = unsafe { *of_t.state_table.get_unchecked(idx as usize) } as u32;
+                    of_s = primitives::slice_get(&of_t.state_table, idx as usize) as u32;
                 }
                 {
-                    let tt = unsafe { ml_t.symbol_tt.get_unchecked(p.ml_c as usize) };
+                    let tt = primitives::slice_get_ref(&ml_t.symbol_tt, p.ml_c as usize);
                     let nb = (tt.delta_nb_bits.wrapping_add(ml_s)) >> 16;
                     add_bits!(ml_s & ((1u32 << nb) - 1), nb);
                     let idx = (ml_s >> nb) as i32 + tt.delta_find_state;
-                    ml_s = unsafe { *ml_t.state_table.get_unchecked(idx as usize) } as u32;
+                    ml_s = primitives::slice_get(&ml_t.state_table, idx as usize) as u32;
                 }
                 {
-                    let tt = unsafe { ll_t.symbol_tt.get_unchecked(p.ll_c as usize) };
+                    let tt = primitives::slice_get_ref(&ll_t.symbol_tt, p.ll_c as usize);
                     let nb = (tt.delta_nb_bits.wrapping_add(ll_s)) >> 16;
                     add_bits!(ll_s & ((1u32 << nb) - 1), nb);
                     let idx = (ll_s >> nb) as i32 + tt.delta_find_state;
-                    ll_s = unsafe { *ll_t.state_table.get_unchecked(idx as usize) } as u32;
+                    ll_s = primitives::slice_get(&ll_t.state_table, idx as usize) as u32;
                 }
                 flush_fast!();
 
@@ -1016,11 +883,11 @@ fn encode_seq_custom(
             macro_rules! encode_transition_opt {
                 ($table:expr, $state:expr, $symbol:expr) => {
                     if let (Some(t), Some(s)) = (&$table, &mut $state) {
-                        let tt = unsafe { t.symbol_tt.get_unchecked($symbol as usize) };
+                        let tt = primitives::slice_get_ref(&t.symbol_tt, $symbol as usize);
                         let nb = (tt.delta_nb_bits.wrapping_add(*s)) >> 16;
                         add_bits!(*s & ((1u32 << nb) - 1), nb);
                         let idx = (*s >> nb) as i32 + tt.delta_find_state;
-                        *s = unsafe { *t.state_table.get_unchecked(idx as usize) } as u32;
+                        *s = primitives::slice_get(&t.state_table, idx as usize) as u32;
                     }
                 };
             }
@@ -1053,16 +920,12 @@ fn encode_seq_custom(
     add_bits!(1u32, 1u8);
     flush_fast!();
     while bits_used > 0 {
-        unsafe {
-            *buf_ptr.add(pos) = bits as u8;
-        }
+        primitives::bitstream_write_byte(writer_buf, pos, bits as u8);
         bits >>= 8;
         bits_used = bits_used.saturating_sub(8);
         pos += 1;
     }
-    unsafe {
-        writer_buf.set_len(pos);
-    }
+    primitives::set_vec_len(writer_buf, pos);
     output.extend_from_slice(writer_buf);
 
     true
@@ -1132,10 +995,6 @@ fn estimate_fse_bits(freqs: &[u32], total: usize) -> usize {
     if total == 0 {
         return 0;
     }
-    // Integer-only Shannon entropy estimate using fixed-point log2.
-    // For each symbol with frequency f: contribution = f * log2(total/f)
-    //   = f * (log2(total) - log2(f))
-    // We use 32 - leading_zeros as an integer log2 approximation.
     let log2_total = (usize::BITS).saturating_sub(total.leading_zeros());
     let mut bits: u64 = 0;
     for &f in freqs {

@@ -1,5 +1,9 @@
+#![forbid(unsafe_code)]
+
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
+
+use super::primitives;
 
 pub struct BitWriter {
     #[cfg(feature = "alloc")]
@@ -55,9 +59,7 @@ impl BitWriter {
     #[inline(always)]
     fn ensure_capacity(&mut self) {
         if self.pos + 8 > self.buf.capacity() {
-            unsafe {
-                self.buf.set_len(self.pos);
-            }
+            primitives::set_vec_len(&mut self.buf, self.pos);
             self.buf.reserve(64);
         }
     }
@@ -73,21 +75,16 @@ impl BitWriter {
         self.bits_used += n;
         if self.bits_used >= 32 {
             self.ensure_capacity();
-            unsafe {
-                let ptr = self.buf.as_mut_ptr().add(self.pos);
-                (ptr as *mut u64).write_unaligned(self.bits.to_le());
-                let nb = (self.bits_used >> 3) as usize;
-                self.pos += nb;
-                self.bits >>= nb << 3;
-                self.bits_used &= 7;
-            }
+            primitives::write_u64_le_unaligned(&mut self.buf, self.pos, self.bits);
+            let nb = (self.bits_used >> 3) as usize;
+            self.pos += nb;
+            self.bits >>= nb << 3;
+            self.bits_used &= 7;
         }
     }
 
     pub fn flush_remaining(&mut self) {
-        unsafe {
-            self.buf.set_len(self.pos);
-        }
+        primitives::set_vec_len(&mut self.buf, self.pos);
         while self.bits_used > 0 {
             self.buf.push(self.bits as u8);
             self.bits >>= 8;
@@ -111,9 +108,7 @@ impl BitWriter {
     }
 
     pub fn as_bytes(&mut self) -> &[u8] {
-        unsafe {
-            self.buf.set_len(self.pos);
-        }
+        primitives::set_vec_len(&mut self.buf, self.pos);
         &self.buf
     }
 
