@@ -1,7 +1,7 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use crate::sequences::{Sequence, SequenceDecodeTables, compute_offset};
+use crate::sequences::{SequenceDecodeTables, compute_offset};
 use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
 use zrip_core::fse::FseSeqDecodeEntry;
@@ -209,70 +209,6 @@ pub fn decode_execute_neon_safe(
             history,
         )
     }
-}
-
-/// Decode sequences into a Vec (for compatibility with non-monolithic path).
-///
-/// # Safety
-/// Must be called on aarch64.
-pub unsafe fn decode_sequences_neon(
-    data: &[u8],
-    num_sequences: u32,
-    tables: &SequenceDecodeTables,
-    offsets: &mut [u32; 3],
-) -> Result<Vec<Sequence>, DecompressError> {
-    if data.is_empty() {
-        return Err(DecompressError::CorruptSequences);
-    }
-
-    let mut rev_reader =
-        ReverseBitReader::new(data).map_err(|_| DecompressError::CorruptSequences)?;
-
-    let mut ll_state = init_state(&tables.ll_table, tables.ll_accuracy, &mut rev_reader)?;
-    let mut of_state = init_state(&tables.of_table, tables.of_accuracy, &mut rev_reader)?;
-    let mut ml_state = init_state(&tables.ml_table, tables.ml_accuracy, &mut rev_reader)?;
-
-    let mut sequences = Vec::with_capacity(num_sequences as usize);
-
-    for i in 0..num_sequences {
-        let of_e = tables.of_table[of_state as usize & of_mask];
-        let ml_e = tables.ml_table[ml_state as usize & ml_mask];
-        let ll_e = tables.ll_table[ll_state as usize & ll_mask];
-
-        rev_reader.refill();
-
-        let of_extra = rev_reader.read_bits_fast(of_e.extra_bits);
-        let offset_value = of_e.baseline_value + of_extra;
-
-        let ml_extra = rev_reader.read_bits_fast(ml_e.extra_bits);
-        let match_length = ml_e.baseline_value + ml_extra;
-
-        let ll_extra = rev_reader.read_bits_fast(ll_e.extra_bits);
-        let literal_length = ll_e.baseline_value + ll_extra;
-
-        let offset = compute_offset(offset_value, literal_length, offsets);
-
-        sequences.push(Sequence {
-            literal_length,
-            offset,
-            match_length,
-        });
-
-        if i < num_sequences - 1 {
-            rev_reader.refill();
-
-            let ll_entry = &tables.ll_table[ll_state as usize & ll_mask];
-            ll_state = ll_entry.base_line as u32 + rev_reader.read_bits_fast(ll_entry.num_bits);
-
-            let ml_entry = &tables.ml_table[ml_state as usize & ml_mask];
-            ml_state = ml_entry.base_line as u32 + rev_reader.read_bits_fast(ml_entry.num_bits);
-
-            let of_entry = &tables.of_table[of_state as usize & of_mask];
-            of_state = of_entry.base_line as u32 + rev_reader.read_bits_fast(of_entry.num_bits);
-        }
-    }
-
-    Ok(sequences)
 }
 
 #[inline(always)]
