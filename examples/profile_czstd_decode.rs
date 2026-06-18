@@ -21,5 +21,5 @@ fn main() {
     }
     let elapsed = start.elapsed();
     let mbs = (data.len() as f64 * 20.0) / elapsed.as_secs_f64() / 1e6;
-    eprintln!("{:.0} MB/s decode", mbs);
+    eprintln!("{mbs:.0} MB/s decode");
 }

@@ -7,7 +7,7 @@ fn decompress_garbage_bytes_never_panics() {
         let data: Vec<u8> = (0..len)
             .map(|i| {
                 let x = seed
-                    .wrapping_mul(6364136223846793005)
+                    .wrapping_mul(6_364_136_223_846_793_005)
                     .wrapping_add(i as u64);
                 (x >> 33) as u8
             })
@@ -24,8 +24,8 @@ fn decompress_valid_frame_with_corrupt_blocks_never_panics() {
         let garbage: Vec<u8> = (0..garbage_len)
             .map(|i| {
                 let x = seed
-                    .wrapping_mul(2654435761)
-                    .wrapping_add(i as u64 * 1103515245);
+                    .wrapping_mul(2_654_435_761)
+                    .wrapping_add(i as u64 * 1_103_515_245);
                 (x >> 24) as u8
             })
             .collect();
@@ -72,7 +72,7 @@ fn decompress_truncated_at_every_byte_never_panics() {
 #[test]
 fn decompress_two_byte_flips_never_panic() {
     let original: Vec<u8> = (0..2000u32)
-        .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
         .collect();
     let compressed = zrip::compress(&original, 1).unwrap();
     let len = compressed.len();
@@ -145,7 +145,7 @@ fn decompress_block_header_claiming_huge_size() {
         0x00, // FHD: no checksum, no dict, fcs=0, single=0
         0x00, // window descriptor
     ];
-    let block_hdr = (131071u32 << 3) | 0b001; // last=1, raw=00
+    let block_hdr = (131_071_u32 << 3) | 0b001; // last=1, raw=00
     frame.push((block_hdr & 0xFF) as u8);
     frame.push(((block_hdr >> 8) & 0xFF) as u8);
     frame.push(((block_hdr >> 16) & 0xFF) as u8);
@@ -223,7 +223,7 @@ fn decompress_corrupt_sequence_section_never_panics() {
 #[test]
 fn decompress_corrupt_literals_section_never_panics() {
     let original: Vec<u8> = (0..8000u32)
-        .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
         .collect();
     let compressed = zrip::compress(&original, 1).unwrap();
 

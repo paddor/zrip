@@ -58,7 +58,7 @@ pub(crate) fn compress_dfast_block(
             )
         };
     }
-    dispatch!(0, 0)
+    dispatch!(0, 0);
 }
 
 /// 4-cursor DFast match finder with prefetch pipeline.

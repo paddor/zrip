@@ -728,17 +728,14 @@ fn encode_seq_custom(
         return false;
     }
 
-    let ll_enc = match build_table_enc(ll_freq, ll_max, 9, n) {
-        Some(e) => e,
-        None => return false,
+    let Some(ll_enc) = build_table_enc(ll_freq, ll_max, 9, n) else {
+        return false;
     };
-    let of_enc = match build_table_enc(of_freq, of_max, 8, n) {
-        Some(e) => e,
-        None => return false,
+    let Some(of_enc) = build_table_enc(of_freq, of_max, 8, n) else {
+        return false;
     };
-    let ml_enc = match build_table_enc(ml_freq, ml_max, 9, n) {
-        Some(e) => e,
-        None => return false,
+    let Some(ml_enc) = build_table_enc(ml_freq, ml_max, 9, n) else {
+        return false;
     };
 
     let ll_mode: u8 = match &ll_enc {

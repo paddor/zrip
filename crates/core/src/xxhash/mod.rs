@@ -1,10 +1,10 @@
 mod primitives;
 
-const PRIME64_1: u64 = 0x9E3779B185EBCA87;
-const PRIME64_2: u64 = 0xC2B2AE3D27D4EB4F;
-const PRIME64_3: u64 = 0x165667B19E3779F9;
-const PRIME64_4: u64 = 0x85EBCA77C2B2AE63;
-const PRIME64_5: u64 = 0x27D4EB2F165667C5;
+const PRIME64_1: u64 = 0x9E37_79B1_85EB_CA87;
+const PRIME64_2: u64 = 0xC2B2_AE3D_27D4_EB4F;
+const PRIME64_3: u64 = 0x1656_67B1_9E37_79F9;
+const PRIME64_4: u64 = 0x85EB_CA77_C2B2_AE63;
+const PRIME64_5: u64 = 0x27D4_EB2F_1656_67C5;
 
 #[inline]
 fn xxh64_round(mut acc: u64, input: u64) -> u64 {
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn content_checksum() {
         let hash = xxh64(b"test data for zstd", 0);
-        let checksum = (hash & 0xFFFFFFFF) as u32;
+        let checksum = (hash & 0xFFFF_FFFF) as u32;
         assert_eq!(checksum, hash as u32);
     }
 }

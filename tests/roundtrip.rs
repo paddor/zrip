@@ -22,7 +22,7 @@ fn roundtrip_all_levels_repetitive() {
 #[test]
 fn roundtrip_all_levels_random() {
     let original: Vec<u8> = (0..100_000u32)
-        .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
         .collect();
     for level in [-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4] {
         let compressed = zrip::compress(&original, level).unwrap();
@@ -138,9 +138,9 @@ fn roundtrip_all_levels_all_patterns() {
             "random_ish",
             (0..10000u32)
                 .map(|i| {
-                    ((i as u64)
-                        .wrapping_mul(6364136223846793005u64)
-                        .wrapping_add(1442695040888963407u64)
+                    (u64::from(i)
+                        .wrapping_mul(6_364_136_223_846_793_005_u64)
+                        .wrapping_add(1_442_695_040_888_963_407_u64)
                         >> 56) as u8
                 })
                 .collect(),
@@ -166,7 +166,7 @@ fn roundtrip_exact_block_fill() {
         }
         let size = size as usize;
         let data: Vec<u8> = (0..size as u32)
-            .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+            .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
             .collect();
         let compressed = zrip::compress(&data, 1).unwrap();
         let decompressed = zrip::decompress(&compressed).unwrap();
@@ -179,8 +179,8 @@ fn roundtrip_incompressible_random() {
     let data: Vec<u8> = (0..50_000u64)
         .map(|i| {
             let x = i
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
             (x >> 33) as u8
         })
         .collect();
@@ -201,8 +201,8 @@ fn roundtrip_mixed_compressible_incompressible() {
         } else {
             data.extend((0..250u64).map(|j| {
                 let x = (i * 1000 + j)
-                    .wrapping_mul(6364136223846793005)
-                    .wrapping_add(1442695040888963407);
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
                 (x >> 33) as u8
             }));
         }
@@ -223,8 +223,8 @@ fn roundtrip_zero_literal_lengths() {
     for level in [1, 2, 3, 4] {
         let compressed = zrip::compress(&data, level).unwrap();
         let decoded = zrip::decompress(&compressed)
-            .unwrap_or_else(|e| panic!("decode failed at L{}: {}", level, e));
-        assert_eq!(decoded, data, "zero-ll round-trip mismatch at L{}", level);
+            .unwrap_or_else(|e| panic!("decode failed at L{level}: {e}"));
+        assert_eq!(decoded, data, "zero-ll round-trip mismatch at L{level}");
     }
 }
 
@@ -243,11 +243,10 @@ fn roundtrip_alternating_rep_offsets_ll0() {
     for level in [1, 3] {
         let compressed = zrip::compress(&data, level).unwrap();
         let decoded = zrip::decompress(&compressed)
-            .unwrap_or_else(|e| panic!("decode failed at L{}: {}", level, e));
+            .unwrap_or_else(|e| panic!("decode failed at L{level}: {e}"));
         assert_eq!(
             decoded, data,
-            "alternating rep offsets mismatch at L{}",
-            level
+            "alternating rep offsets mismatch at L{level}"
         );
     }
 }
@@ -273,8 +272,8 @@ fn roundtrip_match_length_boundaries() {
     for level in [1, 3] {
         let compressed = zrip::compress(&data, level).unwrap();
         let decoded = zrip::decompress(&compressed)
-            .unwrap_or_else(|e| panic!("decode failed at L{}: {}", level, e));
-        assert_eq!(decoded, data, "ML boundary mismatch at L{}", level);
+            .unwrap_or_else(|e| panic!("decode failed at L{level}: {e}"));
+        assert_eq!(decoded, data, "ML boundary mismatch at L{level}");
     }
 }
 
@@ -291,8 +290,8 @@ fn roundtrip_single_symbol_distribution() {
     for level in [1, 3] {
         let compressed = zrip::compress(&data, level).unwrap();
         let decoded = zrip::decompress(&compressed)
-            .unwrap_or_else(|e| panic!("decode failed at L{}: {}", level, e));
-        assert_eq!(decoded, data, "single-symbol FSE mismatch at L{}", level);
+            .unwrap_or_else(|e| panic!("decode failed at L{level}: {e}"));
+        assert_eq!(decoded, data, "single-symbol FSE mismatch at L{level}");
     }
 }
 
@@ -301,10 +300,10 @@ fn roundtrip_single_symbol_distribution() {
 #[test]
 fn roundtrip_large_literal_runs() {
     let mut data = Vec::with_capacity(200_000);
-    let mut rng = 0xDEADBEEFu32;
+    let mut rng = 0xDEAD_BEEF_u32;
     for _ in 0..100 {
         for _ in 0..1024 {
-            rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
+            rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             data.push((rng >> 16) as u8);
         }
         for j in 0..32u8 {
@@ -317,8 +316,8 @@ fn roundtrip_large_literal_runs() {
     for level in [1, 3] {
         let compressed = zrip::compress(&data, level).unwrap();
         let decoded = zrip::decompress(&compressed)
-            .unwrap_or_else(|e| panic!("decode failed at L{}: {}", level, e));
-        assert_eq!(decoded, data, "large LL run mismatch at L{}", level);
+            .unwrap_or_else(|e| panic!("decode failed at L{level}: {e}"));
+        assert_eq!(decoded, data, "large LL run mismatch at L{level}");
     }
 }
 
@@ -384,7 +383,7 @@ fn checksum_mismatch_detected() {
 fn checksum_various_sizes() {
     for size in [0, 1, 100, 1000, 10000, 100_000] {
         let original: Vec<u8> = (0..size as u32)
-            .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+            .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
             .collect();
         let compressed = zrip::compress(&original, 1).unwrap();
         let decompressed = zrip::decompress(&compressed).unwrap();
@@ -584,7 +583,7 @@ fn decompress_skippable_frame_before_data() {
     let compressed = zrip::compress(payload, 1).unwrap();
 
     let mut stream = Vec::new();
-    stream.extend_from_slice(&0x184D2A50u32.to_le_bytes());
+    stream.extend_from_slice(&0x184D_2A50_u32.to_le_bytes());
     stream.extend_from_slice(&(b"skip me".len() as u32).to_le_bytes());
     stream.extend_from_slice(b"skip me");
     stream.extend_from_slice(&compressed);
@@ -602,7 +601,7 @@ fn decompress_skippable_frame_between_data_frames() {
 
     let mut stream = Vec::new();
     stream.extend_from_slice(&c1);
-    stream.extend_from_slice(&0x184D2A5Fu32.to_le_bytes());
+    stream.extend_from_slice(&0x184D_2A5F_u32.to_le_bytes());
     stream.extend_from_slice(&4u32.to_le_bytes());
     stream.extend_from_slice(b"skip");
     stream.extend_from_slice(&c2);

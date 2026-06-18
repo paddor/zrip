@@ -568,7 +568,7 @@ fn hash5_const<const HASH_LOG: u32>(value: u64, hash_log: u32) -> usize {
     (((value << 24).wrapping_mul(PRIME64_1)) >> (64 - hl)) as usize
 }
 
-const PRIME7: u64 = 58295818150454627;
+const PRIME7: u64 = 58_295_818_150_454_627;
 
 #[inline(always)]
 fn hash7_const<const HASH_LOG: u32>(value: u64, hash_log: u32) -> usize {

@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
-pub const PRIME32_1: u32 = 0x9E3779B1;
-pub const PRIME32_2: u32 = 0x85EBCA77;
-pub const PRIME64_1: u64 = 0x9E3779B185EBCA87;
+pub const PRIME32_1: u32 = 0x9E37_79B1;
+pub const PRIME32_2: u32 = 0x85EB_CA77;
+pub const PRIME64_1: u64 = 0x9E37_79B1_85EB_CA87;
 
 #[inline]
 pub fn hash4(value: u32, hash_log: u32) -> u32 {

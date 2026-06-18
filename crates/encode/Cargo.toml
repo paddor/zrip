@@ -7,6 +7,9 @@ description = "zstd encoder for zrip (internal crate)"
 license = "MIT"
 repository = "https://github.com/paddor/zrip"
 
+[lints]
+workspace = true
+
 [features]
 default = ["std"]
 std = ["alloc", "zrip-core/std"]

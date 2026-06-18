@@ -17,7 +17,7 @@ use crate::fse::{FseDecodeEntry, LL_MAX_SYMBOL, ML_MAX_SYMBOL, OF_MAX_SYMBOL};
 use crate::huffman::HuffmanDecodeEntry;
 use crate::huffman::weights::{build_huffman_decode_table, parse_huffman_weights};
 
-pub const DICT_MAGIC: u32 = 0xEC30A437;
+pub const DICT_MAGIC: u32 = 0xEC30_A437;
 
 /// A pre-trained zstd dictionary for improved compression of small data.
 ///

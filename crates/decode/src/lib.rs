@@ -70,7 +70,7 @@ pub(crate) fn skip_skippable_frame(data: &[u8]) -> Option<usize> {
         return None;
     }
     let magic = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-    if (magic & 0xFFFFFFF0) != 0x184D2A50 {
+    if (magic & 0xFFFF_FFF0) != 0x184D_2A50 {
         return None;
     }
     let frame_size = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
@@ -272,7 +272,7 @@ pub(crate) fn decompress_frame(
     if let Some(ref mut hasher) = hasher {
         hasher.update(&output[output_start..]);
         let hash = hasher.finish();
-        let expected_checksum = (hash & 0xFFFFFFFF) as u32;
+        let expected_checksum = (hash & 0xFFFF_FFFF) as u32;
 
         if offset + 4 > input.len() {
             return Err(DecompressError::InputExhausted);
