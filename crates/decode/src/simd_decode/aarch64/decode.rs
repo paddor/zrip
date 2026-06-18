@@ -126,7 +126,7 @@ pub unsafe fn decode_execute_neon(
 
     let last_seq = num_sequences - 1;
     let mut seq_idx: u32 = 0;
-    let fast_limit = rev_reader.limit_ptr + 16;
+    let fast_limit = rev_reader.limit_ptr.saturating_add(16);
     while seq_idx + 2 <= last_seq && rev_reader.ptr >= fast_limit {
         rev_reader.refill_fast();
         let (ll1, ml1, off1) = decode_fields!(rev_reader, rep_offsets);
