@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [0.3.1]
+
+### Fixed
+
+- UB in SIMD decode: `wildcopy_neon_write32` computed an out-of-bounds pointer
+  before checking if the fast path applies, triggering UB even when `len < 32`.
+- Removed dead `decode_sequences_neon` that referenced undefined variables and
+  would fail to compile on aarch64.
+- Fixed `eprintln!("")` clippy warning in decode_compare example.
+
+### Changed
+
+- Split monolithic 3k-line test file into focused modules (`roundtrip`,
+  `interop`, `streaming`, `dict`, `adversarial`, `proptest_tests`).
+- Made tests Miri-compatible: avoid C zstd FFI and SIMD paths under Miri,
+  use pure-Rust scalar fallbacks.
+- Removed stale version badge from README.
+
 ## [0.3.0]
 
 ### Added
