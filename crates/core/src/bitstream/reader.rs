@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn read_single_bits() {
-        let data = [0b10110100u8];
+        let data = [0b1011_0100_u8];
         let mut r = BitReader::new(&data);
         assert_eq!(r.read_bits(1).unwrap(), 0);
         assert_eq!(r.read_bits(1).unwrap(), 0);
@@ -132,10 +132,10 @@ mod tests {
 
     #[test]
     fn read_cross_byte() {
-        let data = [0b11010110, 0b10110001];
+        let data = [0b1101_0110, 0b1011_0001];
         let mut r = BitReader::new(&data);
         assert_eq!(r.read_bits(4).unwrap(), 0b0110);
-        assert_eq!(r.read_bits(8).unwrap(), 0b00011101);
+        assert_eq!(r.read_bits(8).unwrap(), 0b0001_1101);
         assert_eq!(r.read_bits(4).unwrap(), 0b1011);
     }
 

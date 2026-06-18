@@ -80,6 +80,7 @@ redundant_closure_for_method_calls = "allow"
 # u128 -> f64 is fine for display purposes.
 enum_glob_use = "allow"
 module_name_repetitions = "allow"
+needless_pass_by_value = "allow"
 
 [profile.release]
 lto = "thin"

@@ -1132,7 +1132,7 @@ fn fastcover_c_zstd_cross_validates() {
         .map(|i| {
             format!(
                 r#"{{"ts":{},"level":"info","msg":"request processed","user_id":{},"latency_ms":{}}}"#,
-                1700000000 + i,
+                1_700_000_000 + i,
                 i % 50,
                 i * 3 + 10,
             )

@@ -104,15 +104,15 @@ fn compute_rep_offsets(content: &[u8], samples: &[&[u8]]) -> [u32; 3] {
 }
 
 fn compute_dict_id(content: &[u8], samples: &[&[u8]]) -> u32 {
-    let mut h = 0x811c9dc5u32;
+    let mut h = 0x811c_9dc5_u32;
     for &b in content {
         h ^= b as u32;
-        h = h.wrapping_mul(0x01000193);
+        h = h.wrapping_mul(0x0100_0193);
     }
     for &sample in samples.iter().take(10) {
         for &b in sample {
             h ^= b as u32;
-            h = h.wrapping_mul(0x01000193);
+            h = h.wrapping_mul(0x0100_0193);
         }
     }
     if h == 0 {

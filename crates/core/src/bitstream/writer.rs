@@ -134,7 +134,7 @@ mod tests {
         w.write_bits(0b11, 2);
         w.write_bits(0b000, 3);
         let bytes = w.into_bytes();
-        assert_eq!(bytes, [0b00011101]);
+        assert_eq!(bytes, [0b0001_1101]);
     }
 
     #[test]
@@ -151,7 +151,7 @@ mod tests {
         let mut w = BitWriter::new();
         w.write_bits(0b1, 1);
         let bytes = w.into_bytes();
-        assert_eq!(bytes, [0b00000001]);
+        assert_eq!(bytes, [0b0000_0001]);
     }
 
     #[test]
