@@ -122,7 +122,7 @@ impl CompressContext {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::unnecessary_wraps)]
 fn compress_core(
     input: &[u8],
     params: LevelParams,
@@ -154,7 +154,7 @@ fn compress_core(
         1
     } else if input.len() <= 0xFFFF + 256 {
         2
-    } else if input.len() <= 0xFFFFFFFF {
+    } else if input.len() <= 0xFFFF_FFFF {
         4
     } else {
         8
@@ -432,7 +432,7 @@ fn compress_core(
     }
 
     let hash = xxh64(input, 0);
-    let checksum = (hash & 0xFFFFFFFF) as u32;
+    let checksum = (hash & 0xFFFF_FFFF) as u32;
     output.extend_from_slice(&checksum.to_le_bytes());
 
     Ok(())

@@ -162,7 +162,7 @@ impl<R: Read> FrameDecoder<R> {
             self.read_buf[3],
         ]);
 
-        if (magic & 0xFFFFFFF0) == 0x184D2A50 {
+        if (magic & 0xFFFF_FFF0) == 0x184D_2A50 {
             self.inner.read_exact(&mut self.read_buf[5..9])?;
             let skip_size = u32::from_le_bytes([
                 self.read_buf[5],
@@ -462,7 +462,7 @@ impl<R: Read> FrameDecoder<R> {
 
         if let Some(ref hasher) = self.hasher {
             let hash = hasher.finish();
-            let expected = (hash & 0xFFFFFFFF) as u32;
+            let expected = (hash & 0xFFFF_FFFF) as u32;
             if expected != stored {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,

@@ -23,7 +23,7 @@ pub enum CompressError {
 /// Error returned by decompression functions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecompressError {
-    /// Frame magic number is not `0xFD2FB528`.
+    /// Frame magic number is not `0xFD2F_B528`.
     BadMagic,
     /// Frame descriptor or field sizes are invalid.
     BadFrameHeader,

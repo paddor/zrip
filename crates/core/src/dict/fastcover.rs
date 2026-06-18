@@ -135,16 +135,17 @@ fn hash_dmer(dmer: &[u8]) -> usize {
     let len = dmer.len();
     if len <= 8 {
         let v = read_le_partial(dmer);
-        v.wrapping_mul(0x9E3779B97F4A7C15) as usize
+        v.wrapping_mul(0x9E37_79B9_7F4A_7C15) as usize
     } else {
-        let mut h = read_le_u64(dmer).wrapping_mul(0x9E3779B97F4A7C15);
+        let mut h = read_le_u64(dmer).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         let mut off = 8;
         while off + 8 <= len {
-            h = h.rotate_left(11) ^ read_le_u64(&dmer[off..]).wrapping_mul(0x9E3779B97F4A7C15);
+            h = h.rotate_left(11) ^ read_le_u64(&dmer[off..]).wrapping_mul(0x9E37_79B9_7F4A_7C15);
             off += 8;
         }
         if off < len {
-            h = h.rotate_left(11) ^ read_le_partial(&dmer[off..]).wrapping_mul(0x9E3779B97F4A7C15);
+            h = h.rotate_left(11)
+                ^ read_le_partial(&dmer[off..]).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         }
         h as usize
     }

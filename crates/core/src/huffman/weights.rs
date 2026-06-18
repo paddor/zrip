@@ -53,7 +53,7 @@ fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompr
         return Err(DecompressError::BadHuffmanWeights);
     }
 
-    let compressed = &data[1..1 + compressed_size];
+    let compressed = &data[1..=compressed_size];
 
     let mut bit_reader = BitReader::new(compressed);
     let (distribution, accuracy_log) =

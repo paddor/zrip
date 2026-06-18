@@ -137,7 +137,7 @@ impl<W: Write> FrameEncoder<W> {
         self.flush_block(true)?;
 
         let hash = self.hasher.finish();
-        let checksum = (hash & 0xFFFFFFFF) as u32;
+        let checksum = (hash & 0xFFFF_FFFF) as u32;
         self.inner.write_all(&checksum.to_le_bytes())?;
         Ok(())
     }
@@ -260,7 +260,7 @@ impl<W: Write> FrameEncoder<W> {
                         );
                     }
                 }
-            };
+            }
             if self.params.force_raw_literals {
                 block_encoder::encode_compressed_block_raw(
                     &chunk,

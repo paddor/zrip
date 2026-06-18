@@ -1,6 +1,6 @@
 //! Fast, pure-Rust zstd compression.
 //!
-//! zrip implements zstd compression levels -7 through 4 (Fast and DFast strategies),
+//! zrip implements zstd compression levels -7 through 4 (Fast and `DFast` strategies),
 //! targeting high-speed compression for data transfers. It produces standard zstd
 //! frames decompressible by any compliant decoder.
 //!
@@ -24,7 +24,7 @@
 //! | -7..=-1 | Fast | Fastest encode, lowest ratio |
 //! | 0 | | Library default (currently level 1) |
 //! | 1..=2 | Fast | Good balance for network transfers |
-//! | 3..=4 | DFast | Better ratio, still fast |
+//! | 3..=4 | `DFast` | Better ratio, still fast |
 //!
 //! # Streaming
 //!
@@ -127,6 +127,7 @@ pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usiz
     zrip_encode::compress_into(input, output, level)
 }
 
+#[must_use]
 pub fn compress_bound(input_len: usize) -> usize {
     let num_blocks = input_len / zrip_core::frame::MAX_BLOCK_SIZE + 1;
     input_len + num_blocks * 3 + 18

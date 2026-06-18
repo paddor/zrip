@@ -65,13 +65,13 @@ pub fn encode_sequences_section(
         }
 
         let ml_extra_bits = (ml_packed >> 24) as u8;
-        let ml_extra = ml_packed & 0xFFFFFF;
+        let ml_extra = ml_packed & 0x00FF_FFFF;
         if ml_extra_bits > 0 {
             writer.write_bits(ml_extra, ml_extra_bits);
         }
 
         let ll_extra_bits = (ll_packed >> 24) as u8;
-        let ll_extra = ll_packed & 0xFFFFFF;
+        let ll_extra = ll_packed & 0x00FF_FFFF;
         if ll_extra_bits > 0 {
             writer.write_bits(ll_extra, ll_extra_bits);
         }

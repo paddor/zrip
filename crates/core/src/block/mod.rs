@@ -51,7 +51,7 @@ mod tests {
         let hdr = parse_block_header(&data).unwrap();
         assert!(!hdr.last_block);
         assert_eq!(hdr.block_type, BlockType::Raw);
-        assert_eq!(hdr.block_size, 0x010000 >> 3);
+        assert_eq!(hdr.block_size, 0x0001_0000 >> 3);
     }
 
     #[test]

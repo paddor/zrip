@@ -25,7 +25,7 @@ fn roundtrip_all_levels_c_cross_validate() {
 #[test]
 fn roundtrip_all_levels_random_c_cross_validate() {
     let original: Vec<u8> = (0..100_000u32)
-        .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
         .collect();
     for level in [-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4] {
         let compressed = zrip::compress(&original, level).unwrap();
@@ -82,9 +82,9 @@ fn roundtrip_all_levels_all_patterns_c_cross_validate() {
             "random_ish",
             (0..10000u32)
                 .map(|i| {
-                    ((i as u64)
-                        .wrapping_mul(6364136223846793005u64)
-                        .wrapping_add(1442695040888963407u64)
+                    (u64::from(i)
+                        .wrapping_mul(6_364_136_223_846_793_005_u64)
+                        .wrapping_add(1_442_695_040_888_963_407_u64)
                         >> 56) as u8
                 })
                 .collect(),
@@ -110,7 +110,7 @@ fn roundtrip_exact_block_fill_c_cross_validate() {
         }
         let size = size as usize;
         let data: Vec<u8> = (0..size as u32)
-            .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+            .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
             .collect();
         let compressed = zrip::compress(&data, 1).unwrap();
         let c_dec = zstd::decode_all(&compressed[..]).unwrap();
@@ -123,8 +123,8 @@ fn roundtrip_incompressible_random_c_cross_validate() {
     let data: Vec<u8> = (0..50_000u64)
         .map(|i| {
             let x = i
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
             (x >> 33) as u8
         })
         .collect();
@@ -142,8 +142,8 @@ fn roundtrip_zero_literal_lengths_c_cross_validate() {
     for level in [1, 2, 3, 4] {
         let compressed = zrip::compress(&data, level).unwrap();
         let decoded = zstd::decode_all(&compressed[..])
-            .unwrap_or_else(|e| panic!("C zstd decode failed at L{}: {}", level, e));
-        assert_eq!(decoded, data, "zero-ll round-trip mismatch at L{}", level);
+            .unwrap_or_else(|e| panic!("C zstd decode failed at L{level}: {e}"));
+        assert_eq!(decoded, data, "zero-ll round-trip mismatch at L{level}");
     }
 }
 
@@ -162,11 +162,10 @@ fn roundtrip_alternating_rep_offsets_ll0_c_cross_validate() {
     for level in [1, 3] {
         let compressed = zrip::compress(&data, level).unwrap();
         let decoded = zstd::decode_all(&compressed[..])
-            .unwrap_or_else(|e| panic!("C zstd decode failed at L{}: {}", level, e));
+            .unwrap_or_else(|e| panic!("C zstd decode failed at L{level}: {e}"));
         assert_eq!(
             decoded, data,
-            "alternating rep offsets mismatch at L{}",
-            level
+            "alternating rep offsets mismatch at L{level}"
         );
     }
 }
@@ -190,8 +189,8 @@ fn roundtrip_match_length_boundaries_c_cross_validate() {
     for level in [1, 3] {
         let compressed = zrip::compress(&data, level).unwrap();
         let decoded = zstd::decode_all(&compressed[..])
-            .unwrap_or_else(|e| panic!("C zstd decode failed at L{}: {}", level, e));
-        assert_eq!(decoded, data, "ML boundary mismatch at L{}", level);
+            .unwrap_or_else(|e| panic!("C zstd decode failed at L{level}: {e}"));
+        assert_eq!(decoded, data, "ML boundary mismatch at L{level}");
     }
 }
 
@@ -206,18 +205,18 @@ fn roundtrip_single_symbol_distribution_c_cross_validate() {
     for level in [1, 3] {
         let compressed = zrip::compress(&data, level).unwrap();
         let decoded = zstd::decode_all(&compressed[..])
-            .unwrap_or_else(|e| panic!("C zstd decode failed at L{}: {}", level, e));
-        assert_eq!(decoded, data, "single-symbol FSE mismatch at L{}", level);
+            .unwrap_or_else(|e| panic!("C zstd decode failed at L{level}: {e}"));
+        assert_eq!(decoded, data, "single-symbol FSE mismatch at L{level}");
     }
 }
 
 #[test]
 fn roundtrip_large_literal_runs_c_cross_validate() {
     let mut data = Vec::with_capacity(200_000);
-    let mut rng = 0xDEADBEEFu32;
+    let mut rng = 0xDEAD_BEEF_u32;
     for _ in 0..100 {
         for _ in 0..1024 {
-            rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
+            rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             data.push((rng >> 16) as u8);
         }
         for j in 0..32u8 {
@@ -230,8 +229,8 @@ fn roundtrip_large_literal_runs_c_cross_validate() {
     for level in [1, 3] {
         let compressed = zrip::compress(&data, level).unwrap();
         let decoded = zstd::decode_all(&compressed[..])
-            .unwrap_or_else(|e| panic!("C zstd decode failed at L{}: {}", level, e));
-        assert_eq!(decoded, data, "large LL run mismatch at L{}", level);
+            .unwrap_or_else(|e| panic!("C zstd decode failed at L{level}: {e}"));
+        assert_eq!(decoded, data, "large LL run mismatch at L{level}");
     }
 }
 
@@ -321,9 +320,9 @@ fn compress_into_c_cross_validate() {
 #[test]
 fn rep_offset2_rotation_cross_validate() {
     let mut data = vec![0u8; 64 * 1024];
-    let mut rng = 0x12345678u32;
-    for b in data.iter_mut() {
-        rng = rng.wrapping_mul(1103515245).wrapping_add(12345);
+    let mut rng = 0x1234_5678_u32;
+    for b in &mut data {
+        rng = rng.wrapping_mul(1_103_515_245).wrapping_add(12345);
         *b = (rng >> 16) as u8 & 0x1F;
     }
     for chunk in data.chunks_mut(512) {
@@ -339,21 +338,21 @@ fn rep_offset2_rotation_cross_validate() {
     for level in [3, 4] {
         let compressed = zrip::compress(&data, level).unwrap();
         let decoded = zstd::decode_all(&compressed[..])
-            .unwrap_or_else(|e| panic!("C zstd decode failed at L{}: {}", level, e));
-        assert_eq!(decoded, data, "rep offset rotation mismatch at L{}", level);
+            .unwrap_or_else(|e| panic!("C zstd decode failed at L{level}: {e}"));
+        assert_eq!(decoded, data, "rep offset rotation mismatch at L{level}");
     }
 }
 
 #[test]
 fn roundtrip_negative_levels_cross_validate() {
     let data: Vec<u8> = (0..100_000u32)
-        .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
         .collect();
     for level in [-7, -6, -5, -4, -3, -2, -1] {
         let compressed = zrip::compress(&data, level).unwrap();
         let decoded = zstd::decode_all(&compressed[..])
-            .unwrap_or_else(|e| panic!("C zstd decode failed at L{}: {}", level, e));
-        assert_eq!(decoded, data, "C zstd round-trip mismatch at L{}", level);
+            .unwrap_or_else(|e| panic!("C zstd decode failed at L{level}: {e}"));
+        assert_eq!(decoded, data, "C zstd round-trip mismatch at L{level}");
     }
 }
 
@@ -370,15 +369,14 @@ fn roundtrip_corpus_l3_cross_validate() {
         "webster",
         "x-ray",
     ] {
-        let path = format!("corpus/{}", name);
-        let data = match std::fs::read(&path) {
-            Ok(d) => d,
-            Err(_) => continue,
+        let path = format!("corpus/{name}");
+        let Ok(data) = std::fs::read(&path) else {
+            continue;
         };
         let compressed = zrip::compress(&data, 3).unwrap();
         let decoded = zstd::decode_all(&compressed[..])
-            .unwrap_or_else(|e| panic!("C zstd decode failed for {} L3: {}", name, e));
-        assert_eq!(decoded, data, "C zstd round-trip mismatch for {} L3", name);
+            .unwrap_or_else(|e| panic!("C zstd decode failed for {name} L3: {e}"));
+        assert_eq!(decoded, data, "C zstd round-trip mismatch for {name} L3");
     }
 }
 
@@ -395,15 +393,14 @@ fn roundtrip_corpus_l4_cross_validate() {
         "webster",
         "x-ray",
     ] {
-        let path = format!("corpus/{}", name);
-        let data = match std::fs::read(&path) {
-            Ok(d) => d,
-            Err(_) => continue,
+        let path = format!("corpus/{name}");
+        let Ok(data) = std::fs::read(&path) else {
+            continue;
         };
         let compressed = zrip::compress(&data, 4).unwrap();
         let decoded = zstd::decode_all(&compressed[..])
-            .unwrap_or_else(|e| panic!("C zstd decode failed for {} L4: {}", name, e));
-        assert_eq!(decoded, data, "C zstd round-trip mismatch for {} L4", name);
+            .unwrap_or_else(|e| panic!("C zstd decode failed for {name} L4: {e}"));
+        assert_eq!(decoded, data, "C zstd round-trip mismatch for {name} L4");
     }
 }
 
@@ -457,7 +454,7 @@ fn decompress_c_zstd_negative_levels() {
 #[test]
 fn decompress_c_zstd_random() {
     let original: Vec<u8> = (0..100_000u32)
-        .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
         .collect();
     for level in [1, 3, 5, 9] {
         let compressed = zstd::encode_all(&original[..], level).unwrap();
@@ -531,9 +528,9 @@ fn decompress_c_all_levels_all_patterns() {
             "random_ish",
             (0..10000u32)
                 .map(|i| {
-                    ((i as u64)
-                        .wrapping_mul(6364136223846793005u64)
-                        .wrapping_add(1442695040888963407u64)
+                    (u64::from(i)
+                        .wrapping_mul(6_364_136_223_846_793_005_u64)
+                        .wrapping_add(1_442_695_040_888_963_407_u64)
                         >> 56) as u8
                 })
                 .collect(),
@@ -554,7 +551,7 @@ fn decompress_c_all_levels_all_patterns() {
 fn decompress_c_block_boundary_sizes() {
     for size in [128 * 1024 - 1, 128 * 1024, 128 * 1024 + 1, 200_000] {
         let original: Vec<u8> = (0..size as u32)
-            .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+            .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
             .collect();
         let compressed = zstd::encode_all(&original[..], 1).unwrap();
         let decompressed =
@@ -568,8 +565,8 @@ fn decompress_c_high_entropy() {
     let original: Vec<u8> = (0..50_000u32)
         .map(|i| {
             let x = i
-                .wrapping_mul(2654435761)
-                .wrapping_add(i.wrapping_mul(1103515245));
+                .wrapping_mul(2_654_435_761)
+                .wrapping_add(i.wrapping_mul(1_103_515_245));
             (x >> 16) as u8
         })
         .collect();
@@ -611,7 +608,7 @@ fn decompress_c_alternating_compressible_incompressible() {
         if i % 2 == 0 {
             original.extend(std::iter::repeat_n(0x42u8, 250));
         } else {
-            original.extend((0..250u32).map(|j| ((j + i).wrapping_mul(2654435761) >> 24) as u8));
+            original.extend((0..250u32).map(|j| ((j + i).wrapping_mul(2_654_435_761) >> 24) as u8));
         }
     }
     for level in [1, 3, 9] {
@@ -632,7 +629,7 @@ fn decompress_c_size_sweep() {
                 continue;
             }
             let original: Vec<u8> = (0..s as u32)
-                .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+                .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
                 .collect();
             let compressed = zstd::encode_all(&original[..], 1).unwrap();
             let decompressed =
@@ -645,7 +642,7 @@ fn decompress_c_size_sweep() {
 #[test]
 fn decompress_c_multiblock_frame() {
     let original: Vec<u8> = (0..200_000u32)
-        .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
         .collect();
     for level in [1, 3, 9, 19] {
         let compressed = zstd::encode_all(&original[..], level).unwrap();
@@ -673,7 +670,8 @@ fn decompress_c_long_literal_lengths() {
     let mut data = Vec::with_capacity(50_000);
     for i in 0..50 {
         data.extend(
-            (0..500u32).map(|j| ((j.wrapping_add(i * 500).wrapping_mul(2654435761)) >> 16) as u8),
+            (0..500u32)
+                .map(|j| ((j.wrapping_add(i * 500).wrapping_mul(2_654_435_761)) >> 16) as u8),
         );
         data.extend(std::iter::repeat_n(0x42u8, 500));
     }
@@ -832,7 +830,7 @@ fn decompress_c_4stream_segment_boundary_sizes() {
         997, 998, 999, 1000, 1001, 1002, 1003, 4093, 4094, 4095, 4096, 4097, 255, 256, 257,
     ] {
         let data: Vec<u8> = (0..output_size)
-            .map(|i| ((i as u32).wrapping_mul(2654435761) >> 24) as u8)
+            .map(|i| ((i as u32).wrapping_mul(2_654_435_761) >> 24) as u8)
             .collect();
         let compressed = zstd::encode_all(&data[..], 1).unwrap();
         let decompressed =
@@ -856,7 +854,7 @@ fn decompress_c_predefined_fse_tables() {
 fn decompress_c_high_accuracy_fse_tables() {
     let data: Vec<u8> = (0..50_000u32)
         .map(|i| {
-            let x = i.wrapping_mul(1103515245).wrapping_add(12345);
+            let x = i.wrapping_mul(1_103_515_245).wrapping_add(12345);
             ((x >> 16) & 0xFF) as u8
         })
         .collect();
@@ -889,12 +887,8 @@ fn decompress_c_rle_fse_tables() {
     for level in [1, 3, 6, 9] {
         let compressed = zstd::encode_all(&data[..], level).unwrap();
         let decoded = zrip::decompress(&compressed)
-            .unwrap_or_else(|e| panic!("zrip decode of C L{} failed: {}", level, e));
-        assert_eq!(
-            decoded, data,
-            "C zstd RLE FSE decode mismatch at L{}",
-            level
-        );
+            .unwrap_or_else(|e| panic!("zrip decode of C L{level} failed: {e}"));
+        assert_eq!(decoded, data, "C zstd RLE FSE decode mismatch at L{level}");
     }
 }
 
@@ -1008,7 +1002,7 @@ fn streaming_decoder_multiframe_seq_tables_reset() {
     let mut output = Vec::new();
     decoder.read_to_end(&mut output).unwrap();
 
-    let mut expected = data1.to_vec();
+    let mut expected = data1.clone();
     expected.extend_from_slice(&data2);
     assert_eq!(output, expected);
 }
@@ -1037,11 +1031,8 @@ fn streaming_encoder_reset_c_zstd_interop() {
 fn make_dict_samples() -> (Vec<Vec<u8>>, Vec<u8>) {
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
-                i, i, i
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
         })
         .collect();
 
@@ -1081,7 +1072,7 @@ fn decompress_c_with_dictionary() {
         std::io::Write::write_all(&mut encoder, sample).unwrap();
         let compressed = encoder.finish().unwrap();
         let decompressed = zrip::decompress_with_dict(&compressed, &dict)
-            .unwrap_or_else(|e| panic!("dict decompress failed: {}", e));
+            .unwrap_or_else(|e| panic!("dict decompress failed: {e}"));
         assert_eq!(&decompressed, sample);
     }
 }
@@ -1141,7 +1132,7 @@ fn fastcover_c_zstd_cross_validates() {
         .map(|i| {
             format!(
                 r#"{{"ts":{},"level":"info","msg":"request processed","user_id":{},"latency_ms":{}}}"#,
-                1700000000 + i,
+                1_700_000_000 + i,
                 i % 50,
                 i * 3 + 10,
             )
@@ -1323,7 +1314,7 @@ fn decompress_skippable_frame_before_c_data() {
     let compressed = zstd::encode_all(&payload[..], 1).unwrap();
 
     let mut stream = Vec::new();
-    stream.extend_from_slice(&0x184D2A50u32.to_le_bytes());
+    stream.extend_from_slice(&0x184D_2A50_u32.to_le_bytes());
     stream.extend_from_slice(&(b"skip me".len() as u32).to_le_bytes());
     stream.extend_from_slice(b"skip me");
     stream.extend_from_slice(&compressed);
@@ -1341,7 +1332,7 @@ fn decompress_skippable_frame_between_c_data_frames() {
 
     let mut stream = Vec::new();
     stream.extend_from_slice(&c1);
-    stream.extend_from_slice(&0x184D2A5Fu32.to_le_bytes());
+    stream.extend_from_slice(&0x184D_2A5F_u32.to_le_bytes());
     stream.extend_from_slice(&4u32.to_le_bytes());
     stream.extend_from_slice(b"skip");
     stream.extend_from_slice(&c2);

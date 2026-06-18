@@ -4,7 +4,7 @@ exclude = ["fuzz", "bench"]
 
 [package]
 name = "zrip"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Pure Rust zstd codec: Fast/DFast strategies (levels -7..4), COVER/FastCOVER dict builder"
@@ -22,9 +22,12 @@ dict_builder = ["std", "zrip-core/dict_builder"]
 nightly = ["zrip-core/nightly", "zrip-encode/nightly", "zrip-decode/nightly"]
 
 [dependencies]
-zrip-core = { version = "0.3.0", path = "crates/core", default-features = false }
-zrip-encode = { version = "0.3.0", path = "crates/encode", default-features = false }
-zrip-decode = { version = "0.3.0", path = "crates/decode", default-features = false }
+zrip-core = { version = "0.3.1", path = "crates/core", default-features = false }
+zrip-encode = { version = "0.3.1", path = "crates/encode", default-features = false }
+zrip-decode = { version = "0.3.1", path = "crates/decode", default-features = false }
+
+[lints]
+workspace = true
 
 [dev-dependencies]
 zstd = "0.13"
@@ -34,6 +37,50 @@ libc = "0.2"
 
 [[example]]
 name = "quickstart"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Casts are pervasive and intentional in a codec operating on fixed-width fields.
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+cast_precision_loss = "allow"
+# Raw pointer casts in unsafe primitives and SIMD intrinsics.
+ptr_as_ptr = "allow"
+ptr_cast_constness = "allow"
+cast_ptr_alignment = "allow"
+# Hot-path primitives need guaranteed inlining.
+inline_always = "allow"
+# Codec functions are inherently long.
+too_many_lines = "allow"
+# Internal crate: doc and must_use noise not worth it.
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+doc_markdown = "allow"
+# Acceptable in codec code.
+similar_names = "allow"
+items_after_statements = "allow"
+wildcard_imports = "allow"
+# Bitwise bool is intentional for branchless hot paths.
+needless_bitwise_bool = "allow"
+# match on tuple with catch-all is clearer than if-let for FSE table dispatch.
+single_match_else = "allow"
+# manual_ilog2 suggestion changes behavior on zero.
+manual_ilog2 = "allow"
+bool_to_int_with_if = "allow"
+if_not_else = "allow"
+# Iterating with .iter() is explicit about intent.
+explicit_iter_loop = "allow"
+# let-else doesn't help when the else is a complex expression.
+option_if_let_else = "allow"
+match_same_arms = "allow"
+redundant_closure_for_method_calls = "allow"
+# u128 -> f64 is fine for display purposes.
+enum_glob_use = "allow"
+module_name_repetitions = "allow"
+needless_pass_by_value = "allow"
 
 [profile.release]
 lto = "thin"

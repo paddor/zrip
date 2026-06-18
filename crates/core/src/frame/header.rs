@@ -45,7 +45,9 @@ pub fn parse_frame_header(data: &[u8]) -> Result<FrameHeader, DecompressError> {
 
     let mut offset = 5;
 
-    let window_size = if !single_segment {
+    let window_size = if single_segment {
+        0
+    } else {
         if data.len() <= offset {
             return Err(DecompressError::BadFrameHeader);
         }
@@ -56,8 +58,6 @@ pub fn parse_frame_header(data: &[u8]) -> Result<FrameHeader, DecompressError> {
         let window_base = 1u64 << (10 + exponent);
         let window_add = (window_base >> 3) * mantissa;
         window_base + window_add
-    } else {
-        0
     };
 
     let dict_id_size = match dict_id_flag {

@@ -39,7 +39,7 @@ fn main() {
             t.elapsed().as_nanos()
         })
         .collect();
-    times.sort();
+    times.sort_unstable();
     let zrip_c_ns = times[iters / 2];
 
     // zrip decoding zrip data
@@ -56,7 +56,7 @@ fn main() {
             t.elapsed().as_nanos()
         })
         .collect();
-    times.sort();
+    times.sort_unstable();
     let zrip_z_ns = times[iters / 2];
 
     // C zstd decoding C-zstd data
@@ -77,7 +77,7 @@ fn main() {
             t.elapsed().as_nanos()
         })
         .collect();
-    times.sort();
+    times.sort_unstable();
     let c_c_ns = times[iters / 2];
 
     let mb = data.len() as f64 / 1e6;

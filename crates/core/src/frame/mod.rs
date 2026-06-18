@@ -4,8 +4,8 @@
 
 pub mod header;
 
-/// Zstd frame magic number (`0xFD2FB528`).
-pub const ZSTD_MAGIC: u32 = 0xFD2FB528;
+/// Zstd frame magic number (`0xFD2F_B528`).
+pub const ZSTD_MAGIC: u32 = 0xFD2F_B528;
 
 /// Minimum frame header size in bytes.
 pub const MIN_FRAME_HEADER_SIZE: usize = 2;

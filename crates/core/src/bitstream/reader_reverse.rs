@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn sentinel_only_no_data() {
-        let data = [0b00000001];
+        let data = [0b0000_0001];
         let r = ReverseBitReader::new(&data).unwrap();
         assert_eq!(r.bits_remaining(), 0);
     }
@@ -192,21 +192,21 @@ mod tests {
 
         let mut w = BitWriter::new();
         w.write_bits(0b101, 3);
-        w.write_bits(0b11001010, 8);
+        w.write_bits(0b1100_1010, 8);
         w.write_bits(0b1, 1);
         w.close_reverse_stream();
         let bytes = w.into_bytes();
 
         let mut r = ReverseBitReader::new(&bytes).unwrap();
         assert_eq!(r.read_bits(1).unwrap(), 0b1);
-        assert_eq!(r.read_bits(8).unwrap(), 0b11001010);
+        assert_eq!(r.read_bits(8).unwrap(), 0b1100_1010);
         assert_eq!(r.read_bits(3).unwrap(), 0b101);
         assert_eq!(r.bits_remaining(), 0);
     }
 
     #[test]
     fn single_byte_with_data() {
-        let data = [0b00001101];
+        let data = [0b0000_1101];
         let mut r = ReverseBitReader::new(&data).unwrap();
         assert_eq!(r.read_bits(3).unwrap(), 0b101);
         assert_eq!(r.bits_remaining(), 0);

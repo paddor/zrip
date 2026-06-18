@@ -69,6 +69,7 @@ pub fn compress(input: &[u8], level: i32) -> Result<Vec<u8>, CompressError> {
     compress_inner(input, &params)
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn compress_inner(input: &[u8], params: &strategy::LevelParams) -> Result<Vec<u8>, CompressError> {
     let mut output = Vec::with_capacity(input.len() + 32);
     compress_frame(input, params, &mut output);
@@ -82,7 +83,7 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
         1
     } else if input.len() <= 0xFFFF + 256 {
         2
-    } else if input.len() <= 0xFFFFFFFF {
+    } else if input.len() <= 0xFFFF_FFFF {
         4
     } else {
         8
@@ -201,7 +202,7 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
     }
 
     let hash = xxh64(input, 0);
-    let checksum = (hash & 0xFFFFFFFF) as u32;
+    let checksum = (hash & 0xFFFF_FFFF) as u32;
     output.extend_from_slice(&checksum.to_le_bytes());
 }
 
@@ -221,7 +222,7 @@ pub fn compress_with_dict(
         1
     } else if input.len() <= 0xFFFF + 256 {
         2
-    } else if input.len() <= 0xFFFFFFFF {
+    } else if input.len() <= 0xFFFF_FFFF {
         4
     } else {
         8
@@ -390,7 +391,7 @@ pub fn compress_with_dict(
     }
 
     let hash = xxh64(input, 0);
-    let checksum = (hash & 0xFFFFFFFF) as u32;
+    let checksum = (hash & 0xFFFF_FFFF) as u32;
     output.extend_from_slice(&checksum.to_le_bytes());
 
     Ok(output)

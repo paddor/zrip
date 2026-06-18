@@ -5,11 +5,8 @@
 fn zrip_trained_dict_roundtrip() {
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
-                i, i, i
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
         })
         .collect();
 
@@ -35,11 +32,8 @@ fn zrip_trained_dict_roundtrip() {
 fn fastcover_improves_compression() {
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
-                i, i, i
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
         })
         .collect();
 
@@ -66,11 +60,7 @@ fn fastcover_improves_compression() {
 fn fastcover_various_params() {
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com"}}"#,
-                i, i, i,
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com"}}"#).into_bytes()
         })
         .collect();
     let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
@@ -114,7 +104,7 @@ fn fastcover_various_params() {
 fn fastcover_diverse_data_types() {
     // JSON-like
     let json_samples: Vec<Vec<u8>> = (0..100)
-        .map(|i| format!(r#"{{"key{}":"val{}"}}"#, i, i).into_bytes())
+        .map(|i| format!(r#"{{"key{i}":"val{i}"}}"#).into_bytes())
         .collect();
     let json_refs: Vec<&[u8]> = json_samples.iter().map(|s| s.as_slice()).collect();
     let dict = zrip::dict::train_dict_fastcover(
@@ -150,7 +140,7 @@ fn fastcover_diverse_data_types() {
             let mut v = vec![0x08]; // field 1, varint
             v.push((i & 0x7F) as u8);
             v.push(0x12); // field 2, length-delimited
-            let s = format!("user_{}", i);
+            let s = format!("user_{i}");
             v.push(s.len() as u8);
             v.extend_from_slice(s.as_bytes());
             v
@@ -225,11 +215,8 @@ fn fastcover_large_dict() {
 fn fastcover_all_levels() {
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
-                i, i, i
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
         })
         .collect();
     let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
@@ -256,11 +243,8 @@ fn streaming_dict_zrip_trained_roundtrip() {
 
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
-                i, i, i
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
         })
         .collect();
     let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
@@ -323,11 +307,8 @@ fn streaming_dict_single_byte_writes() {
 
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
-                i, i, i
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
         })
         .collect();
     let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
@@ -364,11 +345,8 @@ fn streaming_dict_roundtrip() {
 
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
-                i, i, i
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
         })
         .collect();
     let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
@@ -403,11 +381,8 @@ fn streaming_dict_multiblock() {
 
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
-                i, i, i
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
         })
         .collect();
     let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
@@ -446,11 +421,8 @@ fn streaming_encoder_reset_with_dict() {
 
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
-                i, i, i
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
         })
         .collect();
     let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
@@ -484,11 +456,8 @@ fn streaming_decoder_reset_with_dict() {
 
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
-                i, i, i
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
         })
         .collect();
     let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
@@ -522,11 +491,8 @@ fn streaming_dict_multiblock_reset() {
 
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
-                i, i, i
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
         })
         .collect();
     let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
@@ -561,11 +527,8 @@ fn streaming_decoder_dict_mismatch() {
 
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(
-                r#"{{"id":{},"name":"user_{}","email":"user{}@example.com","active":true}}"#,
-                i, i, i
-            )
-            .into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
         })
         .collect();
     let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
