@@ -60,7 +60,7 @@ fn fastcover_improves_compression() {
 fn fastcover_various_params() {
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
-            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com"}}"#,).into_bytes()
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com"}}"#).into_bytes()
         })
         .collect();
     let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
