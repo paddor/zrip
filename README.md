@@ -134,40 +134,24 @@ let dict = train_dict_fastcover(&samples, 16384, FastCoverParams::default());
 
 ## Safety
 
-zrip uses unsafe for performance, not a zero-unsafe codebase. All algorithm
-and control-flow code is `#![forbid(unsafe_code)]`. Unsafe is confined to
-small, auditable leaf modules:
+[SAFETY.md](SAFETY.md) documents the unsafe boundary and catalogs C zstd
+memory safety bugs that Rust prevents by construction.
 
-- `primitives.rs` modules in `bitstream/`, `huffman/`, `encode/`, `decode/`:
-  `#[inline(always)]` wrappers around `get_unchecked`, `read_unaligned`,
-  `set_len`, and `copy_nonoverlapping` with `debug_assert!` guards.
-- `simd/` and `simd_decode/`: intrinsics and raw pointer arithmetic for
-  wildcopy, copy-match, and the fused SIMD sequence decoder.
-- `huffman/decode_4stream.rs`: pointer-based interleaved 4-stream Huffman
-  decoder.
+## Design
+
+[DESIGN.md](DESIGN.md) covers the encode/decode pipeline, SIMD dispatch,
+compile-time specialization, and divergences from C zstd.
 
 ## Levels
 
-| Level | Strategy | Hash table | Literals | Sequences | Notes |
-|------:|:---------|:-----------|:---------|:----------|:------|
-| -7 | Fast | 32 KB | Raw | Predefined FSE | Max throughput, no entropy coding |
-| -6..-1 | Fast | 32 KB | Huffman | Predefined/custom FSE | Standard encode pipeline |
-| 1 | Fast | 64 KB | Huffman | Predefined/custom FSE | 7-byte min match |
-| 2 | Fast | 256 KB | Huffman | Predefined/custom FSE | 6-byte min match, 1 MB window |
-| 3 | DFast | 2x 128 KB | Huffman | Predefined/custom FSE | Dual hash (short + long matches) |
-| 4 | DFast | 2x 256 KB | Huffman | Predefined/custom FSE | Best ratio in this crate |
+| Level | Strategy | Hash table | Min match | Literals | Sequences |
+|------:|:---------|:-----------|:---------:|:---------|:----------|
+| -7 | Fast | 32 KB | 5 | Raw | Predefined FSE |
+| -6..-1 | Fast | 32 KB | 5 | Huffman | Predefined/custom FSE |
+| 1 | Fast | 64 KB | 4 | Huffman | Predefined/custom FSE |
+| 2 | Fast | 256 KB | 4 | Huffman | Predefined/custom FSE |
+| 3 | DFast | 2x 128 KB | 4 | Huffman | Predefined/custom FSE |
+| 4 | DFast | 2x 256 KB | 4 | Huffman | Predefined/custom FSE |
 
-Level 0 maps to the library default (currently level 1).
-
-**L-7** skips Huffman table construction and always emits raw literal blocks
-with predefined FSE tables. This eliminates the most expensive part of the
-encode pipeline (Huffman tree build, stream encoding, custom FSE table
-estimation) at the cost of compression ratio. The result is a valid zstd
-frame that any decoder handles, but with LZ4-class encode throughput.
-
-**L-6 through L2** use the full encode pipeline: Huffman-compressed literals
-(with treeless reuse across blocks) and predefined or custom FSE tables for
-sequences, whichever produces smaller output.
-
-**L3 and L4** use the DFast strategy with two hash tables (short 4-byte and
-long 8-byte matches) for better match quality at lower throughput.
+Level 0 maps to the library default (currently level 1). See
+[DESIGN.md](DESIGN.md) for parameter details and pipeline behavior per level.
