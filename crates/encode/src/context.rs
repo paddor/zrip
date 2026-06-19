@@ -363,6 +363,7 @@ fn compress_core(
                         plen,
                         params.hash_log,
                         params.chain_log,
+                        params.min_match,
                         hash_table,
                         hash_long,
                     );

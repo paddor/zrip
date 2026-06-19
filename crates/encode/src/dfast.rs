@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use crate::primitives;
 use crate::strategy::LevelParams;
 use zrip_core::Sequence;
-use zrip_core::hash::PRIME64_1;
+use zrip_core::hash::{PRIME32_1, PRIME64_1};
 
 pub(crate) fn compress_dfast(
     src: &[u8],
@@ -45,8 +45,8 @@ pub(crate) fn compress_dfast_block(
     sequences: &mut Vec<Sequence>,
 ) {
     macro_rules! dispatch {
-        ($hl:expr, $sl:expr) => {
-            compress_dfast_block_impl::<$hl, $sl>(
+        ($hl:expr, $sl:expr, $mls:expr) => {
+            compress_dfast_block_impl::<$hl, $sl, $mls>(
                 src,
                 block_start,
                 block_end,
@@ -58,7 +58,10 @@ pub(crate) fn compress_dfast_block(
             )
         };
     }
-    dispatch!(0, 0);
+    match params.min_match {
+        ..=4 => dispatch!(0, 0, 4),
+        _ => dispatch!(0, 0, 5),
+    }
 }
 
 /// 4-cursor DFast match finder with prefetch pipeline.
@@ -68,7 +71,7 @@ pub(crate) fn compress_dfast_block(
 /// iteration probes two positions, reusing hash computations across shifts
 /// and prefetching both hash_short and hash_long for the next position.
 #[allow(unused_assignments, unused_variables, clippy::too_many_arguments)]
-fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
+fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const MLS: u32>(
     src: &[u8],
     block_start: usize,
     block_end: usize,
@@ -118,7 +121,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
         ($pos:expr) => {{
             let pos = $pos;
             if pos + 8 <= src.len() {
-                let hs = h5(primitives::rd64(src, pos), short_log);
+                let hs = short_hash::<MLS>(src, pos, short_log);
                 primitives::hash_store(hash_short, hs, pos as u32);
                 let hl = h8(primitives::rd64(src, pos), hash_log);
                 primitives::hash_store(hash_long, hl, pos as u32);
@@ -135,7 +138,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
             let cap_end = safe_end.min(ms + 2 + step * 4);
             let mut pos = ms + 2;
             while pos < cap_end {
-                let hs = h5(primitives::rd64(src, pos), short_log);
+                let hs = short_hash::<MLS>(src, pos, short_log);
                 primitives::hash_store(hash_short, hs, pos as u32);
                 let hl = h8(primitives::rd64(src, pos), hash_log);
                 primitives::hash_store(hash_long, hl, pos as u32);
@@ -144,7 +147,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
             if me >= 2 {
                 let tail = me - 2;
                 if tail < safe_end && tail >= cap_end {
-                    let hs = h5(primitives::rd64(src, tail), short_log);
+                    let hs = short_hash::<MLS>(src, tail, short_log);
                     primitives::hash_store(hash_short, hs, tail as u32);
                     let hl = h8(primitives::rd64(src, tail), hash_log);
                     primitives::hash_store(hash_long, hl, tail as u32);
@@ -190,9 +193,9 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
             break;
         }
 
-        let mut hs0 = h5(primitives::rd64(src, ip0), short_log);
+        let mut hs0 = short_hash::<MLS>(src, ip0, short_log);
         let mut hl0 = h8(primitives::rd64(src, ip0), hash_log);
-        let mut hs1 = h5(primitives::rd64(src, ip1), short_log);
+        let mut hs1 = short_hash::<MLS>(src, ip1, short_log);
         let mut hl1 = h8(primitives::rd64(src, ip1), hash_log);
 
         let mut match_short = primitives::hash_load(hash_short, hs0) as usize;
@@ -372,7 +375,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
             hs0 = hs1;
             hl0 = hl1;
 
-            hs1 = h5(primitives::rd64(src, ip2), short_log);
+            hs1 = short_hash::<MLS>(src, ip2, short_log);
             hl1 = h8(primitives::rd64(src, ip2), hash_log);
             ip0 = ip1;
             ip1 = ip2;
@@ -525,7 +528,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32>(
             hs0 = hs1;
             hl0 = hl1;
 
-            hs1 = h5(primitives::rd64(src, ip2), short_log);
+            hs1 = short_hash::<MLS>(src, ip2, short_log);
             hl1 = h8(primitives::rd64(src, ip2), hash_log);
             ip0 = ip1;
             ip1 = ip2;
@@ -561,6 +564,7 @@ pub(crate) fn prefill_hash_tables(
     prefix_len: usize,
     hash_log: u32,
     short_log: u32,
+    min_match: u32,
     hash_short: &mut [u32],
     hash_long: &mut [u32],
 ) {
@@ -573,7 +577,11 @@ pub(crate) fn prefill_hash_tables(
     let step = (prefix_len / hash_size).max(1);
     let mut i = 0;
     while i + 8 <= prefix_len {
-        let hs = h5(primitives::rd64(combined, i), short_log);
+        let hs = if min_match <= 4 {
+            h4(primitives::rd32(combined, i), short_log)
+        } else {
+            h5(primitives::rd64(combined, i), short_log)
+        };
         primitives::hash_store(hash_short, hs, i as u32);
         let hl = h8(primitives::rd64(combined, i), hash_log);
         primitives::hash_store(hash_long, hl, i as u32);
@@ -581,7 +589,11 @@ pub(crate) fn prefill_hash_tables(
     }
     let tail_start = prefix_len.saturating_sub(64);
     for i in tail_start..prefix_len.saturating_sub(7) {
-        let hs = h5(primitives::rd64(combined, i), short_log);
+        let hs = if min_match <= 4 {
+            h4(primitives::rd32(combined, i), short_log)
+        } else {
+            h5(primitives::rd64(combined, i), short_log)
+        };
         primitives::hash_store(hash_short, hs, i as u32);
         let hl = h8(primitives::rd64(combined, i), hash_log);
         primitives::hash_store(hash_long, hl, i as u32);
@@ -638,6 +650,7 @@ pub(crate) fn compress_dfast_with_prefix_reuse(
         plen,
         params.hash_log,
         params.chain_log,
+        params.min_match,
         hash_short,
         hash_long,
     );
@@ -655,8 +668,22 @@ pub(crate) fn compress_dfast_with_prefix_reuse(
 }
 
 #[inline(always)]
+fn h4(val: u32, hash_log: u32) -> usize {
+    (val.wrapping_mul(PRIME32_1) >> (32 - hash_log)) as usize
+}
+
+#[inline(always)]
 fn h5(val: u64, hash_log: u32) -> usize {
     ((val << 24).wrapping_mul(PRIME64_1) >> (64 - hash_log)) as usize
+}
+
+#[inline(always)]
+fn short_hash<const MLS: u32>(src: &[u8], pos: usize, short_log: u32) -> usize {
+    if MLS <= 4 {
+        h4(primitives::rd32(src, pos), short_log)
+    } else {
+        h5(primitives::rd64(src, pos), short_log)
+    }
 }
 
 #[inline(always)]

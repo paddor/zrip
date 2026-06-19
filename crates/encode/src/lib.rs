@@ -358,6 +358,7 @@ pub fn compress_with_dict(
                         plen,
                         params.hash_log,
                         params.chain_log,
+                        params.min_match,
                         &mut hash_short,
                         &mut hash_long,
                     );

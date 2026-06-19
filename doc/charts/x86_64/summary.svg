@@ -14,9 +14,9 @@
   <rect x="167.0" y="259.0" width="80.0" height="22.8" fill="#4680c4" rx="1"/>
   <rect x="167.0" y="252.0" width="80.0" height="7.0" fill="#60a5fa" rx="1"/>
   <text x="207.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">C zstd</text>
-  <rect x="279.0" y="270.8" width="80.0" height="34.2" fill="#f87171" rx="1"/>
-  <rect x="279.0" y="245.7" width="80.0" height="25.1" fill="#c45050" rx="1"/>
-  <rect x="279.0" y="233.5" width="80.0" height="12.1" fill="#f87171" rx="1"/>
+  <rect x="279.0" y="271.0" width="80.0" height="34.0" fill="#f87171" rx="1"/>
+  <rect x="279.0" y="245.9" width="80.0" height="25.1" fill="#c45050" rx="1"/>
+  <rect x="279.0" y="233.3" width="80.0" height="12.6" fill="#f87171" rx="1"/>
   <text x="319.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip</text>
   <rect x="391.0" y="260.0" width="80.0" height="45.0" fill="#f59e0b" rx="1"/>
   <rect x="391.0" y="230.7" width="80.0" height="29.3" fill="#c47d08" rx="1"/>
