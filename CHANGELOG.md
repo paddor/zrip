@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [0.3.2]
+
+### Added
+
+- DESIGN.md: encode/decode pipeline, SIMD dispatch, compile-time
+  specialization, level parameters, and divergences from C zstd.
+- SAFETY.md: catalogs 17 verified C zstd memory safety bugs that Rust
+  prevents by construction (CVEs, OSS-Fuzz findings, AFL reports).
+- Per-file pipeline chart (`plot_pipeline.py` and `pipeline.svg`).
+- aarch64 benchmark charts behind collapsible in README.
+- Dictionary training example in README (`train_dict_fastcover`).
+
+### Changed
+
+- Replaced stale README performance tables with auto-generated charts.
+- Chart legend label changed from "safe API" to "encapsulated unsafe".
+- Fixed README Levels table: min-match was wrong for L1 (said 7, is 4)
+  and L2 (said 6, is 4).
+- `detect_hardware()` in plot scripts now supports `ZRIP_CPU` env var
+  for macOS/aarch64 chart subtitle.
+- Added `include` field to Cargo.toml for crates.io packaging.
+
 ## [0.3.1]
 
 ### Fixed
