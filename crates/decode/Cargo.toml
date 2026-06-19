@@ -19,3 +19,6 @@ nightly = ["zrip-core/nightly"]
 
 [dependencies]
 zrip-core = { version = "0.3.1", path = "../core", default-features = false }
+
+[dev-dependencies]
+zrip = { path = "../.." }

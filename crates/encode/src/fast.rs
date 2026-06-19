@@ -233,7 +233,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
             ip1 = ip2;
             ip2 += 1;
 
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
             primitives::prefetch_ht(hash_table, h_ip2);
 
             // Write hash for shifted ip0
@@ -301,7 +301,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
             let step = step_size + ((ip0 - anchor) >> search_strength);
             ip2 = ip0 + step;
 
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
             primitives::prefetch_ht(hash_table, h_next);
 
             if ip0 >= probe_limit {
