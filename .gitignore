@@ -5,5 +5,4 @@
 /fuzz/artifacts/
 /bench/corpus/
 /bench/target/
-/doc/charts/
 Cargo.lock
