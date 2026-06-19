@@ -361,7 +361,7 @@ fn pack_sequences_and_literals(
     let mut rep1 = rep_offsets[1];
     let mut rep2 = rep_offsets[2];
 
-    for seq in &sequences[..n] {
+    for (i, seq) in sequences[..n].iter().enumerate() {
         let ll = seq.literal_length as usize;
         if lit_offset + ll <= src_len {
             primitives::copy_literals_fast(src, lit_offset, &mut workspace.lit_buf, lit_pos, ll);
@@ -423,14 +423,19 @@ fn pack_sequences_and_literals(
             | ((of_extra as u64) << (ll_nb + ml_nb));
         let extra_nbits = ll_nb + ml_nb + of_c;
 
-        workspace.packed_seqs.push(PackedSeq {
-            extra_bits,
-            ll_c,
-            ml_c,
-            of_c,
-            extra_nbits,
-        });
+        primitives::vec_write_at(
+            &mut workspace.packed_seqs,
+            i,
+            PackedSeq {
+                extra_bits,
+                ll_c,
+                ml_c,
+                of_c,
+                extra_nbits,
+            },
+        );
     }
+    primitives::set_vec_len(&mut workspace.packed_seqs, n);
     rep_offsets[0] = rep0;
     rep_offsets[1] = rep1;
     rep_offsets[2] = rep2;

@@ -44,6 +44,7 @@ pub(crate) fn match_at<const MLS: usize>(src: &[u8], a: usize, b: usize) -> bool
     }
 }
 
+#[inline(always)]
 pub(crate) fn count_match(src: &[u8], p1: usize, p2: usize, limit: usize) -> usize {
     debug_assert!(p1 <= limit && limit <= src.len());
     debug_assert!(p2 < src.len());
@@ -146,6 +147,12 @@ pub(crate) fn bitstream_flush(buf: &mut Vec<u8>, pos: usize, bits: u64) {
 pub(crate) fn bitstream_write_byte(buf: &mut Vec<u8>, pos: usize, val: u8) {
     debug_assert!(pos < buf.capacity());
     unsafe { *buf.as_mut_ptr().add(pos) = val }
+}
+
+#[inline(always)]
+pub(crate) fn vec_write_at<T>(vec: &mut Vec<T>, idx: usize, val: T) {
+    debug_assert!(idx < vec.capacity());
+    unsafe { vec.as_mut_ptr().add(idx).write(val) }
 }
 
 #[inline(always)]

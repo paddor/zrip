@@ -318,7 +318,7 @@ pub unsafe fn decode_execute_avx2(
         }
     } else {
         unsafe {
-            decode_execute_avx2_inner::<true>(
+            decode_execute_avx2_with_history(
                 seq_data,
                 num_sequences,
                 tables,
@@ -328,6 +328,30 @@ pub unsafe fn decode_execute_avx2(
                 history,
             )
         }
+    }
+}
+
+#[target_feature(enable = "avx2,bmi2")]
+#[inline(never)]
+unsafe fn decode_execute_avx2_with_history(
+    seq_data: &[u8],
+    num_sequences: u32,
+    tables: &SequenceDecodeTables,
+    rep_offsets: &mut [u32; 3],
+    literals: &[u8],
+    output: &mut Vec<u8>,
+    history: &[u8],
+) -> Result<(), DecompressError> {
+    unsafe {
+        decode_execute_avx2_inner::<true>(
+            seq_data,
+            num_sequences,
+            tables,
+            rep_offsets,
+            literals,
+            output,
+            history,
+        )
     }
 }
 
