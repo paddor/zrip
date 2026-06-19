@@ -84,6 +84,8 @@ unsafe fn count_match_raw(
 
 #[inline(always)]
 pub(crate) fn assert_rep_valid(r0: u32, r1: u32) {
+    debug_assert!(r0 > 0);
+    debug_assert!(r1 > 0);
     unsafe {
         core::hint::assert_unchecked(r0 > 0);
         core::hint::assert_unchecked(r1 > 0);
@@ -127,6 +129,7 @@ pub(crate) fn copy_literals_fast(
         let s = src.as_ptr().add(src_off);
         let d = dst.as_mut_ptr().add(dst_off);
         if len <= 16 && src_off + 16 <= src.len() {
+            debug_assert!(dst_off + 16 <= dst.capacity());
             (d as *mut u64).write_unaligned((s as *const u64).read_unaligned());
             (d.add(8) as *mut u64).write_unaligned((s.add(8) as *const u64).read_unaligned());
         } else {

@@ -22,6 +22,9 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
     output: &mut Vec<u8>,
     history: &[u8],
 ) -> Result<(), DecompressError> {
+    if num_sequences == 0 {
+        return Ok(());
+    }
     if seq_data.is_empty() {
         return Err(DecompressError::CorruptSequences);
     }
@@ -380,7 +383,7 @@ unsafe fn copy_match_from_history(
 
 /// Safe wrapper around `decode_execute_avx2`.
 /// Caller must have verified AVX2+BMI2 availability via `CpuTier::Avx2`.
-pub fn decode_execute_avx2_safe(
+pub(crate) fn decode_execute_avx2_safe(
     seq_data: &[u8],
     num_sequences: u32,
     tables: &SequenceDecodeTables,

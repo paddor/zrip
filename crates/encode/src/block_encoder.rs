@@ -141,6 +141,7 @@ impl FseEncodeTable {
         let nb_bits_out = tt.delta_nb_bits.wrapping_add(1 << 15) >> 16;
         let base_state = (nb_bits_out << 16).wrapping_sub(tt.delta_nb_bits);
         let idx = (base_state >> nb_bits_out) as i32 + tt.delta_find_state;
+        debug_assert!(idx >= 0);
         primitives::slice_get(&self.state_table, idx as usize) as u32
     }
 }
@@ -637,6 +638,7 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
             let nb = (tt.delta_nb_bits.wrapping_add($state)) >> 16;
             add_bits!($state & ((1u32 << nb) - 1), nb);
             let idx = ($state >> nb) as i32 + tt.delta_find_state;
+            debug_assert!(idx >= 0);
             $state = primitives::slice_get(&$table.state_table, idx as usize) as u32;
         }};
     }

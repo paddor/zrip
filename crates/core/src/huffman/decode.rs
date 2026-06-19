@@ -72,15 +72,24 @@ pub fn decode_single_stream_vec(
     output.clear();
     output.reserve(output_size);
     primitives::set_vec_len(output, output_size);
+    let result;
     #[cfg(target_arch = "x86_64")]
     {
         if crate::simd::cpu_tier() >= crate::simd::CpuTier::Bmi2 {
-            return super::decode_4stream::decode_single_stream_bmi2_safe(
+            result = super::decode_4stream::decode_single_stream_bmi2_safe(
                 table, table_log, data, output,
             );
+            if result.is_err() {
+                output.clear();
+            }
+            return result;
         }
     }
-    decode_single_stream_into(table, table_log, data, output)
+    result = decode_single_stream_into(table, table_log, data, output);
+    if result.is_err() {
+        output.clear();
+    }
+    result
 }
 
 pub fn decode_4_streams(
@@ -104,19 +113,29 @@ pub fn decode_4_streams_into(
     output.clear();
     output.reserve(output_size);
     primitives::set_vec_len(output, output_size);
+    let result;
     #[cfg(target_arch = "x86_64")]
     {
         if crate::simd::cpu_tier() >= crate::simd::CpuTier::Bmi2 {
-            return super::decode_4stream::decode_4_streams_core_bmi2_safe(
+            result = super::decode_4stream::decode_4_streams_core_bmi2_safe(
                 table,
                 table_log,
                 data,
                 output_size,
                 output,
             );
+            if result.is_err() {
+                output.clear();
+            }
+            return result;
         }
     }
-    super::decode_4stream::decode_4_streams_core(table, table_log, data, output_size, output)
+    result =
+        super::decode_4stream::decode_4_streams_core(table, table_log, data, output_size, output);
+    if result.is_err() {
+        output.clear();
+    }
+    result
 }
 
 pub(super) fn decode_stream_tail(
