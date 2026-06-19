@@ -381,7 +381,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
             ip1 = ip2;
             ip2 = ip3;
 
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
             {
                 primitives::prefetch_ht(hash_short, hs1);
                 primitives::prefetch_ht(hash_long, hl1);
@@ -536,7 +536,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
             ip2 = ip0 + step;
             ip3 = ip1 + step;
 
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
             {
                 primitives::prefetch_ht(hash_short, hs1);
                 primitives::prefetch_ht(hash_long, hl1);

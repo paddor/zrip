@@ -103,6 +103,16 @@ pub(crate) fn prefetch_ht(table: &[u32], idx: usize) {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+#[inline(always)]
+pub(crate) fn prefetch_ht(table: &[u32], idx: usize) {
+    debug_assert!(idx < table.len());
+    unsafe {
+        let ptr = table.as_ptr().add(idx) as *const u8;
+        core::arch::asm!("prfm pldl1keep, [{x}]", x = in(reg) ptr, options(nostack, preserves_flags));
+    }
+}
+
 #[inline(always)]
 pub(crate) fn slice_get<T: Copy>(slice: &[T], idx: usize) -> T {
     debug_assert!(idx < slice.len());
