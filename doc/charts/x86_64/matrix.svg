@@ -20,7 +20,7 @@
   <rect x="95.3" y="187.6" width="50.0" height="12.4" fill="#60a5fa" rx="1"/>
   <rect x="147.8" y="220.3" width="50.0" height="49.7" fill="#f87171" rx="1"/>
   <rect x="147.8" y="185.3" width="50.0" height="35.0" fill="#c45050" rx="1"/>
-  <rect x="147.8" y="157.1" width="50.0" height="28.2" fill="#f87171" rx="1"/>
+  <rect x="147.8" y="157.4" width="50.0" height="28.0" fill="#f87171" rx="1"/>
   <rect x="200.3" y="196.5" width="50.0" height="73.5" fill="#f59e0b" rx="1"/>
   <rect x="200.3" y="165.7" width="50.0" height="30.8" fill="#c47d08" rx="1"/>
   <rect x="200.3" y="137.4" width="50.0" height="28.3" fill="#f59e0b" rx="1"/>
@@ -28,19 +28,19 @@
   <rect x="348.7" y="230.3" width="50.0" height="39.7" fill="#60a5fa" rx="1"/>
   <rect x="348.7" y="202.4" width="50.0" height="27.8" fill="#4680c4" rx="1"/>
   <rect x="348.7" y="189.3" width="50.0" height="13.2" fill="#60a5fa" rx="1"/>
-  <rect x="401.2" y="215.9" width="50.0" height="54.1" fill="#f87171" rx="1"/>
-  <rect x="401.2" y="184.0" width="50.0" height="31.9" fill="#c45050" rx="1"/>
-  <rect x="401.2" y="152.1" width="50.0" height="31.9" fill="#f87171" rx="1"/>
-  <rect x="453.7" y="194.9" width="50.0" height="75.1" fill="#f59e0b" rx="1"/>
-  <rect x="453.7" y="164.7" width="50.0" height="30.1" fill="#c47d08" rx="1"/>
-  <rect x="453.7" y="136.4" width="50.0" height="28.4" fill="#f59e0b" rx="1"/>
+  <rect x="401.2" y="215.4" width="50.0" height="54.6" fill="#f87171" rx="1"/>
+  <rect x="401.2" y="183.5" width="50.0" height="31.9" fill="#c45050" rx="1"/>
+  <rect x="401.2" y="151.8" width="50.0" height="31.7" fill="#f87171" rx="1"/>
+  <rect x="453.7" y="198.0" width="50.0" height="72.0" fill="#f59e0b" rx="1"/>
+  <rect x="453.7" y="170.1" width="50.0" height="27.9" fill="#c47d08" rx="1"/>
+  <rect x="453.7" y="143.7" width="50.0" height="26.4" fill="#f59e0b" rx="1"/>
   <text x="450.0" y="288" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Level 1</text>
   <rect x="602.0" y="216.8" width="50.0" height="53.2" fill="#60a5fa" rx="1"/>
   <rect x="602.0" y="190.8" width="50.0" height="26.1" fill="#4680c4" rx="1"/>
   <rect x="602.0" y="177.0" width="50.0" height="13.8" fill="#60a5fa" rx="1"/>
-  <rect x="654.5" y="204.8" width="50.0" height="65.2" fill="#f87171" rx="1"/>
-  <rect x="654.5" y="175.6" width="50.0" height="29.3" fill="#c45050" rx="1"/>
-  <rect x="654.5" y="147.1" width="50.0" height="28.5" fill="#f87171" rx="1"/>
+  <rect x="654.5" y="205.0" width="50.0" height="65.0" fill="#f87171" rx="1"/>
+  <rect x="654.5" y="175.7" width="50.0" height="29.3" fill="#c45050" rx="1"/>
+  <rect x="654.5" y="147.3" width="50.0" height="28.4" fill="#f87171" rx="1"/>
   <rect x="707.0" y="153.4" width="50.0" height="116.6" fill="#f59e0b" rx="1"/>
   <rect x="707.0" y="124.2" width="50.0" height="29.3" fill="#c47d08" rx="1"/>
   <rect x="707.0" y="96.1" width="50.0" height="28.1" fill="#f59e0b" rx="1"/>
@@ -58,9 +58,9 @@
   <rect x="95.3" y="511.6" width="50.0" height="33.4" fill="#60a5fa" rx="1"/>
   <rect x="95.3" y="469.6" width="50.0" height="42.0" fill="#4680c4" rx="1"/>
   <rect x="95.3" y="461.2" width="50.0" height="8.5" fill="#60a5fa" rx="1"/>
-  <rect x="147.8" y="499.8" width="50.0" height="45.2" fill="#f87171" rx="1"/>
-  <rect x="147.8" y="457.9" width="50.0" height="41.9" fill="#c45050" rx="1"/>
-  <rect x="147.8" y="441.1" width="50.0" height="16.8" fill="#f87171" rx="1"/>
+  <rect x="147.8" y="500.0" width="50.0" height="45.0" fill="#f87171" rx="1"/>
+  <rect x="147.8" y="458.1" width="50.0" height="41.9" fill="#c45050" rx="1"/>
+  <rect x="147.8" y="441.4" width="50.0" height="16.6" fill="#f87171" rx="1"/>
   <rect x="200.3" y="485.6" width="50.0" height="59.4" fill="#f59e0b" rx="1"/>
   <rect x="200.3" y="449.0" width="50.0" height="36.6" fill="#c47d08" rx="1"/>
   <rect x="200.3" y="429.9" width="50.0" height="19.1" fill="#f59e0b" rx="1"/>
@@ -68,19 +68,19 @@
   <rect x="348.7" y="508.9" width="50.0" height="36.1" fill="#60a5fa" rx="1"/>
   <rect x="348.7" y="473.9" width="50.0" height="35.0" fill="#4680c4" rx="1"/>
   <rect x="348.7" y="464.0" width="50.0" height="9.9" fill="#60a5fa" rx="1"/>
-  <rect x="401.2" y="492.7" width="50.0" height="52.3" fill="#f87171" rx="1"/>
-  <rect x="401.2" y="455.2" width="50.0" height="37.5" fill="#c45050" rx="1"/>
-  <rect x="401.2" y="433.8" width="50.0" height="21.4" fill="#f87171" rx="1"/>
-  <rect x="453.7" y="484.3" width="50.0" height="60.7" fill="#f59e0b" rx="1"/>
-  <rect x="453.7" y="449.0" width="50.0" height="35.3" fill="#c47d08" rx="1"/>
-  <rect x="453.7" y="429.7" width="50.0" height="19.3" fill="#f59e0b" rx="1"/>
+  <rect x="401.2" y="492.2" width="50.0" height="52.8" fill="#f87171" rx="1"/>
+  <rect x="401.2" y="454.6" width="50.0" height="37.5" fill="#c45050" rx="1"/>
+  <rect x="401.2" y="433.4" width="50.0" height="21.2" fill="#f87171" rx="1"/>
+  <rect x="453.7" y="483.6" width="50.0" height="61.4" fill="#f59e0b" rx="1"/>
+  <rect x="453.7" y="448.5" width="50.0" height="35.1" fill="#c47d08" rx="1"/>
+  <rect x="453.7" y="429.2" width="50.0" height="19.4" fill="#f59e0b" rx="1"/>
   <text x="450.0" y="563" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Level 1</text>
   <rect x="602.0" y="484.6" width="50.0" height="60.4" fill="#60a5fa" rx="1"/>
   <rect x="602.0" y="453.0" width="50.0" height="31.6" fill="#4680c4" rx="1"/>
   <rect x="602.0" y="441.5" width="50.0" height="11.5" fill="#60a5fa" rx="1"/>
   <rect x="654.5" y="471.9" width="50.0" height="73.1" fill="#f87171" rx="1"/>
-  <rect x="654.5" y="436.8" width="50.0" height="35.0" fill="#c45050" rx="1"/>
-  <rect x="654.5" y="418.4" width="50.0" height="18.4" fill="#f87171" rx="1"/>
+  <rect x="654.5" y="436.9" width="50.0" height="35.0" fill="#c45050" rx="1"/>
+  <rect x="654.5" y="418.7" width="50.0" height="18.2" fill="#f87171" rx="1"/>
   <rect x="707.0" y="425.9" width="50.0" height="119.1" fill="#f59e0b" rx="1"/>
   <rect x="707.0" y="393.6" width="50.0" height="32.3" fill="#c47d08" rx="1"/>
   <rect x="707.0" y="371.1" width="50.0" height="22.5" fill="#f59e0b" rx="1"/>
@@ -96,9 +96,9 @@
   <rect x="95.3" y="808.5" width="50.0" height="11.5" fill="#60a5fa" rx="1"/>
   <rect x="95.3" y="745.3" width="50.0" height="63.2" fill="#4680c4" rx="1"/>
   <rect x="95.3" y="743.6" width="50.0" height="1.7" fill="#60a5fa" rx="1"/>
-  <rect x="147.8" y="808.4" width="50.0" height="11.6" fill="#f87171" rx="1"/>
-  <rect x="147.8" y="744.9" width="50.0" height="63.5" fill="#c45050" rx="1"/>
-  <rect x="147.8" y="741.9" width="50.0" height="3.0" fill="#f87171" rx="1"/>
+  <rect x="147.8" y="808.7" width="50.0" height="11.3" fill="#f87171" rx="1"/>
+  <rect x="147.8" y="745.2" width="50.0" height="63.5" fill="#c45050" rx="1"/>
+  <rect x="147.8" y="742.3" width="50.0" height="2.9" fill="#f87171" rx="1"/>
   <rect x="200.3" y="782.9" width="50.0" height="37.1" fill="#f59e0b" rx="1"/>
   <rect x="200.3" y="727.4" width="50.0" height="55.5" fill="#c47d08" rx="1"/>
   <rect x="200.3" y="719.1" width="50.0" height="8.4" fill="#f59e0b" rx="1"/>
@@ -106,19 +106,19 @@
   <rect x="348.7" y="801.4" width="50.0" height="18.6" fill="#60a5fa" rx="1"/>
   <rect x="348.7" y="746.5" width="50.0" height="54.8" fill="#4680c4" rx="1"/>
   <rect x="348.7" y="739.8" width="50.0" height="6.7" fill="#60a5fa" rx="1"/>
-  <rect x="401.2" y="789.5" width="50.0" height="30.5" fill="#f87171" rx="1"/>
-  <rect x="401.2" y="731.1" width="50.0" height="58.4" fill="#c45050" rx="1"/>
-  <rect x="401.2" y="724.4" width="50.0" height="6.8" fill="#f87171" rx="1"/>
-  <rect x="453.7" y="781.1" width="50.0" height="38.9" fill="#f59e0b" rx="1"/>
+  <rect x="401.2" y="789.6" width="50.0" height="30.4" fill="#f87171" rx="1"/>
+  <rect x="401.2" y="731.2" width="50.0" height="58.4" fill="#c45050" rx="1"/>
+  <rect x="401.2" y="724.6" width="50.0" height="6.6" fill="#f87171" rx="1"/>
+  <rect x="453.7" y="781.0" width="50.0" height="39.0" fill="#f59e0b" rx="1"/>
   <rect x="453.7" y="726.2" width="50.0" height="54.8" fill="#c47d08" rx="1"/>
   <rect x="453.7" y="717.6" width="50.0" height="8.6" fill="#f59e0b" rx="1"/>
   <text x="450.0" y="838" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Level 1</text>
   <rect x="602.0" y="751.7" width="50.0" height="68.3" fill="#60a5fa" rx="1"/>
   <rect x="602.0" y="702.8" width="50.0" height="48.9" fill="#4680c4" rx="1"/>
   <rect x="602.0" y="693.0" width="50.0" height="9.9" fill="#60a5fa" rx="1"/>
-  <rect x="654.5" y="754.6" width="50.0" height="65.4" fill="#f87171" rx="1"/>
-  <rect x="654.5" y="702.1" width="50.0" height="52.5" fill="#c45050" rx="1"/>
-  <rect x="654.5" y="691.7" width="50.0" height="10.4" fill="#f87171" rx="1"/>
+  <rect x="654.5" y="755.6" width="50.0" height="64.4" fill="#f87171" rx="1"/>
+  <rect x="654.5" y="703.1" width="50.0" height="52.5" fill="#c45050" rx="1"/>
+  <rect x="654.5" y="692.9" width="50.0" height="10.2" fill="#f87171" rx="1"/>
   <rect x="707.0" y="709.2" width="50.0" height="110.8" fill="#f59e0b" rx="1"/>
   <rect x="707.0" y="659.2" width="50.0" height="50.0" fill="#c47d08" rx="1"/>
   <rect x="707.0" y="646.1" width="50.0" height="13.1" fill="#f59e0b" rx="1"/>
@@ -126,11 +126,11 @@
   <rect x="250" y="850" width="12" height="12" fill="#60a5fa" rx="2"/>
   <text x="268" y="860" fill="#e6edf3" font-size="10" font-weight="500">C zstd 1.5.7 (libzstd)</text>
   <rect x="250" y="868" width="12" height="12" fill="#f87171" rx="2"/>
-  <text x="268" y="878" fill="#e6edf3" font-size="10" font-weight="500">zrip (safe API, Rust)</text>
+  <text x="268" y="878" fill="#e6edf3" font-size="10" font-weight="500">zrip (encapsulated unsafe, Rust)</text>
   <rect x="460" y="850" width="12" height="12" fill="#f59e0b" rx="2"/>
   <text x="478" y="860" fill="#e6edf3" font-size="10" font-weight="500">structured-zstd 0.0.41 (unsafe Rust)</text>
   <rect x="460" y="868" width="12" height="12" fill="#c084fc" rx="2"/>
-  <text x="478" y="878" fill="#e6edf3" font-size="10" font-weight="500">lz4rip 0.3.1 (safe API, Rust, LZ4)</text>
+  <text x="478" y="878" fill="#e6edf3" font-size="10" font-weight="500">lz4rip 0.3.1 (encapsulated unsafe, Rust, LZ4)</text>
   <text x="240" y="903" fill="#e6edf3" font-size="9">bright = compress + decompress</text>
   <text x="480" y="903" fill="#7d8590" font-size="9">dim = transfer @100 MB/s</text>
 </svg>

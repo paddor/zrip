@@ -28,9 +28,9 @@ COLORS = {
 
 LABELS = {
     "C zstd":          "C zstd 1.5.7 (libzstd)",
-    "zrip":            "zrip (safe API, Rust)",
+    "zrip":            "zrip (encapsulated unsafe, Rust)",
     "structured-zstd": "structured-zstd 0.0.41 (unsafe Rust)",
-    "lz4rip":          "lz4rip 0.3.1 (safe API, Rust, LZ4)",
+    "lz4rip":          "lz4rip 0.3.1 (encapsulated unsafe, Rust, LZ4)",
 }
 
 LEVELS = [3, 1, -1]
@@ -59,34 +59,38 @@ TRANSFER_RATE = 100e6  # 100 MB/s
 
 def detect_hardware():
     try:
-        for line in open("/proc/cpuinfo"):
-            if line.startswith("model name"):
-                cpu = line.split(":", 1)[1].strip()
-                cpu = cpu.replace("(R)", "").replace("(TM)", "").replace("CPU ", "")
-                extras = []
+        cpu = os.environ.get("ZRIP_CPU")
+        if not cpu:
+            for line in open("/proc/cpuinfo"):
+                if line.startswith("model name"):
+                    cpu = line.split(":", 1)[1].strip()
+                    cpu = cpu.replace("(R)", "").replace("(TM)", "").replace("CPU ", "")
+                    break
+        if cpu:
+            extras = []
+            try:
+                gov = open("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor").read().strip()
+                if gov == "performance":
+                    extras.append("performance governor")
+            except OSError:
+                pass
+            for path, off_val in [
+                ("/sys/devices/system/cpu/intel_pstate/no_turbo", "1"),
+                ("/sys/devices/system/cpu/cpufreq/boost", "0"),
+            ]:
                 try:
-                    gov = open("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor").read().strip()
-                    if gov == "performance":
-                        extras.append("performance governor")
+                    if open(path).read().strip() == off_val:
+                        extras.append("turbo off")
+                    break
                 except OSError:
-                    pass
-                for path, off_val in [
-                    ("/sys/devices/system/cpu/intel_pstate/no_turbo", "1"),
-                    ("/sys/devices/system/cpu/cpufreq/boost", "0"),
-                ]:
-                    try:
-                        if open(path).read().strip() == off_val:
-                            extras.append("turbo off")
-                        break
-                    except OSError:
-                        continue
-                if not extras:
-                    hw = os.environ.get("ZRIP_HW_EXTRAS")
-                    if hw:
-                        extras.extend(hw.split(","))
-                if extras:
-                    cpu += ", " + ", ".join(extras)
-                return cpu
+                    continue
+            if not extras:
+                hw = os.environ.get("ZRIP_HW_EXTRAS")
+                if hw:
+                    extras.extend(hw.split(","))
+            if extras:
+                cpu += ", " + ", ".join(extras)
+            return cpu
     except OSError:
         pass
     return None
