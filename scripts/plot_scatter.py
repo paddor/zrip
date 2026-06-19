@@ -59,11 +59,11 @@ MIN_FILE_SIZE = 10_000
 
 # Fixed axis ranges so the chart doesn't shift when data changes.
 FIXED_LOG_X_MIN = 1.477  # 10^1.477 ≈ 30 MB/s
-FIXED_LOG_X_MAX = 3.602  # 10^3.602 ≈ 4000 MB/s
+FIXED_LOG_X_MAX = 3.903  # 10^3.903 ≈ 8000 MB/s
 FIXED_Y_RANGES = {
     "High compressibility":   (2.5, 10.0),
     "Medium compressibility": (1.4, 3.2),
-    "Low compressibility":    (0.95, 1.45),
+    "Low compressibility":    (0.95, 1.55),
 }
 
 
