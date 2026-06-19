@@ -8,7 +8,7 @@ use core::ptr;
 /// - `src` must be valid for reads of `len` bytes.
 /// - `dst` must be valid for writes of `len` bytes.
 /// - Regions may NOT overlap.
-#[inline]
+#[inline(always)]
 pub unsafe fn wildcopy_nonoverlap(src: *const u8, dst: *mut u8, len: usize) {
     debug_assert!(len > 0);
     unsafe {
@@ -29,7 +29,7 @@ pub unsafe fn wildcopy_nonoverlap(src: *const u8, dst: *mut u8, len: usize) {
 /// # Safety
 /// - `dst` must point to a buffer with at least `len + 7` bytes of writable space.
 /// - `dst - offset` must be a valid readable position within the same allocation.
-#[inline]
+#[inline(always)]
 pub unsafe fn copy_match(dst: *mut u8, offset: usize, len: usize) {
     debug_assert!(offset > 0);
     debug_assert!(len > 0);
@@ -43,7 +43,7 @@ pub unsafe fn copy_match(dst: *mut u8, offset: usize, len: usize) {
     }
 }
 
-#[inline]
+#[inline(always)]
 unsafe fn copy_match_overlapping(mut dst: *mut u8, offset: usize, len: usize) {
     unsafe {
         let end = dst.add(len);

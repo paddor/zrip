@@ -44,6 +44,7 @@ pub(crate) fn match_at<const MLS: usize>(src: &[u8], a: usize, b: usize) -> bool
     }
 }
 
+#[inline(always)]
 pub(crate) fn count_match(src: &[u8], p1: usize, p2: usize, limit: usize) -> usize {
     debug_assert!(p1 <= limit && limit <= src.len());
     debug_assert!(p2 < src.len());
@@ -83,6 +84,8 @@ unsafe fn count_match_raw(
 
 #[inline(always)]
 pub(crate) fn assert_rep_valid(r0: u32, r1: u32) {
+    debug_assert!(r0 > 0);
+    debug_assert!(r1 > 0);
     unsafe {
         core::hint::assert_unchecked(r0 > 0);
         core::hint::assert_unchecked(r1 > 0);
@@ -126,6 +129,7 @@ pub(crate) fn copy_literals_fast(
         let s = src.as_ptr().add(src_off);
         let d = dst.as_mut_ptr().add(dst_off);
         if len <= 16 && src_off + 16 <= src.len() {
+            debug_assert!(dst_off + 16 <= dst.capacity());
             (d as *mut u64).write_unaligned((s as *const u64).read_unaligned());
             (d.add(8) as *mut u64).write_unaligned((s.add(8) as *const u64).read_unaligned());
         } else {
@@ -146,6 +150,12 @@ pub(crate) fn bitstream_flush(buf: &mut Vec<u8>, pos: usize, bits: u64) {
 pub(crate) fn bitstream_write_byte(buf: &mut Vec<u8>, pos: usize, val: u8) {
     debug_assert!(pos < buf.capacity());
     unsafe { *buf.as_mut_ptr().add(pos) = val }
+}
+
+#[inline(always)]
+pub(crate) fn vec_write_at<T>(vec: &mut Vec<T>, idx: usize, val: T) {
+    debug_assert!(idx < vec.capacity());
+    unsafe { vec.as_mut_ptr().add(idx).write(val) }
 }
 
 #[inline(always)]

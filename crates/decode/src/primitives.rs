@@ -26,6 +26,7 @@ pub(crate) fn ptr_gt(a: *const u8, b: *const u8) -> bool {
 
 #[inline(always)]
 pub(crate) fn ptr_offset_from_mut(a: *mut u8, b: *mut u8) -> usize {
+    debug_assert!(a >= b);
     unsafe { a.offset_from(b) as usize }
 }
 

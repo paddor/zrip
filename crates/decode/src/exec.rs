@@ -18,6 +18,9 @@ pub fn decode_execute_sequences(
     output: &mut Vec<u8>,
     history: &[u8],
 ) -> Result<(), DecompressError> {
+    if num_sequences == 0 {
+        return Ok(());
+    }
     if data.is_empty() {
         return Err(DecompressError::CorruptSequences);
     }
