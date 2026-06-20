@@ -12,7 +12,72 @@ use zrip_core::Sequence;
 use zrip_core::dict::Dictionary;
 use zrip_core::error::CompressError;
 use zrip_core::frame::{MAX_BLOCK_SIZE, ZSTD_MAGIC};
+use zrip_core::huffman::encode::HuffmanEncodeTable;
 use zrip_core::xxhash::xxh64;
+
+/// Pre-computed dictionary state for hot-loop compression.
+///
+/// Built once from a [`Dictionary`] + [`LevelParams`]. Caches the pre-filled
+/// hash table(s) and a combined buffer with the dict prefix already loaded,
+/// plus encode-side entropy tables built from the dict's decode tables.
+pub(crate) struct PreparedDict {
+    combined: Vec<u8>,
+    hash_snapshot: Vec<u32>,
+    hash_long_snapshot: Vec<u32>,
+    prefix_len: usize,
+    rep_offsets: [u32; 3],
+    dict_id: u32,
+    huf_table: Option<HuffmanEncodeTable>,
+}
+
+impl PreparedDict {
+    pub fn new(dict: &Dictionary, params: &LevelParams) -> Self {
+        let prefix = dict.content();
+        let prefix_len = prefix.len();
+
+        let mut combined = Vec::with_capacity(prefix_len + MAX_BLOCK_SIZE);
+        combined.extend_from_slice(prefix);
+
+        let (hash_snapshot, hash_long_snapshot) = match params.strategy {
+            Strategy::Fast => {
+                let hash_size = 1usize << params.hash_log;
+                let mut hash_table = vec![0u32; hash_size];
+                fast::prefill_hash_table(&combined, prefix_len, params.hash_log, &mut hash_table);
+                (hash_table, Vec::new())
+            }
+            Strategy::DFast => {
+                let short_size = 1usize << params.chain_log;
+                let long_size = 1usize << params.hash_log;
+                let mut hash_short = vec![0u32; short_size];
+                let mut hash_long = vec![0u32; long_size];
+                dfast::prefill_hash_tables(
+                    &combined,
+                    prefix_len,
+                    params.hash_log,
+                    params.chain_log,
+                    params.min_match,
+                    &mut hash_short,
+                    &mut hash_long,
+                );
+                (hash_short, hash_long)
+            }
+        };
+
+        let huf_table = dict
+            .huf_table()
+            .and_then(|(dt, tl)| HuffmanEncodeTable::from_decode_table(dt, tl));
+
+        Self {
+            combined,
+            hash_snapshot,
+            hash_long_snapshot,
+            prefix_len,
+            rep_offsets: *dict.rep_offsets(),
+            dict_id: dict.id(),
+            huf_table,
+        }
+    }
+}
 
 /// Reusable compression context that amortizes hash table and buffer allocations.
 ///
@@ -29,7 +94,7 @@ use zrip_core::xxhash::xxh64;
 /// ```
 pub struct CompressContext {
     params: LevelParams,
-    dict: Option<Dictionary>,
+    prepared: Option<PreparedDict>,
     hash_table: Vec<u32>,
     hash_long: Vec<u32>,
     sequences: Vec<Sequence>,
@@ -51,7 +116,7 @@ impl CompressContext {
         };
         Ok(Self {
             params,
-            dict: None,
+            prepared: None,
             hash_table,
             hash_long,
             sequences: Vec::new(),
@@ -63,24 +128,33 @@ impl CompressContext {
 
     /// Creates a new context with a pre-loaded dictionary.
     pub fn with_dict(level: i32, dict: Dictionary) -> Result<Self, CompressError> {
-        let mut ctx = Self::new(level)?;
-        ctx.dict = Some(dict);
-        Ok(ctx)
+        let params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
+        let prepared = PreparedDict::new(&dict, &params);
+        let hash_table = vec![0u32; prepared.hash_snapshot.len()];
+        let hash_long = vec![0u32; prepared.hash_long_snapshot.len()];
+        Ok(Self {
+            params,
+            prepared: Some(prepared),
+            hash_table,
+            hash_long,
+            sequences: Vec::new(),
+            output: Vec::new(),
+            workspace: BlockEncodeWorkspace::new(),
+            combined: Vec::new(),
+        })
     }
 
     /// Compresses `input` using the context's level and optional dictionary.
     pub fn compress(&mut self, input: &[u8]) -> Result<Cow<'_, [u8]>, CompressError> {
-        let (dict_id, prefix, init_rep) = if let Some(ref d) = self.dict {
-            (Some(d.id()), d.content(), *d.rep_offsets())
-        } else {
-            (None, &[] as &[u8], [1u32, 4, 8])
-        };
+        if self.prepared.is_some() {
+            return self.compress_with_prepared(input);
+        }
         compress_core(
             input,
             self.params,
-            dict_id,
-            prefix,
-            init_rep,
+            None,
+            &[],
+            [1u32, 4, 8],
             &mut self.hash_table,
             &mut self.hash_long,
             &mut self.sequences,
@@ -103,6 +177,234 @@ impl CompressContext {
             Some(dict.id()),
             dict.content(),
             *dict.rep_offsets(),
+            &mut self.hash_table,
+            &mut self.hash_long,
+            &mut self.sequences,
+            &mut self.output,
+            &mut self.workspace,
+            &mut self.combined,
+        )?;
+        Ok(self.take_or_borrow_output())
+    }
+
+    fn compress_with_prepared(&mut self, input: &[u8]) -> Result<Cow<'_, [u8]>, CompressError> {
+        let mut params = self.params;
+        clamp_params_to_src_size(&mut params, input.len());
+
+        let prep = self.prepared.as_ref().unwrap();
+        let snapshot_matches = match params.strategy {
+            Strategy::Fast => (1usize << params.hash_log) == prep.hash_snapshot.len(),
+            Strategy::DFast => {
+                (1usize << params.chain_log) == prep.hash_snapshot.len()
+                    && (1usize << params.hash_log) == prep.hash_long_snapshot.len()
+            }
+        };
+        let dict_id = prep.dict_id;
+        let prefix_len = prep.prefix_len;
+
+        if !snapshot_matches {
+            return self.compress_with_dict_fallback(input, dict_id, prefix_len);
+        }
+
+        let prep = self.prepared.as_mut().unwrap();
+        self.hash_table.copy_from_slice(&prep.hash_snapshot);
+        if !prep.hash_long_snapshot.is_empty() {
+            self.hash_long.copy_from_slice(&prep.hash_long_snapshot);
+        }
+
+        prep.combined.truncate(prep.prefix_len);
+        prep.combined.extend_from_slice(input);
+
+        if let Some(ref huf) = prep.huf_table {
+            self.workspace.prev_huffman = Some(huf.clone());
+        } else {
+            self.workspace.prev_huffman = None;
+        }
+
+        self.output.clear();
+        self.output.reserve(input.len() + 32);
+        self.output.extend_from_slice(&ZSTD_MAGIC.to_le_bytes());
+
+        let fcs_size = if input.len() <= 255 {
+            1
+        } else if input.len() <= 0xFFFF + 256 {
+            2
+        } else if input.len() <= 0xFFFF_FFFF {
+            4
+        } else {
+            8
+        };
+        let fcs_flag = match fcs_size {
+            1 => 0,
+            2 => 1,
+            4 => 2,
+            8 => 3,
+            _ => unreachable!(),
+        };
+
+        let dict_id = prep.dict_id;
+        let dict_id_flag = if dict_id <= 0xFF {
+            1u8
+        } else if dict_id <= 0xFFFF {
+            2
+        } else {
+            3
+        };
+        let descriptor = 0x20 | 0x04 | (fcs_flag << 6) | dict_id_flag;
+        self.output.push(descriptor);
+        match dict_id_flag {
+            1 => self.output.push(dict_id as u8),
+            2 => self
+                .output
+                .extend_from_slice(&(dict_id as u16).to_le_bytes()),
+            3 => self.output.extend_from_slice(&dict_id.to_le_bytes()),
+            _ => unreachable!(),
+        }
+
+        match fcs_size {
+            1 => self.output.push(input.len() as u8),
+            2 => {
+                let v = (input.len() - 256) as u16;
+                self.output.extend_from_slice(&v.to_le_bytes());
+            }
+            4 => self
+                .output
+                .extend_from_slice(&(input.len() as u32).to_le_bytes()),
+            8 => self
+                .output
+                .extend_from_slice(&(input.len() as u64).to_le_bytes()),
+            _ => unreachable!(),
+        }
+
+        if input.is_empty() {
+            block_encoder::encode_raw_block(&[], true, &mut self.output);
+        } else {
+            let prefix_len = prep.prefix_len;
+            let combined = &prep.combined;
+            let mut rep_offsets = prep.rep_offsets;
+
+            if input.len() <= MAX_BLOCK_SIZE {
+                match params.strategy {
+                    Strategy::Fast => {
+                        fast::compress_fast_block(
+                            combined,
+                            prefix_len,
+                            prefix_len + input.len(),
+                            &params,
+                            &rep_offsets,
+                            &mut self.hash_table,
+                            &mut self.sequences,
+                        );
+                    }
+                    Strategy::DFast => {
+                        dfast::compress_dfast_block(
+                            combined,
+                            prefix_len,
+                            prefix_len + input.len(),
+                            &params,
+                            &rep_offsets,
+                            &mut self.hash_table,
+                            &mut self.hash_long,
+                            &mut self.sequences,
+                        );
+                    }
+                }
+                if params.force_raw_literals {
+                    block_encoder::encode_compressed_block_raw(
+                        input,
+                        &self.sequences,
+                        &mut rep_offsets,
+                        true,
+                        &mut self.output,
+                        &mut self.workspace,
+                    );
+                } else {
+                    block_encoder::encode_compressed_block(
+                        input,
+                        &self.sequences,
+                        &mut rep_offsets,
+                        true,
+                        &mut self.output,
+                        &mut self.workspace,
+                    );
+                }
+            } else {
+                let mut offset = 0;
+                while offset < input.len() {
+                    let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
+                    let is_last = offset + chunk_size >= input.len();
+                    match params.strategy {
+                        Strategy::Fast => {
+                            fast::compress_fast_block(
+                                combined,
+                                prefix_len + offset,
+                                prefix_len + offset + chunk_size,
+                                &params,
+                                &rep_offsets,
+                                &mut self.hash_table,
+                                &mut self.sequences,
+                            );
+                        }
+                        Strategy::DFast => {
+                            dfast::compress_dfast_block(
+                                combined,
+                                prefix_len + offset,
+                                prefix_len + offset + chunk_size,
+                                &params,
+                                &rep_offsets,
+                                &mut self.hash_table,
+                                &mut self.hash_long,
+                                &mut self.sequences,
+                            );
+                        }
+                    }
+                    if params.force_raw_literals {
+                        block_encoder::encode_compressed_block_raw(
+                            &input[offset..offset + chunk_size],
+                            &self.sequences,
+                            &mut rep_offsets,
+                            is_last,
+                            &mut self.output,
+                            &mut self.workspace,
+                        );
+                    } else {
+                        block_encoder::encode_compressed_block(
+                            &input[offset..offset + chunk_size],
+                            &self.sequences,
+                            &mut rep_offsets,
+                            is_last,
+                            &mut self.output,
+                            &mut self.workspace,
+                        );
+                    }
+                    offset += chunk_size;
+                }
+            }
+        }
+
+        let hash = xxh64(input, 0);
+        let checksum = (hash & 0xFFFF_FFFF) as u32;
+        self.output.extend_from_slice(&checksum.to_le_bytes());
+
+        Ok(self.take_or_borrow_output())
+    }
+
+    fn compress_with_dict_fallback(
+        &mut self,
+        input: &[u8],
+        dict_id: u32,
+        prefix_len: usize,
+    ) -> Result<Cow<'_, [u8]>, CompressError> {
+        let prep = self.prepared.as_ref().unwrap();
+        let rep_offsets = prep.rep_offsets;
+        let prefix = &prep.combined[..prefix_len];
+
+        compress_core(
+            input,
+            self.params,
+            Some(dict_id),
+            prefix,
+            rep_offsets,
             &mut self.hash_table,
             &mut self.hash_long,
             &mut self.sequences,

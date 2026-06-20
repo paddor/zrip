@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use super::primitives;
 use crate::huffman::{MAX_BITS, MAX_SYMBOL_VALUE};
 
+#[derive(Clone)]
 pub struct HuffmanEncodeTable {
     codes: [u16; MAX_SYMBOL_VALUE + 1],
     num_bits: [u8; MAX_SYMBOL_VALUE + 1],
@@ -43,6 +44,57 @@ impl HuffmanEncodeTable {
         }
 
         let (weights, table_log) = compute_huffman_weights(&freqs, num_symbols)?;
+        let (codes, num_bits) = build_encode_codes(&weights, table_log);
+
+        Some(Self {
+            codes,
+            num_bits,
+            weights,
+            max_symbol: max_sym,
+            table_log,
+        })
+    }
+
+    pub fn from_decode_table(
+        decode_table: &[super::HuffmanDecodeEntry],
+        table_log: u8,
+    ) -> Option<Self> {
+        let table_size = 1usize << table_log;
+        if decode_table.len() < table_size {
+            return None;
+        }
+
+        let mut num_bits_per_sym = [0u8; MAX_SYMBOL_VALUE + 1];
+        let mut max_sym = 0u8;
+        let mut seen = [false; MAX_SYMBOL_VALUE + 1];
+        for entry in &decode_table[..table_size] {
+            let s = entry.symbol;
+            if !seen[s as usize] {
+                num_bits_per_sym[s as usize] = entry.num_bits;
+                seen[s as usize] = true;
+                if s > max_sym {
+                    max_sym = s;
+                }
+            }
+        }
+
+        if max_sym as usize > 128 {
+            return None;
+        }
+
+        let num_symbols = max_sym as usize + 1;
+        let active_count = seen[..num_symbols].iter().filter(|&&s| s).count();
+        if active_count < 2 {
+            return None;
+        }
+
+        let mut weights = vec![0u8; num_symbols];
+        for s in 0..num_symbols {
+            if seen[s] {
+                weights[s] = table_log + 1 - num_bits_per_sym[s];
+            }
+        }
+
         let (codes, num_bits) = build_encode_codes(&weights, table_log);
 
         Some(Self {
@@ -292,6 +344,64 @@ fn build_encode_codes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn from_decode_table_roundtrip() {
+        let data = b"hello world hello world hello world!";
+        let original = HuffmanEncodeTable::from_data(data).unwrap();
+        let weights_raw = original.serialize_weights();
+
+        let (parsed_weights, _) =
+            crate::huffman::weights::parse_huffman_weights(&weights_raw).unwrap();
+        let (decode_table, decode_log) =
+            crate::huffman::weights::build_huffman_decode_table(&parsed_weights).unwrap();
+
+        let rebuilt = HuffmanEncodeTable::from_decode_table(&decode_table, decode_log).unwrap();
+        assert_eq!(original.table_log, rebuilt.table_log);
+        assert_eq!(original.max_symbol, rebuilt.max_symbol);
+        assert_eq!(original.weights, rebuilt.weights);
+        assert_eq!(original.num_bits, rebuilt.num_bits);
+        assert_eq!(original.codes, rebuilt.codes);
+
+        let encoded = rebuilt.encode_single_stream(data);
+        let decoded = crate::huffman::decode::decode_single_stream(
+            &decode_table,
+            decode_log,
+            &encoded,
+            data.len(),
+        )
+        .unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn from_decode_table_skewed() {
+        let mut data = vec![0u8; 900];
+        data.extend(vec![1u8; 80]);
+        data.extend(vec![2u8; 15]);
+        data.extend(vec![3u8; 5]);
+        let original = HuffmanEncodeTable::from_data(&data).unwrap();
+        let weights_raw = original.serialize_weights();
+
+        let (parsed_weights, _) =
+            crate::huffman::weights::parse_huffman_weights(&weights_raw).unwrap();
+        let (decode_table, decode_log) =
+            crate::huffman::weights::build_huffman_decode_table(&parsed_weights).unwrap();
+
+        let rebuilt = HuffmanEncodeTable::from_decode_table(&decode_table, decode_log).unwrap();
+        assert_eq!(original.codes, rebuilt.codes);
+        assert_eq!(original.num_bits, rebuilt.num_bits);
+
+        let encoded = rebuilt.encode_single_stream(&data);
+        let decoded = crate::huffman::decode::decode_single_stream(
+            &decode_table,
+            decode_log,
+            &encoded,
+            data.len(),
+        )
+        .unwrap();
+        assert_eq!(decoded, data);
+    }
 
     #[test]
     fn roundtrip_simple() {
