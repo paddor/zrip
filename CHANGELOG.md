@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.3.4]
+
+### Added
+
+- SECURITY.md with private vulnerability reporting instructions.
+
 ## [0.3.3]
 
 ### Fixed
