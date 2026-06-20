@@ -92,7 +92,7 @@ pub(crate) fn assert_rep_valid(r0: u32, r1: u32) {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(miri)))]
 #[inline(always)]
 pub(crate) fn prefetch_ht(table: &[u32], idx: usize) {
     unsafe {
@@ -103,7 +103,7 @@ pub(crate) fn prefetch_ht(table: &[u32], idx: usize) {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", not(miri)))]
 #[inline(always)]
 pub(crate) fn prefetch_ht(table: &[u32], idx: usize) {
     debug_assert!(idx < table.len());
@@ -112,6 +112,10 @@ pub(crate) fn prefetch_ht(table: &[u32], idx: usize) {
         core::arch::asm!("prfm pldl1keep, [{x}]", x = in(reg) ptr, options(nostack, preserves_flags));
     }
 }
+
+#[cfg(miri)]
+#[inline(always)]
+pub(crate) fn prefetch_ht(_table: &[u32], _idx: usize) {}
 
 #[inline(always)]
 pub(crate) fn slice_get<T: Copy>(slice: &[T], idx: usize) -> T {

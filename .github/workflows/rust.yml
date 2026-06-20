@@ -11,11 +11,12 @@ env:
 
 jobs:
   test:
-    name: cargo test (${{ matrix.toolchain }})
-    runs-on: ubuntu-latest
+    name: cargo test (${{ matrix.os }}, ${{ matrix.toolchain }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest]
         toolchain: [stable, "1.85"]
     steps:
       - uses: actions/checkout@v4

@@ -6,6 +6,7 @@ rust-version = "1.85"
 description = "zstd encoder for zrip (internal crate)"
 license = "MIT"
 repository = "https://github.com/paddor/zrip"
+readme = "README.md"
 
 [lints]
 workspace = true

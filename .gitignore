@@ -1,3 +1,4 @@
+.DS_Store
 /info/
 /target/
 /fuzz/target/
@@ -5,5 +6,4 @@
 /fuzz/artifacts/
 /bench/corpus/
 /bench/target/
-/doc/charts/
 Cargo.lock

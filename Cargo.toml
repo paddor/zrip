@@ -4,14 +4,15 @@ exclude = ["fuzz", "bench"]
 
 [package]
 name = "zrip"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 rust-version = "1.85"
-description = "Pure Rust zstd codec: Fast/DFast strategies (levels -7..4), COVER/FastCOVER dict builder"
+description = "Fast, memory-safe Rust implementation of Zstandard compression (levels -7..4)"
 license = "MIT"
 repository = "https://github.com/paddor/zrip"
 categories = ["compression"]
 keywords = ["zstd", "zstandard", "compression", "decompression"]
+include = ["src/**/*", "README.md", "LICENSE", "CHANGELOG.md", "DESIGN.md", "SAFETY.md"]
 
 [features]
 default = ["std", "frame"]

@@ -7,15 +7,20 @@ zstd frames at high speed.
 ![zstd pipeline benchmark](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/summary.svg)
 
 <details>
-<summary>Encode speed vs compression ratio</summary>
+<summary>x86_64 details (per-file pipeline, scatter, matrix)</summary>
 
+![per-file pipeline](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/pipeline.svg)
 ![encode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/scatter.svg)
+![per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/matrix.svg)
 </details>
 
 <details>
-<summary>Encode/decode throughput by level and compressibility</summary>
+<summary>aarch64 (Apple M4)</summary>
 
-![per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/matrix.svg)
+![aarch64 pipeline summary](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/summary.svg)
+![aarch64 per-file pipeline](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/pipeline.svg)
+![aarch64 encode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/scatter.svg)
+![aarch64 per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/matrix.svg)
 </details>
 
 ## Why zrip
@@ -33,43 +38,6 @@ feature; `frame` requires `std`.
 
 **Dictionary compression.** COVER and FastCOVER training built in for
 small-message workloads (log lines, JSON records, RPC payloads).
-
-## Performance
-
-Geomean across a 15-file Silesia + misc corpus on Intel i7-8700B (x86_64,
-SSE2/AVX2), performance governor, turbo off. Ratio is `original / compressed`;
-higher is better.
-
-### zrip vs C zstd 1.5.7
-
-**Compressible** (12-file geomean: Silesia text, XML, JSON, PDF, binaries)
-
-| Level | Strategy | zrip enc | C enc | zrip dec | C dec | zrip ratio | C ratio |
-|------:|:---------|:--------:|------:|:--------:|------:|:----------:|--------:|
-|    -7 | Fast     | 385 MB/s |   485 | 981 MB/s |  1576 |      2.37x |   2.56x |
-|    -6 | Fast     | 323 MB/s |   461 | 885 MB/s |  1528 |      2.69x |   2.68x |
-|    -1 | Fast     | 276 MB/s |   364 | 777 MB/s |  1297 |      3.51x |   3.51x |
-|     1 | Fast     | 247 MB/s |   345 | 614 MB/s |  1180 |      3.87x |   4.32x |
-|     3 | DFast    | 190 MB/s |   233 | 788 MB/s |  1045 |      4.05x |   4.62x |
-|     4 | DFast    | 189 MB/s |   227 | 786 MB/s |  1009 |      4.08x |   4.65x |
-
-Encode is 72-82% of C zstd, decode 52-75%. Ratio trails C zstd by
-~10% at L1-L4. The gap is pure Rust vs hand-tuned C with SIMD assembly.
-
-**Incompressible** (3-file geomean: SAO star catalog, X-ray, MRI)
-
-| Level | Strategy | zrip enc | C enc | zrip dec | C dec | zrip ratio | C ratio |
-|------:|:---------|:--------:|------:|:--------:|------:|:----------:|--------:|
-|    -7 | Fast     |1074 MB/s |   990 |2948 MB/s |  3996 |      1.26x |   1.30x |
-|    -6 | Fast     |1060 MB/s |   926 |2974 MB/s |  3669 |      1.30x |   1.30x |
-|    -1 | Fast     | 484 MB/s |   610 |1814 MB/s |  3216 |      1.38x |   1.38x |
-|     1 | Fast     | 236 MB/s |   357 | 978 MB/s |  1023 |      1.49x |   1.58x |
-|     3 | DFast    | 133 MB/s |   116 |1008 MB/s |   778 |      1.54x |   1.74x |
-|     4 | DFast    | 123 MB/s |   108 | 917 MB/s |   724 |      1.58x |   1.80x |
-
-Encode is 79% of C zstd at negative levels, closing to parity at
-L3-L4. Decode is 74-96% of C zstd. Both codecs produce near-1.0x
-ratios, so throughput is the only differentiator here.
 
 ## API
 
@@ -141,6 +109,19 @@ dec.read_to_end(&mut output)?;
 `CompressContext::with_dict()` and `DecompressContext::with_dict()`
 provide the same reuse for one-shot compression.
 
+### Dictionary training
+
+Build a dictionary from sample data using the built-in FastCOVER trainer.
+Requires the `dict_builder` feature.
+
+```rust
+use zrip::dict::{train_dict_fastcover, fastcover::FastCoverParams};
+
+let samples: Vec<&[u8]> = messages.iter().map(|m| m.as_bytes()).collect();
+let dict = train_dict_fastcover(&samples, 16384, FastCoverParams::default());
+// Use with compress_with_dict() / decompress_with_dict()
+```
+
 ## Features
 
 | Feature        | Default | Description                                   |
@@ -153,40 +134,29 @@ provide the same reuse for one-shot compression.
 
 ## Safety
 
-zrip uses unsafe for performance, not a zero-unsafe codebase. All algorithm
-and control-flow code is `#![forbid(unsafe_code)]`. Unsafe is confined to
-small, auditable leaf modules:
+[SAFETY.md](SAFETY.md) documents the unsafe boundary and catalogs C zstd
+memory safety bugs that Rust prevents by construction.
 
-- `primitives.rs` modules in `bitstream/`, `huffman/`, `encode/`, `decode/`:
-  `#[inline(always)]` wrappers around `get_unchecked`, `read_unaligned`,
-  `set_len`, and `copy_nonoverlapping` with `debug_assert!` guards.
-- `simd/` and `simd_decode/`: intrinsics and raw pointer arithmetic for
-  wildcopy, copy-match, and the fused SIMD sequence decoder.
-- `huffman/decode_4stream.rs`: pointer-based interleaved 4-stream Huffman
-  decoder.
+All codec paths are fuzz-tested (16 targets, ~10.7M executions) and verified
+under Miri on both x86_64 and aarch64. Fuzz targets cover round-trip
+correctness, cross-validation against C zstd, streaming, dictionary modes,
+and corruption resistance (bitflip, splice, truncate, overwrite).
+
+## Design
+
+[DESIGN.md](DESIGN.md) covers the encode/decode pipeline, SIMD dispatch,
+compile-time specialization, and divergences from C zstd.
 
 ## Levels
 
-| Level | Strategy | Hash table | Literals | Sequences | Notes |
-|------:|:---------|:-----------|:---------|:----------|:------|
-| -7 | Fast | 32 KB | Raw | Predefined FSE | Max throughput, no entropy coding |
-| -6..-1 | Fast | 32 KB | Huffman | Predefined/custom FSE | Standard encode pipeline |
-| 1 | Fast | 64 KB | Huffman | Predefined/custom FSE | 7-byte min match |
-| 2 | Fast | 256 KB | Huffman | Predefined/custom FSE | 6-byte min match, 1 MB window |
-| 3 | DFast | 2x 128 KB | Huffman | Predefined/custom FSE | Dual hash (short + long matches) |
-| 4 | DFast | 2x 256 KB | Huffman | Predefined/custom FSE | Best ratio in this crate |
+| Level | Strategy | Hash table | Min match | Literals | Sequences |
+|------:|:---------|:-----------|:---------:|:---------|:----------|
+| -7 | Fast | 32 KB | 5 | Raw | Predefined FSE |
+| -6..-1 | Fast | 32 KB | 5 | Huffman | Predefined/custom FSE |
+| 1 | Fast | 64 KB | 4 | Huffman | Predefined/custom FSE |
+| 2 | Fast | 256 KB | 4 | Huffman | Predefined/custom FSE |
+| 3 | DFast | 2x 128 KB | 4 | Huffman | Predefined/custom FSE |
+| 4 | DFast | 2x 256 KB | 4 | Huffman | Predefined/custom FSE |
 
-Level 0 maps to the library default (currently level 1).
-
-**L-7** skips Huffman table construction and always emits raw literal blocks
-with predefined FSE tables. This eliminates the most expensive part of the
-encode pipeline (Huffman tree build, stream encoding, custom FSE table
-estimation) at the cost of compression ratio. The result is a valid zstd
-frame that any decoder handles, but with LZ4-class encode throughput.
-
-**L-6 through L2** use the full encode pipeline: Huffman-compressed literals
-(with treeless reuse across blocks) and predefined or custom FSE tables for
-sequences, whichever produces smaller output.
-
-**L3 and L4** use the DFast strategy with two hash tables (short 4-byte and
-long 8-byte matches) for better match quality at lower throughput.
+Level 0 maps to the library default (currently level 1). See
+[DESIGN.md](DESIGN.md) for parameter details and pipeline behavior per level.
