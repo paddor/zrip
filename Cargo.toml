@@ -4,7 +4,7 @@ exclude = ["fuzz", "bench"]
 
 [package]
 name = "zrip"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 rust-version = "1.85"
 description = "Fast, memory-safe Rust implementation of Zstandard compression (levels -7..4)"
