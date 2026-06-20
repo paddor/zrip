@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.3.3]
+
+### Changed
+
+- Improved crate description for crates.io.
+- Added README.md to sub-crates (zrip-core, zrip-encode, zrip-decode).
+- Removed two non-library bugs from SAFETY.md vulnerability table
+  (#94 was in fullbench tool, CVE-2022-4899 was in CLI util.c).
+
 ## [0.3.2]
 
 ### Added
