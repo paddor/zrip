@@ -64,8 +64,8 @@ pub fn compress_with_params(
 }
 
 pub fn compress(input: &[u8], level: i32) -> Result<Vec<u8>, CompressError> {
-    let mut params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
-    clamp_params_to_src_size(&mut params, input.len());
+    let params = strategy::level_params_for_size(level, input.len())
+        .ok_or(CompressError::InvalidLevel(level))?;
     compress_inner(input, &params)
 }
 
@@ -211,8 +211,9 @@ pub fn compress_with_dict(
     level: i32,
     dict: &zrip_core::dict::Dictionary,
 ) -> Result<Vec<u8>, CompressError> {
-    let mut params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
-    clamp_params_to_src_size(&mut params, input.len());
+    let total_window = dict.content().len() + input.len();
+    let params = strategy::level_params_for_size(level, total_window)
+        .ok_or(CompressError::InvalidLevel(level))?;
 
     let mut output = Vec::with_capacity(input.len() + 32);
 
@@ -272,6 +273,19 @@ pub fn compress_with_dict(
         let prefix = dict.content();
         let mut rep_offsets = *dict.rep_offsets();
         let mut workspace = block_encoder::BlockEncodeWorkspace::new();
+
+        workspace.prev_ll = dict
+            .ll_table()
+            .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 35));
+        workspace.prev_of = dict
+            .of_table()
+            .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 31));
+        workspace.prev_ml = dict
+            .ml_table()
+            .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 52));
+        workspace.prev_huffman = dict.huf_table().and_then(|(dt, tl)| {
+            zrip_core::huffman::encode::HuffmanEncodeTable::from_decode_table(dt, tl)
+        });
 
         if input.len() <= MAX_BLOCK_SIZE {
             let sequences = match params.strategy {
@@ -399,8 +413,8 @@ pub fn compress_with_dict(
 }
 
 pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usize, CompressError> {
-    let mut params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
-    clamp_params_to_src_size(&mut params, input.len());
+    let params = strategy::level_params_for_size(level, input.len())
+        .ok_or(CompressError::InvalidLevel(level))?;
     let mut buf = Vec::with_capacity(output.len());
     compress_frame(input, &params, &mut buf);
     if buf.len() > output.len() {

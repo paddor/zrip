@@ -65,6 +65,21 @@ const ALL_FILES: &[&str] = &[
     "corpus/silesia/x-ray",
 ];
 
+const SMALL_FILES: &[&str] = &[
+    "corpus/small/dickens_2k",
+    "corpus/small/dickens_8k",
+    "corpus/small/dickens_32k",
+    "corpus/small/dickens_128k",
+    "corpus/small/hdfs_2k",
+    "corpus/small/hdfs_8k",
+    "corpus/small/hdfs_32k",
+    "corpus/small/hdfs_128k",
+    "corpus/small/xml_collection_2k",
+    "corpus/small/xml_collection_8k",
+    "corpus/small/xml_collection_32k",
+    "corpus/small/xml_collection_128k",
+];
+
 fn cpu_nanos() -> u64 {
     let mut ts = libc::timespec {
         tv_sec: 0,
@@ -260,6 +275,83 @@ fn bench_c_zstd(data: &[u8], name: &str, level: i32, target_ns: u64) -> BenchRes
     }
 }
 
+fn train_dict_for_file(data: &[u8], dict_size: usize) -> Vec<u8> {
+    let chunk_size = 1024usize;
+    let mut concat = Vec::new();
+    let mut sizes = Vec::new();
+    for chunk in data.chunks(chunk_size) {
+        concat.extend_from_slice(chunk);
+        sizes.push(chunk.len());
+    }
+    let mut buf = vec![0u8; dict_size];
+    let n = zstd_safe::train_from_buffer(&mut buf, &concat, &sizes).expect("dict training failed");
+    buf.truncate(n);
+    buf
+}
+
+fn bench_zrip_dict(
+    data: &[u8],
+    name: &str,
+    level: i32,
+    target_ns: u64,
+    dict_bytes: &[u8],
+) -> BenchResult {
+    let dict = zrip::dict::Dictionary::from_bytes(dict_bytes).unwrap();
+    let mut ctx =
+        zrip::CompressContext::with_dict_for_size(level, dict.clone(), data.len()).unwrap();
+    let compressed = ctx.compress(data).unwrap().to_vec();
+    let compress_ns = bench_loop(3, target_ns, 7, || {
+        let _ = std::hint::black_box(ctx.compress(std::hint::black_box(data)).unwrap());
+    });
+    let decompress_ns = bench_loop(3, target_ns, 7, || {
+        let _ = std::hint::black_box(
+            zrip::decompress_with_dict(std::hint::black_box(&compressed), &dict).unwrap(),
+        );
+    });
+    BenchResult {
+        codec: "zrip+dict".into(),
+        input_name: name.into(),
+        level,
+        input_size: data.len(),
+        compressed_size: compressed.len(),
+        compress_ns,
+        decompress_ns,
+    }
+}
+
+fn bench_c_zstd_dict(
+    data: &[u8],
+    name: &str,
+    level: i32,
+    target_ns: u64,
+    dict_bytes: &[u8],
+) -> BenchResult {
+    let mut compressor = zstd::bulk::Compressor::with_dictionary(level, dict_bytes).unwrap();
+    let compressed = compressor.compress(data).unwrap();
+    let mut decompressor = zstd::bulk::Decompressor::with_dictionary(dict_bytes).unwrap();
+    let mut decomp_buf = Vec::with_capacity(data.len() + 1024);
+    let compress_ns = bench_loop(3, target_ns, 7, || {
+        let _ = std::hint::black_box(compressor.compress(std::hint::black_box(data)).unwrap());
+    });
+    let decompress_ns = bench_loop(3, target_ns, 7, || {
+        decomp_buf.clear();
+        let _ = std::hint::black_box(
+            decompressor
+                .decompress_to_buffer(std::hint::black_box(&compressed), &mut decomp_buf)
+                .unwrap(),
+        );
+    });
+    BenchResult {
+        codec: "C zstd+dict".into(),
+        input_name: name.into(),
+        level,
+        input_size: data.len(),
+        compressed_size: compressed.len(),
+        compress_ns,
+        decompress_ns,
+    }
+}
+
 fn ensure_corpus() {
     for &(path, url) in SILESIA_DOWNLOADS {
         if std::fs::metadata(path).is_ok() {
@@ -394,13 +486,14 @@ fn migrate_flat_cache() {
 }
 
 const CODECS: &[&str] = &["C zstd", "zrip", "ruzstd", "structured-zstd", "lz4rip"];
+const DICT_CODECS: &[&str] = &["C zstd+dict", "zrip+dict"];
 
 fn levels_for_codec<'a>(codec: &str, level_filter: &'a [i32]) -> &'a [i32] {
     match codec {
         "ruzstd" | "lz4rip" => &[1],
         _ if !level_filter.is_empty() => level_filter,
-        "zrip" => ZRIP_LEVELS,
-        "C zstd" | "structured-zstd" => C_ZSTD_LEVELS,
+        "zrip" | "zrip+dict" => ZRIP_LEVELS,
+        "C zstd" | "C zstd+dict" | "structured-zstd" => C_ZSTD_LEVELS,
         _ => &[1],
     }
 }
@@ -419,6 +512,8 @@ fn fmt_mbs(input_size: usize, ns: f64) -> String {
 fn display_codec(codec: &str) -> &str {
     match codec {
         "structured-zstd" => "s-zstd",
+        "C zstd+dict" => "Czstd+d",
+        "zrip+dict" => "zrip+d",
         other => other,
     }
 }
@@ -453,6 +548,8 @@ fn main() {
     let mut file_filter: Vec<String> = Vec::new();
     let mut level_filter: Vec<i32> = Vec::new();
     let mut extra_files: Vec<String> = Vec::new();
+    let mut small_only = false;
+    let mut dict_mode = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -485,6 +582,8 @@ fn main() {
                     extra_files.push(args[i].clone());
                 }
             }
+            "--small-only" => small_only = true,
+            "--dict" => dict_mode = true,
             _ => {}
         }
         i += 1;
@@ -499,7 +598,9 @@ fn main() {
         only.clear();
     }
 
-    let active_codecs: Vec<&str> = CODECS
+    let base_codecs: &[&str] = if dict_mode { DICT_CODECS } else { CODECS };
+
+    let active_codecs: Vec<&str> = base_codecs
         .iter()
         .copied()
         .filter(|c| only.is_empty() || only.iter().any(|o| c.contains(o.as_str())))
@@ -519,11 +620,42 @@ fn main() {
 
     let mut results: Vec<BenchResult> = Vec::new();
 
-    let all_paths: Vec<&str> = ALL_FILES
+    let base_files: &[&str] = if small_only { SMALL_FILES } else { ALL_FILES };
+    let all_paths: Vec<&str> = base_files
         .iter()
         .copied()
         .chain(extra_files.iter().map(|s| s.as_str()))
         .collect();
+
+    // Pre-train dicts per source file (keyed by base name before _4k/_16k/etc.)
+    let mut dicts: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
+    if dict_mode {
+        for path in &all_paths {
+            let name = path.rsplit('/').next().unwrap();
+            if !file_filter.is_empty() && !file_filter.iter().any(|f| f == name) {
+                continue;
+            }
+            let source_name = dict_source_name(name);
+            if dicts.contains_key(&source_name) {
+                continue;
+            }
+            let source_path = dict_source_path(&source_name);
+            let source_data = match std::fs::read(&source_path) {
+                Ok(d) => d,
+                Err(_) => {
+                    eprintln!("dict: skipping {source_name} (source {source_path} not found)");
+                    continue;
+                }
+            };
+            eprintln!(
+                "training dict for {source_name} from {} bytes...",
+                source_data.len()
+            );
+            let dict_bytes = train_dict_for_file(&source_data, 16384);
+            eprintln!("  dict size: {} bytes", dict_bytes.len());
+            dicts.insert(source_name, dict_bytes);
+        }
+    }
 
     for path in &all_paths {
         let name = path.rsplit('/').next().unwrap();
@@ -541,6 +673,13 @@ fn main() {
 
         eprintln!("{name} ({} bytes)", data.len());
 
+        let dict_bytes = if dict_mode {
+            let source_name = dict_source_name(name);
+            dicts.get(&source_name)
+        } else {
+            None
+        };
+
         for &level in &all_levels {
             let mut level_batch: Vec<BenchResult> = Vec::new();
 
@@ -556,6 +695,20 @@ fn main() {
                     "ruzstd" => bench_ruzstd(&data, name, level, target_ns),
                     "structured-zstd" => bench_structured_zstd(&data, name, level, target_ns),
                     "lz4rip" => bench_lz4rip(&data, name, level, target_ns),
+                    "zrip+dict" => {
+                        if let Some(db) = dict_bytes {
+                            bench_zrip_dict(&data, name, level, target_ns, db)
+                        } else {
+                            continue;
+                        }
+                    }
+                    "C zstd+dict" => {
+                        if let Some(db) = dict_bytes {
+                            bench_c_zstd_dict(&data, name, level, target_ns, db)
+                        } else {
+                            continue;
+                        }
+                    }
                     _ => unreachable!(),
                 };
                 level_batch.push(r);
@@ -570,4 +723,32 @@ fn main() {
     }
 
     write_cache(&results);
+}
+
+fn dict_source_name(file_name: &str) -> String {
+    let base = file_name
+        .trim_end_matches("_2k")
+        .trim_end_matches("_8k")
+        .trim_end_matches("_32k")
+        .trim_end_matches("_128k");
+    let base = base
+        .trim_end_matches(".txt")
+        .trim_end_matches(".json")
+        .trim_end_matches(".xml")
+        .trim_end_matches(".pdf");
+    base.to_string()
+}
+
+fn dict_source_path(source_name: &str) -> String {
+    match source_name {
+        "hdfs" => "corpus/hdfs.json".into(),
+        "dickens" => "corpus/dickens.txt".into(),
+        "xml_collection" => "corpus/xml_collection.xml".into(),
+        "reymont" => "corpus/reymont.pdf".into(),
+        "compression_1k" => "corpus/compression_1k.txt".into(),
+        "compression_34k" => "corpus/compression_34k.txt".into(),
+        "compression_65k" => "corpus/compression_65k.txt".into(),
+        "compression_66k_JSON" => "corpus/compression_66k_JSON.txt".into(),
+        other => format!("corpus/silesia/{other}"),
+    }
 }

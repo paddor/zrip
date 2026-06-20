@@ -54,7 +54,8 @@ fn main() {
 
             // CompressContext with prepared dict (hot-loop path)
             let dict_ctx = zrip::dict::Dictionary::from_bytes(&dict_buf).unwrap();
-            let mut ctx = zrip::CompressContext::with_dict(level, dict_ctx).unwrap();
+            let mut ctx =
+                zrip::CompressContext::with_dict_for_size(level, dict_ctx, data.len()).unwrap();
             let mut compressed_ctx = Vec::new();
             for _ in 0..3 {
                 compressed_ctx = ctx.compress(data).unwrap().to_vec();

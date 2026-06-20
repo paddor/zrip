@@ -29,12 +29,17 @@ pub(crate) struct BlockEncodeWorkspace {
     pub lit_section: Vec<u8>,
     pub pred_seq: Vec<u8>,
     pub cust_seq: Vec<u8>,
+    pub repeat_seq: Vec<u8>,
     pub huf_concat: Vec<u8>,
     pub huf_stream: Vec<u8>,
     pub pred_writer_buf: Vec<u8>,
     pub cust_writer_buf: Vec<u8>,
+    pub repeat_writer_buf: Vec<u8>,
     packed_seqs: Vec<PackedSeq>,
     pub prev_huffman: Option<HuffmanEncodeTable>,
+    pub prev_ll: Option<FseEncodeTable>,
+    pub prev_of: Option<FseEncodeTable>,
+    pub prev_ml: Option<FseEncodeTable>,
 }
 
 impl BlockEncodeWorkspace {
@@ -44,12 +49,17 @@ impl BlockEncodeWorkspace {
             lit_section: Vec::new(),
             pred_seq: Vec::new(),
             cust_seq: Vec::new(),
+            repeat_seq: Vec::new(),
             huf_concat: Vec::new(),
             huf_stream: Vec::new(),
             pred_writer_buf: Vec::new(),
             cust_writer_buf: Vec::new(),
+            repeat_writer_buf: Vec::new(),
             packed_seqs: Vec::new(),
             prev_huffman: None,
+            prev_ll: None,
+            prev_of: None,
+            prev_ml: None,
         }
     }
 }
@@ -64,7 +74,8 @@ struct SymbolTT {
     delta_find_state: i32,
 }
 
-struct FseEncodeTable {
+#[derive(Clone)]
+pub(crate) struct FseEncodeTable {
     symbol_tt: [SymbolTT; MAX_SYMBOLS],
     state_table: [u16; MAX_TABLE_SIZE],
     table_size: u32,
@@ -75,6 +86,14 @@ const MAX_SYMBOLS: usize = 53;
 const MAX_TABLE_SIZE: usize = 512;
 
 impl FseEncodeTable {
+    pub(crate) fn from_decode_table(
+        decode_table: &[FseDecodeEntry],
+        accuracy_log: u8,
+        max_symbol: usize,
+    ) -> Self {
+        Self::build(decode_table, 1 << accuracy_log, max_symbol, accuracy_log)
+    }
+
     fn build(
         decode_table: &[FseDecodeEntry],
         table_size: usize,
@@ -238,6 +257,20 @@ pub(crate) fn encode_compressed_block(
         &mut workspace.prev_huffman,
     );
 
+    let has_repeat =
+        workspace.prev_ll.is_some() && workspace.prev_of.is_some() && workspace.prev_ml.is_some();
+
+    if has_repeat {
+        encode_seq_repeat(
+            &workspace.packed_seqs,
+            workspace.prev_ll.as_ref().unwrap(),
+            workspace.prev_of.as_ref().unwrap(),
+            workspace.prev_ml.as_ref().unwrap(),
+            &mut workspace.repeat_seq,
+            &mut workspace.repeat_writer_buf,
+        );
+    }
+
     let do_codes = n >= 64;
     let seq_data = if do_codes {
         let (ll_freq, ml_freq, of_freq, total_extra_bits) =
@@ -275,6 +308,17 @@ pub(crate) fn encode_compressed_block(
         );
         &workspace.pred_seq
     };
+
+    let seq_data = if has_repeat && workspace.repeat_seq.len() < seq_data.len() {
+        &workspace.repeat_seq
+    } else {
+        seq_data
+    };
+
+    // Clear dict FSE tables after first block
+    workspace.prev_ll = None;
+    workspace.prev_of = None;
+    workspace.prev_ml = None;
 
     let block_len = workspace.lit_section.len() + seq_data.len();
     if block_len >= src.len() {
@@ -664,6 +708,113 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     add_bits!(ml_state - ml_ts, ML_DEFAULT_ACCURACY);
     add_bits!(of_state - of_ts, OF_DEFAULT_ACCURACY);
     add_bits!(ll_state - ll_ts, LL_DEFAULT_ACCURACY);
+
+    add_bits!(1u32, 1u8);
+    flush_fast!();
+    while bits_used > 0 {
+        primitives::bitstream_write_byte(writer_buf, pos, bits as u8);
+        bits >>= 8;
+        bits_used = bits_used.saturating_sub(8);
+        pos += 1;
+    }
+    primitives::set_vec_len(writer_buf, pos);
+    output.extend_from_slice(writer_buf);
+}
+
+fn encode_seq_repeat(
+    packed: &[PackedSeq],
+    ll_t: &FseEncodeTable,
+    of_t: &FseEncodeTable,
+    ml_t: &FseEncodeTable,
+    output: &mut Vec<u8>,
+    writer_buf: &mut Vec<u8>,
+) {
+    let n = packed.len();
+    let num_seq = n as u32;
+    output.clear();
+    output.reserve(n * 4 + 4);
+
+    if num_seq < 128 {
+        output.push(num_seq as u8);
+    } else if num_seq < 0x7F00 {
+        output.push(((num_seq >> 8) + 128) as u8);
+        output.push(num_seq as u8);
+    } else {
+        output.push(0xFF);
+        let adj = num_seq - 0x7F00;
+        output.push(adj as u8);
+        output.push((adj >> 8) as u8);
+    }
+
+    // Mode byte: repeat (3) for all three streams
+    output.push((3 << 6) | (3 << 4) | (3 << 2));
+
+    let last = primitives::slice_get_ref(packed, n - 1);
+
+    let max_out = n * 18 + 16;
+    writer_buf.clear();
+    writer_buf.reserve(max_out);
+
+    let mut ll_s = ll_t.init_state(last.ll_c);
+    let mut of_s = of_t.init_state(last.of_c);
+    let mut ml_s = ml_t.init_state(last.ml_c);
+
+    let mut pos: usize = 0;
+    let mut bits: u64 = 0;
+    let mut bits_used: u32 = 0;
+
+    macro_rules! add_bits {
+        ($val:expr, $n:expr) => {
+            bits |= ($val as u64) << bits_used;
+            bits_used += $n as u32;
+        };
+    }
+    macro_rules! flush_fast {
+        () => {
+            primitives::bitstream_flush(writer_buf, pos, bits);
+            let nb = (bits_used >> 3) as usize;
+            pos += nb;
+            bits >>= (nb << 3) as u64;
+            bits_used &= 7;
+        };
+    }
+
+    add_bits!(last.extra_bits, last.extra_nbits);
+
+    for k in (0..n - 1).rev() {
+        let p = primitives::slice_get_ref(packed, k);
+
+        flush_fast!();
+        {
+            let tt = primitives::slice_get_ref(&of_t.symbol_tt, p.of_c as usize);
+            let nb = (tt.delta_nb_bits.wrapping_add(of_s)) >> 16;
+            add_bits!(of_s & ((1u32 << nb) - 1), nb);
+            let idx = (of_s >> nb) as i32 + tt.delta_find_state;
+            of_s = primitives::slice_get(&of_t.state_table, idx as usize) as u32;
+        }
+        {
+            let tt = primitives::slice_get_ref(&ml_t.symbol_tt, p.ml_c as usize);
+            let nb = (tt.delta_nb_bits.wrapping_add(ml_s)) >> 16;
+            add_bits!(ml_s & ((1u32 << nb) - 1), nb);
+            let idx = (ml_s >> nb) as i32 + tt.delta_find_state;
+            ml_s = primitives::slice_get(&ml_t.state_table, idx as usize) as u32;
+        }
+        {
+            let tt = primitives::slice_get_ref(&ll_t.symbol_tt, p.ll_c as usize);
+            let nb = (tt.delta_nb_bits.wrapping_add(ll_s)) >> 16;
+            add_bits!(ll_s & ((1u32 << nb) - 1), nb);
+            let idx = (ll_s >> nb) as i32 + tt.delta_find_state;
+            ll_s = primitives::slice_get(&ll_t.state_table, idx as usize) as u32;
+        }
+        flush_fast!();
+
+        add_bits!(p.extra_bits, p.extra_nbits);
+    }
+
+    flush_fast!();
+    add_bits!(ml_s - ml_t.table_size, ml_t.table_log);
+    add_bits!(of_s - of_t.table_size, of_t.table_log);
+    add_bits!(ll_s - ll_t.table_size, ll_t.table_log);
 
     add_bits!(1u32, 1u8);
     flush_fast!();
