@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.3.3]
+
+### Fixed
+
+- Bump sub-crate versions to allow publishing on crates.io (0.3.2
+  sub-crates were never published).
+
 ## [0.3.2]
 
 ### Added

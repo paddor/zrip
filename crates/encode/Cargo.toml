@@ -1,6 +1,6 @@
 [package]
 name = "zrip-encode"
-version = "0.3.1"
+version = "0.3.3"
 edition = "2024"
 rust-version = "1.85"
 description = "zstd encoder for zrip (internal crate)"
@@ -19,7 +19,7 @@ frame = ["std"]
 nightly = ["zrip-core/nightly"]
 
 [dependencies]
-zrip-core = { version = "0.3.1", path = "../core", default-features = false }
+zrip-core = { version = "0.3.3", path = "../core", default-features = false }
 
 [dev-dependencies]
 zrip = { path = "../.." }
