@@ -80,7 +80,9 @@ pub use zrip_encode::strategy::{DEFAULT_LEVEL, LevelParams};
 pub const DEFAULT_DECOMPRESS_LIMIT: usize = usize::MAX;
 pub use zrip_core::SAFE_DECOMPRESS_LIMIT;
 
+#[doc(hidden)]
 pub use zrip_decode as decode;
+#[doc(hidden)]
 pub use zrip_encode as encode;
 
 #[cfg(feature = "alloc")]

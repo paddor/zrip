@@ -15,17 +15,17 @@ use zrip_core::fse::{
     OF_DEFAULT_DIST, promote_ll_table, promote_ml_table, promote_of_table,
 };
 
-pub struct SequenceDecodeTables {
-    pub ll_table: Vec<FseSeqDecodeEntry>,
-    pub ll_accuracy: u8,
-    pub of_table: Vec<FseSeqDecodeEntry>,
-    pub of_accuracy: u8,
-    pub ml_table: Vec<FseSeqDecodeEntry>,
-    pub ml_accuracy: u8,
+pub(crate) struct SequenceDecodeTables {
+    pub(crate) ll_table: Vec<FseSeqDecodeEntry>,
+    pub(crate) ll_accuracy: u8,
+    pub(crate) of_table: Vec<FseSeqDecodeEntry>,
+    pub(crate) of_accuracy: u8,
+    pub(crate) ml_table: Vec<FseSeqDecodeEntry>,
+    pub(crate) ml_accuracy: u8,
 }
 
 impl SequenceDecodeTables {
-    pub fn new_default() -> Self {
+    pub(crate) fn new_default() -> Self {
         Self {
             ll_table: promote_ll_table(&build_decode_table_from_default(
                 &LL_DEFAULT_DIST,
@@ -46,7 +46,7 @@ impl SequenceDecodeTables {
     }
 }
 
-pub fn parse_sequence_count(data: &[u8]) -> Result<(u32, usize), DecompressError> {
+pub(crate) fn parse_sequence_count(data: &[u8]) -> Result<(u32, usize), DecompressError> {
     if data.is_empty() {
         return Err(DecompressError::CorruptSequences);
     }

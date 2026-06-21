@@ -9,7 +9,7 @@ use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
 use zrip_core::hint::{likely, unlikely};
 
-pub fn decode_execute_sequences(
+pub(crate) fn decode_execute_sequences(
     data: &[u8],
     num_sequences: u32,
     tables: &SequenceDecodeTables,
