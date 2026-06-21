@@ -411,6 +411,7 @@ pub(crate) fn compress_fast_with_prefix(
     sequences
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compress_fast_with_prefix_reuse(
     src: &[u8],
     params: &LevelParams,

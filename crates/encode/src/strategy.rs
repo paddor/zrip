@@ -45,7 +45,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
 /// Level 0 is treated as "library default" and maps to level 1.
 pub fn level_params_for_size(level: i32, src_len: usize) -> Option<LevelParams> {
     let mut params = level_params_inner(level)?;
-    if src_len < usize::MAX && src_len >= 2 {
+    if (2..usize::MAX).contains(&src_len) {
         let src_log = 32 - ((src_len as u32) - 1).leading_zeros();
         params.hash_log = params.hash_log.min(src_log);
         params.chain_log = params.chain_log.min(src_log);
