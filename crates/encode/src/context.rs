@@ -124,7 +124,7 @@ impl CompressContext {
     /// Creates a new context for the given compression level (-7..=4).
     pub fn new(level: i32) -> Result<Self, CompressError> {
         let params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
-        let max_log = strategy::max_hash_log(level).unwrap();
+        let max_log = strategy::max_hash_log(level).expect("level validated above");
         let alloc_size = 1usize << max_log;
         let (hash_table, hash_long) = match params.strategy {
             Strategy::Fast => (vec![0u32; alloc_size], Vec::new()),
@@ -191,7 +191,8 @@ impl CompressContext {
         if self.prepared.is_some() {
             return self.compress_with_prepared(input);
         }
-        let params = strategy::level_params_for_size(self.level, input.len()).unwrap();
+        let params = strategy::level_params_for_size(self.level, input.len())
+            .expect("level validated at construction");
         compress_core(
             input,
             params,
@@ -215,7 +216,8 @@ impl CompressContext {
         input: &[u8],
         dict: &Dictionary,
     ) -> Result<Cow<'_, [u8]>, CompressError> {
-        let params = strategy::level_params_for_size(self.level, input.len()).unwrap();
+        let params = strategy::level_params_for_size(self.level, input.len())
+            .expect("level validated at construction");
         compress_core(
             input,
             params,
@@ -236,7 +238,8 @@ impl CompressContext {
     fn compress_with_prepared(&mut self, input: &[u8]) -> Result<Cow<'_, [u8]>, CompressError> {
         let prep = self.prepared.as_ref().unwrap();
         let total_window = prep.prefix_len + input.len();
-        let params = strategy::level_params_for_size(self.level, total_window).unwrap();
+        let params = strategy::level_params_for_size(self.level, total_window)
+            .expect("level validated at construction");
         let snapshot_matches = match params.strategy {
             Strategy::Fast => (1usize << params.hash_log) == prep.hash_snapshot.len(),
             Strategy::DFast => {
@@ -397,7 +400,8 @@ impl CompressContext {
         let rep_offsets = prep.rep_offsets;
         let prefix = &prep.combined[..prefix_len];
 
-        let params = strategy::level_params_for_size(self.level, input.len()).unwrap();
+        let params = strategy::level_params_for_size(self.level, input.len())
+            .expect("level validated at construction");
         compress_core(
             input,
             params,
