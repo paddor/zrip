@@ -90,74 +90,8 @@ pub fn parse_fse_table_description(
     reader: &mut BitReader,
     max_symbol: u8,
 ) -> Result<(Vec<i16>, u8), DecompressError> {
-    let accuracy_log = reader.read_bits(4)? as u8 + 5;
-    if accuracy_log > MAX_TABLE_LOG {
-        return Err(DecompressError::BadFseTable);
-    }
-
-    let table_size = 1i32 << accuracy_log;
-    let mut remaining = table_size + 1;
-    let mut threshold = table_size;
-    let mut nb_bits = accuracy_log + 1;
     let mut distribution = Vec::new();
-
-    while remaining > 1 && distribution.len() <= max_symbol as usize {
-        let max_val = (2 * threshold - 1) - remaining;
-
-        let lower = reader.read_bits(nb_bits - 1)? as i32;
-        let count = if lower < max_val {
-            lower
-        } else {
-            let extra = reader.read_bits(1)? as i32;
-            let full = lower + (extra << (nb_bits - 1));
-            if full >= threshold {
-                full - max_val
-            } else {
-                full
-            }
-        };
-
-        let prob = count - 1;
-        if prob == -1 {
-            distribution.push(-1);
-            remaining -= 1;
-        } else if prob == 0 {
-            distribution.push(0);
-        } else {
-            distribution.push(prob as i16);
-            remaining -= prob;
-        }
-
-        if remaining < 0 {
-            return Err(DecompressError::BadFseTable);
-        }
-
-        if prob == 0 {
-            loop {
-                let repeat = reader.read_bits(2)? as usize;
-                distribution.extend(core::iter::repeat_n(0, repeat));
-                if repeat < 3 {
-                    break;
-                }
-            }
-        }
-
-        while remaining < threshold {
-            nb_bits -= 1;
-            threshold >>= 1;
-        }
-    }
-
-    if remaining != 1 {
-        return Err(DecompressError::BadFseTable);
-    }
-
-    reader.align_to_byte();
-
-    while distribution.len() <= max_symbol as usize {
-        distribution.push(0);
-    }
-
+    let accuracy_log = parse_fse_table_description_into(reader, max_symbol, &mut distribution)?;
     Ok((distribution, accuracy_log))
 }
 
@@ -271,64 +205,9 @@ pub fn build_decode_table(
     distribution: &[i16],
     accuracy_log: u8,
 ) -> Result<Vec<FseDecodeEntry>, DecompressError> {
-    let table_size = 1usize << accuracy_log;
-    let mut table = vec![
-        FseDecodeEntry {
-            base_line: 0,
-            num_bits: 0,
-            symbol: 0,
-        };
-        table_size
-    ];
-
-    let step = (table_size >> 1) + (table_size >> 3) + 3;
-    let mask = table_size - 1;
-
-    let mut high_threshold = table_size - 1;
-    let mut symbol_next = vec![0u16; distribution.len()];
-
-    for (s, &prob) in distribution.iter().enumerate() {
-        if prob == -1 {
-            if unlikely(high_threshold == 0) {
-                return Err(DecompressError::BadFseTable);
-            }
-            table[high_threshold].symbol = s as u8;
-            high_threshold -= 1;
-            symbol_next[s] = 1;
-        } else if prob > 0 {
-            symbol_next[s] = prob as u16;
-        }
-    }
-
-    let mut position = 0;
-    for (s, &prob) in distribution.iter().enumerate() {
-        if prob <= 0 {
-            continue;
-        }
-        for _ in 0..prob {
-            table[position].symbol = s as u8;
-            position = (position + step) & mask;
-            while position > high_threshold {
-                position = (position + step) & mask;
-            }
-        }
-    }
-
-    if position != 0 {
-        return Err(DecompressError::BadFseTable);
-    }
-
-    for entry in table.iter_mut().take(table_size) {
-        let s = entry.symbol as usize;
-        let next_state = symbol_next[s] as u32;
-        symbol_next[s] += 1;
-
-        let nb = accuracy_log as u32 - high_bit(next_state);
-        let new_state = (next_state << nb) - table_size as u32;
-        entry.num_bits = nb as u8;
-        entry.base_line = new_state as u16;
-    }
-
+    let mut table = Vec::new();
+    let mut symbol_next = Vec::new();
+    build_decode_table_into(distribution, accuracy_log, &mut table, &mut symbol_next)?;
     Ok(table)
 }
 
