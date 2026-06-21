@@ -85,12 +85,15 @@ unsafe fn count_match_raw(
 
 #[inline(always)]
 pub(crate) fn assert_rep_valid(r0: u32, r1: u32) {
-    debug_assert!(r0 > 0);
-    debug_assert!(r1 > 0);
-    unsafe {
-        core::hint::assert_unchecked(r0 > 0);
-        core::hint::assert_unchecked(r1 > 0);
+    if r0 == 0 || r1 == 0 {
+        cold_rep_panic(r0, r1);
     }
+}
+
+#[cold]
+#[inline(never)]
+fn cold_rep_panic(r0: u32, r1: u32) -> ! {
+    panic!("rep offsets must be non-zero: r0={r0}, r1={r1}");
 }
 
 #[cfg(all(target_arch = "x86_64", not(miri)))]
