@@ -31,7 +31,9 @@
 //! [`FrameEncoder`] and [`FrameDecoder`] implement [`std::io::Write`] and
 //! [`std::io::Read`] for streaming compression and decompression.
 //!
-//! ```
+//! ```no_run
+//! # #[cfg(feature = "std")]
+//! # {
 //! use std::io::{Write, Read};
 //!
 //! let mut encoder = zrip::FrameEncoder::new(Vec::new(), 1).unwrap();
@@ -42,6 +44,7 @@
 //! let mut output = Vec::new();
 //! decoder.read_to_end(&mut output).unwrap();
 //! assert_eq!(&output, b"streaming data");
+//! # }
 //! ```
 //!
 //! # Buffer reuse
@@ -130,7 +133,9 @@ pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usiz
 #[must_use]
 pub fn compress_bound(input_len: usize) -> usize {
     let num_blocks = input_len / zrip_core::frame::MAX_BLOCK_SIZE + 1;
-    input_len + num_blocks * 3 + 18
+    input_len
+        .saturating_add(num_blocks.saturating_mul(3))
+        .saturating_add(18)
 }
 
 #[cfg(feature = "std")]
