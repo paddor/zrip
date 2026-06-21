@@ -38,6 +38,35 @@ libc = "0.2"
 
 [[example]]
 name = "quickstart"
+required-features = ["std"]
+
+[[example]]
+name = "decode_compare"
+required-features = ["std"]
+
+[[example]]
+name = "mem_profile"
+required-features = ["std"]
+
+[[example]]
+name = "profile_decode"
+required-features = ["std"]
+
+[[example]]
+name = "profile_encode"
+required-features = ["std"]
+
+[[example]]
+name = "profile_czstd"
+required-features = ["std"]
+
+[[example]]
+name = "profile_czstd_decode"
+required-features = ["std"]
+
+[[example]]
+name = "profile_xray"
+required-features = ["std"]
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

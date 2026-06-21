@@ -1,5 +1,5 @@
 // C zstd cross-validation tests. Skipped under Miri (FFI unsupported).
-#![cfg(not(miri))]
+#![cfg(all(feature = "std", not(miri)))]
 
 // ===== Encoder: zrip compress -> C decompress =====
 

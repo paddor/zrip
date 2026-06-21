@@ -420,6 +420,7 @@ fn checksum_validated_on_small_frame() {
 
 // ===== compress_context =====
 
+#[cfg(feature = "std")]
 #[test]
 fn compress_context_roundtrip() {
     let data = b"hello world, this is a test of the compress context API";
@@ -444,6 +445,7 @@ fn decompress_refuses_output_exceeding_max_raw_block() {
     assert_eq!(ok, data);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn decompress_with_limit_rejects_oversized_output() {
     let mut frame = vec![
