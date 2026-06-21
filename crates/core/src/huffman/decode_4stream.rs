@@ -140,6 +140,7 @@ pub(super) fn decode_4_streams_core(
         ($c:expr, $bc:expr, $o:expr) => {{
             let idx = (($c << ($bc & 63)) >> (64 - tl)) as usize;
             let e = unsafe { *tbl.add(idx) };
+            debug_assert!(e.num_bits > 0, "Huffman table entry with 0 bits");
             unsafe { *$o = e.symbol };
             $bc += e.num_bits as u32;
             $o = unsafe { $o.add(1) };
