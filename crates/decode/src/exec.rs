@@ -77,11 +77,11 @@ pub(crate) fn decode_execute_sequences(
             let ml = $match_length as usize;
             let off = $offset as usize;
             if unlikely(off == 0) {
-                return Err(DecompressError::CorruptSequences);
+                return Err(DecompressError::InvalidOffset);
             }
             let out_pos = primitives::ptr_offset_from_mut(op, out_base);
             if unlikely(off > out_pos + history.len()) {
-                return Err(DecompressError::CorruptSequences);
+                return Err(DecompressError::InvalidOffset);
             }
             if likely(off <= out_pos) {
                 primitives::copy_match_inbuf(op, off, ml);

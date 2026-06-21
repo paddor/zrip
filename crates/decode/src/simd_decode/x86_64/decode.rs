@@ -167,12 +167,12 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
 
             let offset = $offset;
             if unlikely(offset == 0) {
-                return Err(DecompressError::CorruptSequences);
+                return Err(DecompressError::InvalidOffset);
             }
             let off = offset as usize;
             let out_pos = unsafe { op.offset_from(out_base) } as usize;
             if unlikely(off > out_pos + hist_len) {
-                return Err(DecompressError::CorruptSequences);
+                return Err(DecompressError::InvalidOffset);
             }
             if unlikely(ml == 0) {
                 return Err(DecompressError::CorruptSequences);

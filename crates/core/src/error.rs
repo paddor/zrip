@@ -33,8 +33,14 @@ pub enum DecompressError {
     BadBlockType,
     /// Literals section is malformed or truncated.
     CorruptLiterals,
-    /// Sequences section is malformed, or decoded output exceeds block size.
+    /// Sequences section is malformed.
     CorruptSequences,
+    /// Raw or RLE block exceeds MAX_BLOCK_SIZE.
+    BlockTooLarge,
+    /// Sequence offset is invalid (zero or beyond available history).
+    InvalidOffset,
+    /// Decoded output size does not match the frame content size field.
+    FrameSizeMismatch,
     /// FSE table description is invalid.
     BadFseTable,
     /// Huffman weight table is malformed.
@@ -87,6 +93,11 @@ impl fmt::Display for DecompressError {
             DecompressError::BadBlockType => write!(f, "unknown block type"),
             DecompressError::CorruptLiterals => write!(f, "corrupt literals section"),
             DecompressError::CorruptSequences => write!(f, "corrupt sequences section"),
+            DecompressError::BlockTooLarge => write!(f, "block size exceeds maximum"),
+            DecompressError::InvalidOffset => write!(f, "invalid match offset"),
+            DecompressError::FrameSizeMismatch => {
+                write!(f, "decoded size does not match frame content size")
+            }
             DecompressError::BadFseTable => write!(f, "invalid FSE table description"),
             DecompressError::BadHuffmanWeights => write!(f, "invalid Huffman weights"),
             DecompressError::BadHuffmanStream => write!(f, "corrupt Huffman stream"),

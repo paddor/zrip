@@ -241,7 +241,7 @@ pub(crate) fn decompress_frame(
         if block_size > zrip_core::frame::MAX_BLOCK_SIZE {
             match block_header.block_type {
                 BlockType::Raw | BlockType::Rle => {
-                    return Err(DecompressError::CorruptSequences);
+                    return Err(DecompressError::BlockTooLarge);
                 }
                 BlockType::Compressed => {}
             }
@@ -319,7 +319,7 @@ pub(crate) fn decompress_frame(
 
     if let Some(fcs) = header.frame_content_size {
         if (output.len() - output_start) as u64 != fcs {
-            return Err(DecompressError::CorruptSequences);
+            return Err(DecompressError::FrameSizeMismatch);
         }
     }
 
@@ -379,7 +379,7 @@ fn decode_compressed_block(
                 dict_history,
             )?;
             if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
-                return Err(DecompressError::CorruptSequences);
+                return Err(DecompressError::BlockTooLarge);
             }
             return Ok(());
         }
@@ -397,7 +397,7 @@ fn decode_compressed_block(
                 dict_history,
             )?;
             if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
-                return Err(DecompressError::CorruptSequences);
+                return Err(DecompressError::BlockTooLarge);
             }
             return Ok(());
         }
@@ -413,7 +413,7 @@ fn decode_compressed_block(
         dict_history,
     )?;
     if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
-        return Err(DecompressError::CorruptSequences);
+        return Err(DecompressError::BlockTooLarge);
     }
 
     Ok(())
