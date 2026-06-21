@@ -15,7 +15,7 @@ pub(crate) mod sequences;
 #[cfg(feature = "std")]
 pub mod streaming;
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub(crate) mod simd_decode;
 
 #[cfg(feature = "alloc")]
