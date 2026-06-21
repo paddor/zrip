@@ -78,6 +78,7 @@ pub use zrip_core::dict::Dictionary;
 pub use zrip_encode::strategy::{DEFAULT_LEVEL, LevelParams};
 
 pub const DEFAULT_DECOMPRESS_LIMIT: usize = usize::MAX;
+pub use zrip_core::SAFE_DECOMPRESS_LIMIT;
 
 pub use zrip_decode as decode;
 pub use zrip_encode as encode;
@@ -93,6 +94,14 @@ pub fn decompress_with_dict(
     dict: &zrip_core::dict::Dictionary,
 ) -> Result<alloc::vec::Vec<u8>, DecompressError> {
     zrip_decode::decompress_with_dict(input, Some(dict))
+}
+
+#[cfg(feature = "alloc")]
+pub fn decompress_with_limit(
+    input: &[u8],
+    max_output_size: usize,
+) -> Result<alloc::vec::Vec<u8>, DecompressError> {
+    zrip_decode::decompress_with_limit(input, max_output_size)
 }
 
 #[cfg(feature = "alloc")]
