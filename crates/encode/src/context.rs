@@ -7,11 +7,11 @@ use alloc::vec::Vec;
 
 use crate::block_encoder::{self, BlockEncodeWorkspace};
 use crate::strategy::{self, LevelParams, Strategy};
-use crate::{block_looks_incompressible, dfast, fast};
+use crate::{block_looks_incompressible, dfast, fast, write_frame_header};
 use zrip_core::Sequence;
 use zrip_core::dict::Dictionary;
 use zrip_core::error::CompressError;
-use zrip_core::frame::{MAX_BLOCK_SIZE, ZSTD_MAGIC};
+use zrip_core::frame::MAX_BLOCK_SIZE;
 use zrip_core::huffman::encode::HuffmanEncodeTable;
 use zrip_core::xxhash::xxh64;
 
@@ -272,58 +272,7 @@ impl CompressContext {
 
         self.output.clear();
         self.output.reserve(input.len() + 32);
-        self.output.extend_from_slice(&ZSTD_MAGIC.to_le_bytes());
-
-        let fcs_size = if input.len() <= 255 {
-            1
-        } else if input.len() <= 0xFFFF + 256 {
-            2
-        } else if input.len() <= 0xFFFF_FFFF {
-            4
-        } else {
-            8
-        };
-        let fcs_flag = match fcs_size {
-            1 => 0,
-            2 => 1,
-            4 => 2,
-            8 => 3,
-            _ => unreachable!(),
-        };
-
-        let dict_id = prep.dict_id;
-        let dict_id_flag = if dict_id <= 0xFF {
-            1u8
-        } else if dict_id <= 0xFFFF {
-            2
-        } else {
-            3
-        };
-        let descriptor = 0x20 | 0x04 | (fcs_flag << 6) | dict_id_flag;
-        self.output.push(descriptor);
-        match dict_id_flag {
-            1 => self.output.push(dict_id as u8),
-            2 => self
-                .output
-                .extend_from_slice(&(dict_id as u16).to_le_bytes()),
-            3 => self.output.extend_from_slice(&dict_id.to_le_bytes()),
-            _ => unreachable!(),
-        }
-
-        match fcs_size {
-            1 => self.output.push(input.len() as u8),
-            2 => {
-                let v = (input.len() - 256) as u16;
-                self.output.extend_from_slice(&v.to_le_bytes());
-            }
-            4 => self
-                .output
-                .extend_from_slice(&(input.len() as u32).to_le_bytes()),
-            8 => self
-                .output
-                .extend_from_slice(&(input.len() as u64).to_le_bytes()),
-            _ => unreachable!(),
-        }
+        write_frame_header(&mut self.output, input.len(), Some(prep.dict_id));
 
         if input.is_empty() {
             block_encoder::encode_raw_block(&[], true, &mut self.output);
@@ -500,56 +449,7 @@ fn compress_core(
 
     output.clear();
     output.reserve(input.len() + 32);
-    output.extend_from_slice(&ZSTD_MAGIC.to_le_bytes());
-
-    let fcs_size = if input.len() <= 255 {
-        1
-    } else if input.len() <= 0xFFFF + 256 {
-        2
-    } else if input.len() <= 0xFFFF_FFFF {
-        4
-    } else {
-        8
-    };
-    let fcs_flag = match fcs_size {
-        1 => 0,
-        2 => 1,
-        4 => 2,
-        8 => 3,
-        _ => unreachable!(),
-    };
-
-    if let Some(did) = dict_id {
-        let dict_id_flag = if did <= 0xFF {
-            1u8
-        } else if did <= 0xFFFF {
-            2
-        } else {
-            3
-        };
-        let descriptor = 0x20 | 0x04 | (fcs_flag << 6) | dict_id_flag;
-        output.push(descriptor);
-        match dict_id_flag {
-            1 => output.push(did as u8),
-            2 => output.extend_from_slice(&(did as u16).to_le_bytes()),
-            3 => output.extend_from_slice(&did.to_le_bytes()),
-            _ => unreachable!(),
-        }
-    } else {
-        let descriptor = 0x20 | 0x04 | (fcs_flag << 6);
-        output.push(descriptor);
-    }
-
-    match fcs_size {
-        1 => output.push(input.len() as u8),
-        2 => {
-            let v = (input.len() - 256) as u16;
-            output.extend_from_slice(&v.to_le_bytes());
-        }
-        4 => output.extend_from_slice(&(input.len() as u32).to_le_bytes()),
-        8 => output.extend_from_slice(&(input.len() as u64).to_le_bytes()),
-        _ => unreachable!(),
-    }
+    write_frame_header(output, input.len(), dict_id);
 
     if input.is_empty() {
         block_encoder::encode_raw_block(&[], true, output);
