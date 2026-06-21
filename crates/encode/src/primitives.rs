@@ -47,6 +47,7 @@ pub(crate) fn match_at<const MLS: usize>(src: &[u8], a: usize, b: usize) -> bool
 #[inline(always)]
 pub(crate) fn count_match(src: &[u8], p1: usize, p2: usize, limit: usize) -> usize {
     debug_assert!(p1 <= limit && limit <= src.len());
+    debug_assert!(p2 < p1, "match position must be behind cursor");
     debug_assert!(p2 < src.len());
     let src_ptr = src.as_ptr();
     unsafe { count_match_raw(src_ptr.add(p1), src_ptr.add(p2), src_ptr.add(limit)) }
@@ -139,11 +140,16 @@ pub(crate) fn copy_literals_fast(
 ) {
     debug_assert!(src_off + len <= src.len());
     debug_assert!(dst_off + len <= dst.capacity());
+    // SAFETY: callers must ensure dst has at least 16 bytes of headroom past dst_off
+    // when len <= 16, because the fast path writes a full 16 bytes.
+    debug_assert!(
+        len > 16 || dst_off + 16 <= dst.capacity(),
+        "copy_literals_fast requires 16 bytes of dst headroom for short copies"
+    );
     unsafe {
         let s = src.as_ptr().add(src_off);
         let d = dst.as_mut_ptr().add(dst_off);
         if len <= 16 && src_off + 16 <= src.len() {
-            debug_assert!(dst_off + 16 <= dst.capacity());
             (d as *mut u64).write_unaligned((s as *const u64).read_unaligned());
             (d.add(8) as *mut u64).write_unaligned((s.add(8) as *const u64).read_unaligned());
         } else {
