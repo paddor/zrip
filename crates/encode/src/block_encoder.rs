@@ -15,6 +15,21 @@ use zrip_core::fse::{
 };
 use zrip_core::huffman::encode::HuffmanEncodeTable;
 
+#[inline]
+fn write_seq_count(output: &mut Vec<u8>, num_seq: u32) {
+    if num_seq < 128 {
+        output.push(num_seq as u8);
+    } else if num_seq < 0x7F00 {
+        output.push(((num_seq >> 8) + 128) as u8);
+        output.push(num_seq as u8);
+    } else {
+        output.push(0xFF);
+        let adj = num_seq - 0x7F00;
+        output.push(adj as u8);
+        output.push((adj >> 8) as u8);
+    }
+}
+
 #[derive(Clone, Copy)]
 struct PackedSeq {
     extra_bits: u64,
@@ -632,17 +647,7 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     output.clear();
     output.reserve(n * 4 + 4);
 
-    if num_seq < 128 {
-        output.push(num_seq as u8);
-    } else if num_seq < 0x7F00 {
-        output.push(((num_seq >> 8) + 128) as u8);
-        output.push(num_seq as u8);
-    } else {
-        output.push(0xFF);
-        let adj = num_seq - 0x7F00;
-        output.push(adj as u8);
-        output.push((adj >> 8) as u8);
-    }
+    write_seq_count(output, num_seq);
 
     output.push(0x00);
 
@@ -734,17 +739,7 @@ fn encode_seq_repeat(
     output.clear();
     output.reserve(n * 4 + 4);
 
-    if num_seq < 128 {
-        output.push(num_seq as u8);
-    } else if num_seq < 0x7F00 {
-        output.push(((num_seq >> 8) + 128) as u8);
-        output.push(num_seq as u8);
-    } else {
-        output.push(0xFF);
-        let adj = num_seq - 0x7F00;
-        output.push(adj as u8);
-        output.push((adj >> 8) as u8);
-    }
+    write_seq_count(output, num_seq);
 
     // Mode byte: repeat (3) for all three streams
     output.push((3 << 6) | (3 << 4) | (3 << 2));
@@ -912,17 +907,7 @@ fn encode_seq_custom(
     let num_seq = n as u32;
     output.reserve(n * 4 + 64);
 
-    if num_seq < 128 {
-        output.push(num_seq as u8);
-    } else if num_seq < 0x7F00 {
-        output.push(((num_seq >> 8) + 128) as u8);
-        output.push(num_seq as u8);
-    } else {
-        output.push(0xFF);
-        let adj = num_seq - 0x7F00;
-        output.push(adj as u8);
-        output.push((adj >> 8) as u8);
-    }
+    write_seq_count(output, num_seq);
 
     output.push((ll_mode << 6) | (of_mode << 4) | (ml_mode << 2));
 
