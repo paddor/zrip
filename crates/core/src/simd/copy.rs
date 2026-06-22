@@ -1,99 +1,117 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
 use super::CpuTier;
 
-/// Copy `len` bytes from `src` to the end of `dst` using the best available SIMD.
-/// `dst` must have enough capacity pre-reserved.
 #[inline]
 pub fn append_literals(dst: &mut Vec<u8>, src: &[u8]) {
     if src.is_empty() {
         return;
     }
 
-    let len = src.len();
-    dst.reserve(len + 32);
-    let dst_offset = dst.len();
-
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(not(feature = "paranoid"))]
     {
-        let tier = super::cpu_tier();
-        if tier >= CpuTier::Avx2 && len >= 32 {
-            unsafe {
-                let dst_ptr = dst.as_mut_ptr().add(dst_offset);
-                super::x86_64::avx2::wildcopy_avx2(src.as_ptr(), dst_ptr, len);
-                dst.set_len(dst_offset + len);
+        let len = src.len();
+        dst.reserve(len + 32);
+        let dst_offset = dst.len();
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let tier = super::cpu_tier();
+            if tier >= CpuTier::Avx2 && len >= 32 {
+                unsafe {
+                    let dst_ptr = dst.as_mut_ptr().add(dst_offset);
+                    super::x86_64::avx2::wildcopy_avx2(src.as_ptr(), dst_ptr, len);
+                    dst.set_len(dst_offset + len);
+                }
+                return;
             }
-            return;
+            if tier >= CpuTier::Sse2 && len >= 16 {
+                unsafe {
+                    let dst_ptr = dst.as_mut_ptr().add(dst_offset);
+                    super::x86_64::sse2::wildcopy_sse2(src.as_ptr(), dst_ptr, len);
+                    dst.set_len(dst_offset + len);
+                }
+                return;
+            }
         }
-        if tier >= CpuTier::Sse2 && len >= 16 {
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            if len >= 16 {
+                unsafe {
+                    let dst_ptr = dst.as_mut_ptr().add(dst_offset);
+                    super::aarch64::neon::wildcopy_neon(src.as_ptr(), dst_ptr, len);
+                    dst.set_len(dst_offset + len);
+                }
+                return;
+            }
+        }
+
+        if len >= 8 {
             unsafe {
                 let dst_ptr = dst.as_mut_ptr().add(dst_offset);
-                super::x86_64::sse2::wildcopy_sse2(src.as_ptr(), dst_ptr, len);
+                super::scalar::wildcopy_nonoverlap(src.as_ptr(), dst_ptr, len);
                 dst.set_len(dst_offset + len);
             }
-            return;
+        } else {
+            dst.extend_from_slice(src);
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
-    {
-        if len >= 16 {
-            unsafe {
-                let dst_ptr = dst.as_mut_ptr().add(dst_offset);
-                super::aarch64::neon::wildcopy_neon(src.as_ptr(), dst_ptr, len);
-                dst.set_len(dst_offset + len);
-            }
-            return;
-        }
-    }
-
-    // Scalar fallback: use standard extend for small copies, wildcopy for larger
-    if len >= 8 {
-        unsafe {
-            let dst_ptr = dst.as_mut_ptr().add(dst_offset);
-            super::scalar::wildcopy_nonoverlap(src.as_ptr(), dst_ptr, len);
-            dst.set_len(dst_offset + len);
-        }
-    } else {
-        dst.extend_from_slice(src);
-    }
+    #[cfg(feature = "paranoid")]
+    dst.extend_from_slice(src);
 }
 
-/// Copy `match_length` bytes from `offset` bytes back within `dst`.
-/// Handles overlapping matches correctly. `dst` must have enough capacity.
 #[inline]
 pub fn append_match(dst: &mut Vec<u8>, offset: usize, match_length: usize) {
     if match_length == 0 {
         return;
     }
 
-    dst.reserve(match_length + 32);
-    let dst_len = dst.len();
-
-    debug_assert!(offset <= dst_len);
+    debug_assert!(offset <= dst.len());
     debug_assert!(offset > 0);
 
-    unsafe {
-        let base = dst.as_mut_ptr();
-        let write_ptr = base.add(dst_len);
-        super::scalar::copy_match(write_ptr, offset, match_length);
-        dst.set_len(dst_len + match_length);
+    #[cfg(not(feature = "paranoid"))]
+    {
+        dst.reserve(match_length + 32);
+        let dst_len = dst.len();
+        unsafe {
+            let base = dst.as_mut_ptr();
+            let write_ptr = base.add(dst_len);
+            super::scalar::copy_match(write_ptr, offset, match_length);
+            dst.set_len(dst_len + match_length);
+        }
+    }
+
+    #[cfg(feature = "paranoid")]
+    {
+        dst.reserve(match_length);
+        let start = dst.len() - offset;
+        if offset >= match_length {
+            let len = dst.len();
+            dst.resize(len + match_length, 0);
+            dst.copy_within(start..start + match_length, len);
+        } else {
+            for i in 0..match_length {
+                let b = dst[start + i % offset];
+                dst.push(b);
+            }
+        }
     }
 }
 
-/// SIMD-dispatched common prefix length for match extension in the encoder.
 #[inline]
 pub fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
         let tier = super::cpu_tier();
         if tier >= CpuTier::Avx2 && a.len() >= 32 && b.len() >= 32 {
             return unsafe { super::x86_64::avx2::common_prefix_len_avx2(a, b) };
         }
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", not(feature = "paranoid")))]
     {
         if a.len() >= 16 && b.len() >= 16 {
             return unsafe { super::aarch64::neon::common_prefix_len_neon(a, b) };
@@ -102,8 +120,6 @@ pub fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
     super::scalar::common_prefix_len(a, b)
 }
 
-/// Copy match where source may be partially in external history and partially
-/// in the output buffer.
 #[inline]
 pub fn append_match_with_history(
     dst: &mut Vec<u8>,

@@ -21,6 +21,7 @@ alloc = ["zrip-core/alloc", "zrip-encode/alloc", "zrip-decode/alloc"]
 frame = ["std", "zrip-encode/frame", "zrip-decode/frame"]
 dict_builder = ["std", "zrip-core/dict_builder"]
 nightly = ["zrip-core/nightly", "zrip-encode/nightly", "zrip-decode/nightly"]
+paranoid = ["zrip-core/paranoid", "zrip-encode/paranoid", "zrip-decode/paranoid"]
 
 [dependencies]
 zrip-core = { version = "0.4.0", path = "crates/core", default-features = false }

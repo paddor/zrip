@@ -1,14 +1,9 @@
+#[cfg(not(feature = "paranoid"))]
 use core::ptr;
 
-/// Copy `len` bytes from `src` to `dst` using 8-byte chunks.
-/// Does NOT overshoot the source read.
-/// Destination must have at least `len` bytes writable.
-///
-/// # Safety
-/// - `src` must be valid for reads of `len` bytes.
-/// - `dst` must be valid for writes of `len` bytes.
-/// - Regions may NOT overlap.
+#[cfg(not(feature = "paranoid"))]
 #[inline(always)]
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn wildcopy_nonoverlap(src: *const u8, dst: *mut u8, len: usize) {
     debug_assert!(len > 0);
     unsafe {
@@ -23,13 +18,9 @@ pub unsafe fn wildcopy_nonoverlap(src: *const u8, dst: *mut u8, len: usize) {
     }
 }
 
-/// Copy `len` bytes from within the output buffer at `offset` bytes back.
-/// Handles overlapping copies (offset < len) correctly by repeating the pattern.
-///
-/// # Safety
-/// - `dst` must point to a buffer with at least `len + 7` bytes of writable space.
-/// - `dst - offset` must be a valid readable position within the same allocation.
+#[cfg(not(feature = "paranoid"))]
 #[inline(always)]
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn copy_match(dst: *mut u8, offset: usize, len: usize) {
     debug_assert!(offset > 0);
     debug_assert!(len > 0);
@@ -43,6 +34,7 @@ pub unsafe fn copy_match(dst: *mut u8, offset: usize, len: usize) {
     }
 }
 
+#[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 unsafe fn copy_match_overlapping(mut dst: *mut u8, offset: usize, len: usize) {
     unsafe {
@@ -60,8 +52,6 @@ unsafe fn copy_match_overlapping(mut dst: *mut u8, offset: usize, len: usize) {
         }
         let pattern_word = u64::from_le_bytes(pattern);
 
-        // For offsets that divide 8 (2, 4), the pattern aligns at 8-byte
-        // boundaries so we can advance by 8 instead of by offset.
         let step = if offset == 2 || offset == 4 {
             8
         } else {
@@ -99,7 +89,7 @@ pub fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
     i
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "paranoid")))]
 mod tests {
     extern crate alloc;
     use super::*;

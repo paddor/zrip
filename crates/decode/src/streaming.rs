@@ -5,6 +5,11 @@ use std::io::{self, Read};
 use crate::BlockDecodeWorkspace;
 use crate::literals::decode_literals_ws;
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
+
+#[cfg(not(feature = "paranoid"))]
+use crate::exec::decode_execute_sequences;
+#[cfg(feature = "paranoid")]
+use crate::safe_exec::decode_execute_sequences;
 use zrip_core::block::{BlockType, parse_block_header};
 use zrip_core::dict::Dictionary;
 use zrip_core::error::DecompressError;
@@ -13,7 +18,10 @@ use zrip_core::frame::header::parse_frame_header;
 use zrip_core::fse::{promote_ll_table, promote_ml_table, promote_of_table};
 use zrip_core::xxhash::Xxh64State;
 
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    not(feature = "paranoid")
+))]
 use zrip_core::simd::CpuTier;
 
 enum State {
@@ -387,7 +395,7 @@ impl<R: Read> FrameDecoder<R> {
 
         let seq_data = &table_data[tables_consumed..];
 
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
         {
             if zrip_core::simd::cpu_tier() >= CpuTier::Avx2 {
                 let before = self.output_buf.len();
@@ -411,7 +419,7 @@ impl<R: Read> FrameDecoder<R> {
             }
         }
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(all(target_arch = "aarch64", not(feature = "paranoid")))]
         {
             if zrip_core::simd::cpu_tier() >= CpuTier::Neon {
                 let before = self.output_buf.len();
@@ -436,7 +444,7 @@ impl<R: Read> FrameDecoder<R> {
         }
 
         let before = self.output_buf.len();
-        crate::exec::decode_execute_sequences(
+        decode_execute_sequences(
             seq_data,
             num_sequences,
             &self.seq_tables,
