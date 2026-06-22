@@ -3,12 +3,12 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use crate::primitives;
 use crate::sequences::{SequenceDecodeTables, compute_offset};
 use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
 use zrip_core::hint::{likely, unlikely};
 
+#[allow(unused_assignments)]
 pub(crate) fn decode_execute_sequences(
     data: &[u8],
     num_sequences: u32,
@@ -35,10 +35,8 @@ pub(crate) fn decode_execute_sequences(
     const WILDCOPY_OVERLENGTH: usize = 64;
     output.reserve(zrip_core::frame::MAX_BLOCK_SIZE + WILDCOPY_OVERLENGTH);
 
-    let out_base = output.as_mut_ptr();
-    let mut op = primitives::ptr_add_mut(out_base, output.len());
-    let op_limit = primitives::ptr_add_mut(out_base, output.capacity() - WILDCOPY_OVERLENGTH);
-    let lit_ptr = literals.as_ptr();
+    let mut op = output.len();
+    let op_limit = output.capacity() - WILDCOPY_OVERLENGTH;
     let mut lit_off: usize = 0;
     let of_mask = ((1u32 << tables.of_accuracy) - 1) as usize;
     let ml_mask = ((1u32 << tables.ml_accuracy) - 1) as usize;
@@ -47,56 +45,42 @@ pub(crate) fn decode_execute_sequences(
     macro_rules! execute_seq {
         ($literal_length:expr, $match_length:expr, $offset:expr) => {{
             let ll = $literal_length as usize;
-            let ml_check = $match_length as usize;
-            if unlikely(primitives::ptr_gt(
-                primitives::ptr_add_mut(op, ll + ml_check) as *const u8,
-                op_limit as *const u8,
-            )) {
+            let ml = $match_length as usize;
+            if unlikely(op + ll + ml > op_limit) {
                 return Err(DecompressError::CorruptSequences);
             }
             if unlikely(lit_off + ll > literals.len()) {
                 return Err(DecompressError::CorruptLiterals);
             }
-            let src = primitives::ptr_add_const(lit_ptr, lit_off);
-            let lit_remaining = literals.len() - lit_off;
-            if lit_remaining >= 16 {
-                primitives::output_write_16(op, src);
-                if ll > 16 {
-                    primitives::output_copy(
-                        primitives::ptr_add_const(src, 16),
-                        primitives::ptr_add_mut(op, 16),
-                        ll - 16,
-                    );
-                }
-            } else {
-                primitives::output_copy(src, op, ll);
-            }
-            op = primitives::ptr_add_mut(op, ll);
+
+            // Append literals
+            output.extend_from_slice(&literals[lit_off..lit_off + ll]);
+            op += ll;
             lit_off += ll;
 
-            let ml = $match_length as usize;
+            // Match copy
             let off = $offset as usize;
             if unlikely(off == 0) {
                 return Err(DecompressError::InvalidOffset);
             }
-            let out_pos = primitives::ptr_offset_from_mut(op, out_base);
+            let out_pos = op;
             if unlikely(off > out_pos + history.len()) {
                 return Err(DecompressError::InvalidOffset);
             }
             if likely(off <= out_pos) {
-                primitives::copy_match_inbuf(op, off, ml);
+                copy_match_safe(output, off, ml);
             } else {
-                primitives::copy_match_from_history(op, history, off, out_pos, ml);
+                copy_match_from_history_safe(output, history, off, out_pos, ml);
             }
-            op = primitives::ptr_add_mut(op, ml);
+            op += ml;
         }};
     }
 
     macro_rules! decode_and_execute_update {
         ($rev_reader:expr, $offsets:expr) => {{
-            let of_e = primitives::fse_table_lookup(&tables.of_table, of_state as usize & of_mask);
-            let ml_e = primitives::fse_table_lookup(&tables.ml_table, ml_state as usize & ml_mask);
-            let ll_e = primitives::fse_table_lookup(&tables.ll_table, ll_state as usize & ll_mask);
+            let of_e = tables.of_table[of_state as usize & of_mask];
+            let ml_e = tables.ml_table[ml_state as usize & ml_mask];
+            let ll_e = tables.ll_table[ll_state as usize & ll_mask];
 
             let of_extra = $rev_reader.read_bits_branchless(of_e.extra_bits);
             let offset_value = of_e.baseline_value + of_extra;
@@ -137,9 +121,9 @@ pub(crate) fn decode_execute_sequences(
     }
     while seq_idx < last_seq {
         rev_reader.refill();
-        let of_e = primitives::fse_table_lookup(&tables.of_table, of_state as usize & of_mask);
-        let ml_e = primitives::fse_table_lookup(&tables.ml_table, ml_state as usize & ml_mask);
-        let ll_e = primitives::fse_table_lookup(&tables.ll_table, ll_state as usize & ll_mask);
+        let of_e = tables.of_table[of_state as usize & of_mask];
+        let ml_e = tables.ml_table[ml_state as usize & ml_mask];
+        let ll_e = tables.ll_table[ll_state as usize & ll_mask];
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
@@ -161,9 +145,9 @@ pub(crate) fn decode_execute_sequences(
     // Last sequence: no FSE state update
     {
         rev_reader.refill();
-        let of_e = primitives::fse_table_lookup(&tables.of_table, of_state as usize & of_mask);
-        let ml_e = primitives::fse_table_lookup(&tables.ml_table, ml_state as usize & ml_mask);
-        let ll_e = primitives::fse_table_lookup(&tables.ll_table, ll_state as usize & ll_mask);
+        let of_e = tables.of_table[of_state as usize & of_mask];
+        let ml_e = tables.ml_table[ml_state as usize & ml_mask];
+        let ll_e = tables.ll_table[ll_state as usize & ll_mask];
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
@@ -177,22 +161,43 @@ pub(crate) fn decode_execute_sequences(
     }
 
     if lit_off < literals.len() {
-        let remaining = literals.len() - lit_off;
-        if primitives::ptr_gt(
-            primitives::ptr_add_mut(op, remaining) as *const u8,
-            primitives::ptr_add_mut(out_base, output.capacity()) as *const u8,
-        ) {
-            return Err(DecompressError::CorruptSequences);
-        }
-        primitives::output_copy(primitives::ptr_add_const(lit_ptr, lit_off), op, remaining);
-        op = primitives::ptr_add_mut(op, remaining);
+        output.extend_from_slice(&literals[lit_off..]);
     }
-
-    let new_len = primitives::ptr_offset_from_mut(op, out_base);
-    if new_len > output.capacity() {
-        return Err(DecompressError::CorruptSequences);
-    }
-    primitives::set_output_len(output, new_len);
 
     Ok(())
+}
+
+#[inline(always)]
+fn copy_match_safe(output: &mut Vec<u8>, offset: usize, match_length: usize) {
+    let start = output.len() - offset;
+    if offset >= match_length {
+        let len = output.len();
+        output.resize(len + match_length, 0);
+        output.copy_within(start..start + match_length, len);
+    } else {
+        for i in 0..match_length {
+            let b = output[start + i % offset];
+            output.push(b);
+        }
+    }
+}
+
+#[inline(always)]
+fn copy_match_from_history_safe(
+    output: &mut Vec<u8>,
+    history: &[u8],
+    offset: usize,
+    out_pos: usize,
+    match_length: usize,
+) {
+    let history_reach = offset - out_pos;
+    let history_start = history.len() - history_reach;
+    let from_history = history_reach.min(match_length);
+
+    output.extend_from_slice(&history[history_start..history_start + from_history]);
+
+    let remaining = match_length - from_history;
+    if remaining > 0 {
+        copy_match_safe(output, offset, remaining);
+    }
 }

@@ -8,14 +8,9 @@ extern crate alloc;
 pub(crate) mod block_decoder;
 #[cfg(feature = "std")]
 pub mod context;
-#[cfg(not(feature = "paranoid"))]
 pub(crate) mod exec;
 pub(crate) mod literals;
-#[cfg(not(feature = "paranoid"))]
-pub(crate) mod primitives;
 pub(crate) mod ring_buffer;
-#[cfg(feature = "paranoid")]
-pub(crate) mod safe_exec;
 pub(crate) mod sequences;
 #[cfg(feature = "std")]
 pub mod streaming;
@@ -31,11 +26,8 @@ use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-#[cfg(not(feature = "paranoid"))]
 use crate::exec::decode_execute_sequences;
 use crate::literals::decode_literals_ws;
-#[cfg(feature = "paranoid")]
-use crate::safe_exec::decode_execute_sequences;
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
 use zrip_core::block::{BlockType, parse_block_header};
 use zrip_core::error::DecompressError;

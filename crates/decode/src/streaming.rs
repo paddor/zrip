@@ -6,10 +6,7 @@ use crate::BlockDecodeWorkspace;
 use crate::literals::decode_literals_ws;
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
 
-#[cfg(not(feature = "paranoid"))]
 use crate::exec::decode_execute_sequences;
-#[cfg(feature = "paranoid")]
-use crate::safe_exec::decode_execute_sequences;
 use zrip_core::block::{BlockType, parse_block_header};
 use zrip_core::dict::Dictionary;
 use zrip_core::error::DecompressError;
