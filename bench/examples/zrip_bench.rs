@@ -158,7 +158,7 @@ fn bench_zrip(data: &[u8], name: &str, level: i32, target_ns: u64) -> BenchResul
         );
     });
     BenchResult {
-        codec: "zrip".into(),
+        codec: ZRIP_CODEC.into(),
         input_name: name.into(),
         level,
         input_size: data.len(),
@@ -485,14 +485,19 @@ fn migrate_flat_cache() {
     }
 }
 
-const CODECS: &[&str] = &["C zstd", "zrip", "ruzstd", "structured-zstd", "lz4rip"];
+#[cfg(feature = "paranoid")]
+const ZRIP_CODEC: &str = "zrip paranoid";
+#[cfg(not(feature = "paranoid"))]
+const ZRIP_CODEC: &str = "zrip";
+
+const CODECS: &[&str] = &["C zstd", ZRIP_CODEC, "ruzstd", "structured-zstd", "lz4rip"];
 const DICT_CODECS: &[&str] = &["C zstd+dict", "zrip+dict"];
 
 fn levels_for_codec<'a>(codec: &str, level_filter: &'a [i32]) -> &'a [i32] {
     match codec {
         "ruzstd" | "lz4rip" => &[1],
         _ if !level_filter.is_empty() => level_filter,
-        "zrip" | "zrip+dict" => ZRIP_LEVELS,
+        "zrip" | "zrip paranoid" | "zrip+dict" => ZRIP_LEVELS,
         "C zstd" | "C zstd+dict" | "structured-zstd" => C_ZSTD_LEVELS,
         _ => &[1],
     }
@@ -512,6 +517,7 @@ fn fmt_mbs(input_size: usize, ns: f64) -> String {
 fn display_codec(codec: &str) -> &str {
     match codec {
         "structured-zstd" => "s-zstd",
+        "zrip paranoid" => "paranoid",
         "C zstd+dict" => "Czstd+d",
         "zrip+dict" => "zrip+d",
         other => other,
@@ -691,7 +697,7 @@ fn main() {
 
                 let r = match codec {
                     "C zstd" => bench_c_zstd(&data, name, level, target_ns),
-                    "zrip" => bench_zrip(&data, name, level, target_ns),
+                    "zrip" | "zrip paranoid" => bench_zrip(&data, name, level, target_ns),
                     "ruzstd" => bench_ruzstd(&data, name, level, target_ns),
                     "structured-zstd" => bench_structured_zstd(&data, name, level, target_ns),
                     "lz4rip" => bench_lz4rip(&data, name, level, target_ns),

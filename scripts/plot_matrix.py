@@ -17,11 +17,12 @@ import platform
 import sys
 
 
-CODEC_ORDER = ["C zstd", "zrip", "structured-zstd", "lz4rip"]
+CODEC_ORDER = ["C zstd", "zrip", "structured-zstd", "zrip paranoid", "lz4rip"]
 
 COLORS = {
     "C zstd":          ("#60a5fa", "#4680c4"),
     "zrip":            ("#f87171", "#c45050"),
+    "zrip paranoid":   ("#f472b6", "#c05a92"),
     "structured-zstd": ("#f59e0b", "#c47d08"),
     "lz4rip":          ("#c084fc", "#9966cc"),
 }
@@ -29,6 +30,7 @@ COLORS = {
 LABELS = {
     "C zstd":          "C zstd 1.5.7 (libzstd)",
     "zrip":            "zrip (encapsulated unsafe, Rust)",
+    "zrip paranoid":   "zrip paranoid (safe Rust, no unsafe)",
     "structured-zstd": "structured-zstd 0.0.42 (unsafe Rust)",
     "lz4rip":          "lz4rip 0.8.5 (encapsulated unsafe, Rust, LZ4)",
 }
