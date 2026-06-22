@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+## [0.4.0]
+
+### Added
+
+- `PreparedDict` for hot-loop dictionary compression: pre-computes hash
+  tables and entropy tables once, amortizing setup across many small
+  compress calls.
+- `decompress_with_limit(input, max_output_size)` and
+  `SAFE_DECOMPRESS_LIMIT` constant for bounded decompression that
+  rejects frames claiming unreasonable output sizes.
+- Dict entropy table reuse and small-input optimizations for Fast
+  strategy: skips redundant Huffman/FSE table construction when
+  dictionary tables can be reused, improving throughput on small inputs.
+
+### Fixed
+
+- Integer overflow in `compress_bound` for near-`usize::MAX` inputs.
+
+### Changed
+
+- Split `CorruptSequences` error into specific variants
+  (`CorruptLiteralLength`, `CorruptMatchLength`, `CorruptOffset`) for
+  better diagnostics.
+- Restricted internal types from leaking through `pub use` of
+  sub-crates.
+- Deduplicated `parse_fse_table_description`, `build_decode_table`,
+  `write_seq_count`, and `write_frame_header` helpers across encode and
+  decode paths.
+- Replaced `assert_unchecked` with cold-path panic in
+  `assert_rep_valid` for safer debug builds.
+- Added `debug_assert` guards for Huffman table and unsafe invariants.
+- Gated std-only tests and examples behind `feature = "std"`.
+- Updated benchmark charts with structured-zstd 0.0.42 results and
+  added L-3/L-1 lines to small-input chart.
+- Added codebase size note to README.
+
 ## [0.3.4]
 
 ### Added
