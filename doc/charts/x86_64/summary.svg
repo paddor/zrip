@@ -18,13 +18,13 @@
   <rect x="167.0" y="264.8" width="80.0" height="18.7" fill="#4680c4" rx="1"/>
   <rect x="167.0" y="257.9" width="80.0" height="6.8" fill="#60a5fa" rx="1"/>
   <text x="207.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">C zstd</text>
-  <rect x="279.0" y="265.4" width="80.0" height="39.6" fill="#f87171" rx="1"/>
-  <rect x="279.0" y="236.2" width="80.0" height="29.2" fill="#c45050" rx="1"/>
-  <rect x="279.0" y="222.0" width="80.0" height="14.3" fill="#f87171" rx="1"/>
+  <rect x="279.0" y="269.9" width="80.0" height="35.1" fill="#f87171" rx="1"/>
+  <rect x="279.0" y="246.0" width="80.0" height="23.9" fill="#c45050" rx="1"/>
+  <rect x="279.0" y="233.2" width="80.0" height="12.7" fill="#f87171" rx="1"/>
   <text x="319.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip</text>
-  <rect x="391.0" y="255.4" width="80.0" height="49.6" fill="#f59e0b" rx="1"/>
-  <rect x="391.0" y="229.0" width="80.0" height="26.4" fill="#c47d08" rx="1"/>
-  <rect x="391.0" y="215.0" width="80.0" height="14.0" fill="#f59e0b" rx="1"/>
+  <rect x="391.0" y="260.2" width="80.0" height="44.8" fill="#f59e0b" rx="1"/>
+  <rect x="391.0" y="238.7" width="80.0" height="21.5" fill="#c47d08" rx="1"/>
+  <rect x="391.0" y="226.0" width="80.0" height="12.7" fill="#f59e0b" rx="1"/>
   <text x="431.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">structured-zstd</text>
   <rect x="503.0" y="149.1" width="80.0" height="155.9" fill="#4ade80" rx="1"/>
   <rect x="503.0" y="123.4" width="80.0" height="25.7" fill="#3aaf60" rx="1"/>
