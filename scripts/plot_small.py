@@ -5,6 +5,9 @@ Reads ~/.cache/zrip/L*/{codec}.jsonl, filters to small corpus files,
 writes small.svg. One panel per source (dickens, hdfs, xml_collection),
 X-axis: input size (log), Y-axis: encode MB/s.
 
+Two shaded bands per codec: Fast (L-7..L2) and DFast (L3..L4).
+Boundary lines labeled at the right edge.
+
 Usage:
     python3 scripts/plot_small.py [output_dir]
 """
@@ -15,16 +18,18 @@ import platform
 import sys
 
 
-CODEC_ORDER = ["C zstd", "zrip"]
+CODEC_ORDER = ["C zstd", "zrip", "structured-zstd"]
 
 COLORS = {
-    "C zstd": "#60a5fa",
-    "zrip":   "#f87171",
+    "C zstd":          "#60a5fa",
+    "zrip":            "#f87171",
+    "structured-zstd": "#f59e0b",
 }
 
 LABELS = {
-    "C zstd": "C zstd (libzstd)",
-    "zrip":   "zrip (Rust)",
+    "C zstd":          "C zstd (libzstd)",
+    "zrip":            "zrip (Rust)",
+    "structured-zstd": "structured-zstd 0.0.42 (Rust)",
 }
 
 SMALL_PREFIXES = ["dickens", "hdfs", "xml_collection"]
@@ -32,7 +37,9 @@ SMALL_SUFFIXES = ["_2k", "_8k", "_32k", "_128k"]
 SMALL_SIZES = [2048, 8192, 32768, 131072]
 SIZE_LABELS = ["2K", "8K", "32K", "128K"]
 
-DISPLAY_LEVELS = [-3, -1, 1, 3]
+BAND_LEVELS = list(range(-7, 5))    # -7..4
+INTERIOR_LEVELS = list(range(-6, 4))  # -6..3 (faint lines inside band)
+LABEL_LEVEL = -1
 
 
 def detect_hardware():
@@ -106,13 +113,38 @@ def load_small_data():
     return {codec: list(seen.values()) for codec, seen in data.items()}
 
 
+def get_mbs(rows, name, level):
+    matches = [r for r in rows if r["input"] == name and r["level"] == level]
+    if matches:
+        r = matches[0]
+        return r["input_size"] / r["compress_ns"] * 1000
+    return None
+
+
+def band_envelope(rows, prefix, levels):
+    """Return (lo_pts, hi_pts) for the min/max MB/s across levels at each size."""
+    lo_pts = []
+    hi_pts = []
+    for si, suffix in enumerate(SMALL_SUFFIXES):
+        name = prefix + suffix
+        vals = []
+        for level in levels:
+            mbs = get_mbs(rows, name, level)
+            if mbs is not None:
+                vals.append(mbs)
+        if vals:
+            lo_pts.append((SMALL_SIZES[si], min(vals)))
+            hi_pts.append((SMALL_SIZES[si], max(vals)))
+    return lo_pts, hi_pts
+
+
 def generate_svg(data):
     hw_label = detect_hardware()
 
     svg_w = 950
     n_panels = len(SMALL_PREFIXES)
     panel_w = 230
-    panel_h = 340
+    panel_h = 400
     top_margin = 55 if hw_label else 45
     left_margin = 90
     panel_gap = 70
@@ -139,8 +171,10 @@ def generate_svg(data):
             f' font-size="10">{hw_label}</text>'
         )
 
-    total_panels_w = n_panels * panel_w + (n_panels - 1) * panel_gap
     x_start = left_margin
+
+    log_min = math.log10(1500)
+    log_max = math.log10(200000)
 
     for pi, prefix in enumerate(SMALL_PREFIXES):
         xl = x_start + pi * (panel_w + panel_gap)
@@ -149,6 +183,17 @@ def generate_svg(data):
         p_bot = p_top + panel_h
         pw = xr - xl
         pcx = (xl + xr) / 2
+
+        panel_max = 0
+        for codec in CODEC_ORDER:
+            rows = data.get(codec, [])
+            for level in BAND_LEVELS:
+                for suffix in SMALL_SUFFIXES:
+                    name = prefix + suffix
+                    mbs = get_mbs(rows, name, level)
+                    if mbs is not None and mbs > panel_max:
+                        panel_max = mbs
+        y_max_mbs = panel_max * 1.15
 
         L.append(
             f'  <rect x="{xl}" y="{p_top}" width="{pw}" height="{panel_h}"'
@@ -160,27 +205,6 @@ def generate_svg(data):
             f'  <text x="{pcx}" y="{p_top - 8}" text-anchor="middle" fill="#e6edf3"'
             f' font-size="12" font-weight="600">{title}</text>'
         )
-
-        log_min = math.log10(1500)
-        log_max = math.log10(200000)
-
-        all_mbs = []
-        for codec in CODEC_ORDER:
-            rows = data.get(codec, [])
-            for level in DISPLAY_LEVELS:
-                for si, suffix in enumerate(SMALL_SUFFIXES):
-                    name = prefix + suffix
-                    matches = [r for r in rows if r["input"] == name and r["level"] == level]
-                    if matches:
-                        r = matches[0]
-                        mbs = r["input_size"] / r["compress_ns"] * 1000
-                        all_mbs.append(mbs)
-
-        if not all_mbs:
-            continue
-
-        y_max_mbs = max(all_mbs) * 1.15
-        y_min_mbs = 0
 
         def map_x(size):
             frac = (math.log10(size) - log_min) / (log_max - log_min)
@@ -220,49 +244,77 @@ def generate_svg(data):
 
         for codec in CODEC_ORDER:
             rows = data.get(codec, [])
+            if not rows:
+                continue
             color = COLORS[codec]
-            for level in DISPLAY_LEVELS:
+
+            lo_pts, hi_pts = band_envelope(rows, prefix, BAND_LEVELS)
+            if not lo_pts:
+                continue
+
+            # Shaded fill between lo and hi
+            fwd = [f"{map_x(sz):.1f},{map_y(mbs):.1f}" for sz, mbs in hi_pts]
+            rev = [f"{map_x(sz):.1f},{map_y(mbs):.1f}" for sz, mbs in reversed(lo_pts)]
+            poly = "M" + "L".join(fwd) + "L" + "L".join(rev) + "Z"
+            L.append(
+                f'  <path d="{poly}" fill="{color}" fill-opacity="0.15"/>'
+            )
+
+            # Faint interior lines (L-6..L1), label L-1
+            for level in INTERIOR_LEVELS:
                 pts = []
                 for si, suffix in enumerate(SMALL_SUFFIXES):
                     name = prefix + suffix
-                    matches = [r for r in rows if r["input"] == name and r["level"] == level]
-                    if matches:
-                        r = matches[0]
-                        mbs = r["input_size"] / r["compress_ns"] * 1000
+                    mbs = get_mbs(rows, name, level)
+                    if mbs is not None:
                         pts.append((SMALL_SIZES[si], mbs))
-
-                if not pts:
-                    continue
-
-                DASHES = {3: "", 1: ' stroke-dasharray="4,3"', -1: ' stroke-dasharray="2,2"', -3: ' stroke-dasharray="6,3,2,3"'}
-                dash = DASHES[level]
                 if len(pts) > 1:
-                    path_parts = []
+                    parts = []
                     for i, (sz, mbs) in enumerate(pts):
-                        xx = map_x(sz)
-                        yy = map_y(mbs)
                         cmd = "M" if i == 0 else "L"
-                        path_parts.append(f"{cmd}{xx:.1f},{yy:.1f}")
+                        parts.append(f"{cmd}{map_x(sz):.1f},{map_y(mbs):.1f}")
                     L.append(
-                        f'  <path d="{"".join(path_parts)}" fill="none"'
+                        f'  <path d="{"".join(parts)}" fill="none"'
+                        f' stroke="{color}" stroke-width="0.7" stroke-opacity="0.35"/>'
+                    )
+                if level == LABEL_LEVEL and pts:
+                    last_sz, last_mbs = pts[-1]
+                    xx = map_x(last_sz)
+                    yy = map_y(last_mbs)
+                    lbl = f"L{LABEL_LEVEL}" if LABEL_LEVEL >= 0 else f"L−{abs(LABEL_LEVEL)}"
+                    L.append(
+                        f'  <text x="{xx + 6:.1f}" y="{yy + 3:.1f}" text-anchor="start"'
+                        f' fill="{color}" font-size="7" font-weight="600"'
+                        f' fill-opacity="0.5">{lbl}</text>'
+                    )
+
+            # Boundary lines: L-7 (solid, top) and L4 (dashed, bottom)
+            for pts, dash, label in [
+                (hi_pts, "", "L−7"),
+                (lo_pts, ' stroke-dasharray="4,3"', "L4"),
+            ]:
+                if len(pts) > 1:
+                    parts = []
+                    for i, (sz, mbs) in enumerate(pts):
+                        cmd = "M" if i == 0 else "L"
+                        parts.append(f"{cmd}{map_x(sz):.1f},{map_y(mbs):.1f}")
+                    L.append(
+                        f'  <path d="{"".join(parts)}" fill="none"'
                         f' stroke="{color}" stroke-width="1.5"{dash}/>'
                     )
 
                 for sz, mbs in pts:
-                    xx = map_x(sz)
-                    yy = map_y(mbs)
                     L.append(
-                        f'  <circle cx="{xx:.1f}" cy="{yy:.1f}" r="3"'
-                        f' fill="{color}" stroke="#0d1117" stroke-width="1"/>'
+                        f'  <circle cx="{map_x(sz):.1f}" cy="{map_y(mbs):.1f}" r="2.5"'
+                        f' fill="{color}" stroke="#0d1117" stroke-width="0.8"/>'
                     )
 
                 last_sz, last_mbs = pts[-1]
                 xx = map_x(last_sz)
                 yy = map_y(last_mbs)
-                lbl = f"L{level}" if level >= 0 else f"L−{abs(level)}"
                 L.append(
                     f'  <text x="{xx + 6:.1f}" y="{yy + 3:.1f}" text-anchor="start"'
-                    f' fill="{color}" font-size="8" font-weight="600">{lbl}</text>'
+                    f' fill="{color}" font-size="7" font-weight="600">{label}</text>'
                 )
 
     # Shared Y-axis label
@@ -278,27 +330,15 @@ def generate_svg(data):
     legend_items = []
     for codec in CODEC_ORDER:
         if codec in data:
-            legend_items.append((codec, LABELS[codec]))
-    legend_items.append(("_dashdot", "dash-dot = L−3"))
-    legend_items.append(("_dot", "dotted = L−1"))
-    legend_items.append(("_dash", "dashed = L1"))
-    legend_items.append(("_solid", "solid = L3"))
+            legend_items.append(("codec", codec, LABELS[codec]))
+    legend_items.append(("band", "fast", "L−7..L4 range"))
+    legend_items.append(("line", "solid", "solid = L−7"))
+    legend_items.append(("line", "dash", "dashed = L4"))
 
-    rw = sum(len(lb) * 6.2 + 24 for _, lb in legend_items) + 12 * (len(legend_items) - 1)
+    rw = sum(len(lb) * 6.2 + 24 for _, _, lb in legend_items) + 12 * (len(legend_items) - 1)
     lx = mid_x - rw / 2
-    for key, label in legend_items:
-        if key.startswith("_"):
-            LEG_DASHES = {"_solid": "", "_dash": " stroke-dasharray='4,3'", "_dot": " stroke-dasharray='2,2'", "_dashdot": " stroke-dasharray='6,3,2,3'"}
-            dash = LEG_DASHES[key]
-            L.append(
-                f'  <line x1="{lx:.0f}" y1="{leg_y}" x2="{lx + 14:.0f}" y2="{leg_y}"'
-                f' stroke="#7d8590" stroke-width="1.5"{dash}/>'
-            )
-            L.append(
-                f'  <text x="{lx + 18:.0f}" y="{leg_y + 3.5}" fill="#7d8590"'
-                f' font-size="10">{label}</text>'
-            )
-        else:
+    for kind, key, label in legend_items:
+        if kind == "codec":
             color = COLORS[key]
             L.append(
                 f'  <circle cx="{lx + 5:.0f}" cy="{leg_y}" r="4" fill="{color}"/>'
@@ -306,6 +346,25 @@ def generate_svg(data):
             L.append(
                 f'  <text x="{lx + 13:.0f}" y="{leg_y + 3.5}" fill="#e6edf3"'
                 f' font-size="10" font-weight="500">{label}</text>'
+            )
+        elif kind == "band":
+            L.append(
+                f'  <rect x="{lx:.0f}" y="{leg_y - 5}" width="14" height="10"'
+                f' fill="#7d8590" fill-opacity="0.25" rx="2"/>'
+            )
+            L.append(
+                f'  <text x="{lx + 18:.0f}" y="{leg_y + 3.5}" fill="#7d8590"'
+                f' font-size="10">{label}</text>'
+            )
+        elif kind == "line":
+            dash = "" if key == "solid" else " stroke-dasharray='4,3'"
+            L.append(
+                f'  <line x1="{lx:.0f}" y1="{leg_y}" x2="{lx + 14:.0f}" y2="{leg_y}"'
+                f' stroke="#7d8590" stroke-width="1.5"{dash}/>'
+            )
+            L.append(
+                f'  <text x="{lx + 18:.0f}" y="{leg_y + 3.5}" fill="#7d8590"'
+                f' font-size="10">{label}</text>'
             )
         lx += len(label) * 6.2 + 24 + 12
 
