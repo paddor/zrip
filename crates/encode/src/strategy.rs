@@ -71,7 +71,7 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             chain_log: 13,
             search_log: 0,
             min_match: 5,
-            target_length: 8,
+            target_length: 7,
             search_strength: 7,
             force_raw_literals: true,
         },
