@@ -9,7 +9,7 @@ zrip = { path = "..", features = ["dict_builder"] }
 zstd = "0.13"
 zstd-safe = "7"
 binggan = "0.14"
-lz4rip = "0.3.1"
+lz4rip = "0.8.5"
 ruzstd = "0.8"
 structured-zstd = "0.0.42"
 libc = "0.2"
