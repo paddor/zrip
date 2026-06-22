@@ -394,7 +394,8 @@ pub(crate) fn compress_fast_with_prefix(
         return compress_fast(src, params, rep_offsets);
     }
     let hash_size = 1usize << params.hash_log;
-    let mut hash_table = vec![0u32; hash_size];
+    let mut dict_hash = vec![0u32; hash_size];
+    let mut input_hash = vec![0u32; hash_size];
     let mut sequences = Vec::new();
     let mut combined = Vec::new();
     compress_fast_with_prefix_reuse(
@@ -402,18 +403,21 @@ pub(crate) fn compress_fast_with_prefix(
         params,
         rep_offsets,
         prefix,
-        &mut hash_table,
+        &mut dict_hash,
+        &mut input_hash,
         &mut sequences,
         &mut combined,
     );
     sequences
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compress_fast_with_prefix_reuse(
     src: &[u8],
     params: &LevelParams,
     rep_offsets: &[u32; 3],
     prefix: &[u8],
+    dict_hash: &mut [u32],
     hash_table: &mut [u32],
     sequences: &mut Vec<Sequence>,
     combined: &mut Vec<u8>,
@@ -423,7 +427,9 @@ pub(crate) fn compress_fast_with_prefix_reuse(
     combined.extend_from_slice(prefix);
     combined.extend_from_slice(src);
 
-    prefill_hash_table(combined, prefix.len(), params.hash_log, hash_table);
+    prefill_hash_table(combined, prefix.len(), params.hash_log, dict_hash);
+    hash_table.copy_from_slice(dict_hash);
+    let use_dict_fallback = src.len() <= 1024;
 
     sequences.clear();
     let plen = prefix.len();
@@ -433,6 +439,7 @@ pub(crate) fn compress_fast_with_prefix_reuse(
     let step_size = acceleration + 1;
     let search_strength = params.search_strength as usize;
     let mut rep = *rep_offsets;
+    let window = 1usize << params.window_log;
 
     if src.len() < 8 {
         return;
@@ -484,16 +491,20 @@ pub(crate) fn compress_fast_with_prefix_reuse(
         loop {
             let val = primitives::rd32(combined, ip);
             let h = hash4_const::<0>(val, params.hash_log);
-            let match_pos = primitives::hash_load(hash_table, h) as usize;
+
+            // Probe input hash table (read + write)
+            let input_match = primitives::hash_load(hash_table, h) as usize;
             primitives::hash_store(hash_table, h, ip as u32);
 
-            if match_pos < ip
-                && ip - match_pos <= (1usize << params.window_log)
-                && val == primitives::rd32(combined, match_pos)
+            // Primary table lookup (prefix + input entries, evolves during matching)
+            if input_match < ip
+                && ip - input_match <= window
+                && val == primitives::rd32(combined, input_match)
             {
                 let clen = combined.len();
                 let mut match_len =
-                    primitives::count_match(combined, ip + 4, match_pos + 4, clen) + 4;
+                    primitives::count_match(combined, ip + 4, input_match + 4, clen) + 4;
+                let match_pos = input_match;
                 let mut back = 0usize;
                 while ip - back > anchor
                     && match_pos > back
@@ -540,6 +551,67 @@ pub(crate) fn compress_fast_with_prefix_reuse(
                 );
 
                 break;
+            }
+
+            // Fallback: check frozen dict table for prefix matches lost
+            // to hash collisions. Only for small inputs where every byte
+            // matters; on large inputs the extra sequences hurt encoding.
+            if use_dict_fallback {
+                let dict_match = primitives::hash_load(dict_hash, h) as usize;
+                if dict_match < plen && val == primitives::rd32(combined, dict_match) {
+                    let clen = combined.len();
+                    let dlen = primitives::count_match(combined, ip + 4, dict_match + 4, clen) + 4;
+                    if dlen >= 6 {
+                        let match_pos = dict_match;
+                        let mut match_len = dlen;
+                        let mut back = 0usize;
+                        while ip - back > anchor
+                            && match_pos > back
+                            && combined[ip - back - 1] == combined[match_pos - back - 1]
+                        {
+                            back += 1;
+                        }
+                        let match_start = ip - back;
+                        match_len += back;
+                        let offset = (match_start - (match_pos - back)) as u32;
+                        let lit_len = (match_start - anchor) as u32;
+
+                        sequences.push(Sequence {
+                            literal_length: lit_len,
+                            offset,
+                            match_length: match_len as u32,
+                        });
+
+                        rep[2] = rep[1];
+                        rep[1] = rep[0];
+                        rep[0] = offset;
+
+                        ip += match_len - back;
+                        anchor = ip;
+
+                        insert_complementary_fast::<0>(
+                            combined,
+                            match_start,
+                            ip,
+                            params.hash_log,
+                            hash_table,
+                        );
+                        insert_hash::<0>(combined, ip, params.hash_log, hash_table);
+                        rep_match_loop_fast::<0>(
+                            combined,
+                            &mut ip,
+                            &mut anchor,
+                            &mut rep,
+                            params.hash_log,
+                            hash_table,
+                            sequences,
+                            limit,
+                            clen,
+                        );
+
+                        break;
+                    }
+                }
             }
 
             let step = step_size + ((ip - search_start) >> search_strength);

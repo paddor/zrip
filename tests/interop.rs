@@ -1,5 +1,5 @@
 // C zstd cross-validation tests. Skipped under Miri (FFI unsupported).
-#![cfg(not(miri))]
+#![cfg(all(feature = "std", not(miri)))]
 
 // ===== Encoder: zrip compress -> C decompress =====
 
@@ -1122,6 +1122,65 @@ fn compress_context_with_dict_c_cross_validate() {
         let mut decompressed = Vec::new();
         std::io::Read::read_to_end(&mut decoder, &mut decompressed).unwrap();
         assert_eq!(&decompressed, sample);
+    }
+}
+
+#[test]
+fn prepared_dict_deterministic_output() {
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let c_dict = zstd::dict::DecoderDictionary::copy(&dict_data);
+
+    for level in [1, 3] {
+        let dict2 = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+        let mut ctx = zrip::CompressContext::with_dict(level, dict2).unwrap();
+
+        for sample in &samples[..20] {
+            let first = ctx.compress(sample).unwrap().to_vec();
+            let second = ctx.compress(sample).unwrap().to_vec();
+            assert_eq!(
+                first, second,
+                "L{level} non-deterministic prepared dict output"
+            );
+
+            let mut decoder =
+                zstd::Decoder::with_prepared_dictionary(first.as_slice(), &c_dict).unwrap();
+            let mut decompressed = Vec::new();
+            std::io::Read::read_to_end(&mut decoder, &mut decompressed).unwrap();
+            assert_eq!(&decompressed, sample, "L{level} C decompress failed");
+
+            let zrip_dec = zrip::decompress_with_dict(&first, &dict).unwrap();
+            assert_eq!(&zrip_dec, sample, "L{level} zrip decompress failed");
+        }
+    }
+}
+
+#[test]
+fn prepared_dict_matches_oneshot() {
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let c_dict = zstd::dict::DecoderDictionary::copy(&dict_data);
+
+    for level in [1, 3] {
+        let dict2 = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+        let mut ctx = zrip::CompressContext::with_dict(level, dict2).unwrap();
+
+        for sample in &samples[..20] {
+            let prepared = ctx.compress(sample).unwrap().to_vec();
+            let oneshot = zrip::compress_with_dict(sample, level, &dict).unwrap();
+
+            let mut dec =
+                zstd::Decoder::with_prepared_dictionary(prepared.as_slice(), &c_dict).unwrap();
+            let mut out = Vec::new();
+            std::io::Read::read_to_end(&mut dec, &mut out).unwrap();
+            assert_eq!(&out, sample, "L{level} prepared dict C decompress failed");
+
+            let mut dec2 =
+                zstd::Decoder::with_prepared_dictionary(oneshot.as_slice(), &c_dict).unwrap();
+            let mut out2 = Vec::new();
+            std::io::Read::read_to_end(&mut dec2, &mut out2).unwrap();
+            assert_eq!(&out2, sample, "L{level} oneshot dict C decompress failed");
+        }
     }
 }
 

@@ -28,12 +28,12 @@ COLORS = {
 LABELS = {
     "C zstd":          "C zstd 1.5.7 (libzstd)",
     "zrip":            "zrip (encapsulated unsafe, Rust)",
-    "structured-zstd": "structured-zstd 0.0.41 (unsafe Rust)",
+    "structured-zstd": "structured-zstd 0.0.42 (unsafe Rust)",
     "ruzstd":          "ruzstd 0.8.2 (safe Rust)",
 }
 
 LEVEL = 1
-MIN_FILE_SIZE = 10_000
+MIN_FILE_SIZE = 1_000_000
 TRANSFER_RATE = 100e6  # 100 MB/s
 
 

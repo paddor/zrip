@@ -33,9 +33,37 @@ pub const DEFAULT_LEVEL: i32 = 1;
 /// Returns the compression parameters for a given level, or `None` if out of range.
 ///
 /// Level 0 is treated as "library default" and maps to level 1.
+/// Uses the large-input (>256 KB) parameter tier.
 pub fn level_params(level: i32) -> Option<LevelParams> {
+    level_params_for_size(level, usize::MAX)
+}
+
+/// Returns the compression parameters for a given level, sized for `src_len`.
+///
+/// Uses fixed parameters per level with log values clamped down for small inputs.
+///
+/// Level 0 is treated as "library default" and maps to level 1.
+pub fn level_params_for_size(level: i32, src_len: usize) -> Option<LevelParams> {
+    let mut params = level_params_inner(level)?;
+    if (2..usize::MAX).contains(&src_len) {
+        let src_log = 32 - ((src_len as u32) - 1).leading_zeros();
+        params.hash_log = params.hash_log.min(src_log);
+        params.chain_log = params.chain_log.min(src_log);
+        params.window_log = params.window_log.min(src_log);
+    }
+    Some(params)
+}
+
+/// Returns the maximum hash_log for a given level.
+/// Used by CompressContext to pre-allocate hash tables.
+pub fn max_hash_log(level: i32) -> Option<u32> {
+    let p = level_params_inner(level)?;
+    Some(p.hash_log.max(p.chain_log))
+}
+
+fn level_params_inner(level: i32) -> Option<LevelParams> {
     Some(match level {
-        0 => return level_params(DEFAULT_LEVEL),
+        0 => return level_params_inner(DEFAULT_LEVEL),
         -7 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
@@ -43,7 +71,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
             chain_log: 13,
             search_log: 0,
             min_match: 5,
-            target_length: 8,
+            target_length: 7,
             search_strength: 7,
             force_raw_literals: true,
         },

@@ -1,3 +1,4 @@
+#![cfg(feature = "std")]
 // Streaming encoder/decoder tests. Pure zrip (no C zstd).
 
 #[test]

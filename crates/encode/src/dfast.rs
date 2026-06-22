@@ -70,7 +70,7 @@ pub(crate) fn compress_dfast_block(
 /// hash tables.  Pipeline: ip0, ip1=ip0+1, ip2=ip0+step, ip3=ip2+1.  Each
 /// iteration probes two positions, reusing hash computations across shifts
 /// and prefetching both hash_short and hash_long for the next position.
-#[allow(unused_assignments, unused_variables, clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const MLS: u32>(
     src: &[u8],
     block_start: usize,
@@ -111,7 +111,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
 
     let mut rep0 = rep_offsets[0];
     let mut rep1 = rep_offsets[1];
-    let mut rep2 = rep_offsets[2];
+    let mut _rep2 = rep_offsets[2];
     let mut anchor = block_start;
     let mut ip0 = block_start;
 
@@ -269,7 +269,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                     offset,
                     match_length: mlen as u32,
                 });
-                rep2 = rep1;
+                _rep2 = rep1;
                 rep1 = rep0;
                 rep0 = offset;
                 ip0 += mlen - back;
@@ -319,7 +319,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                                 offset,
                                 match_length: (long_len + back) as u32,
                             });
-                            rep2 = rep1;
+                            _rep2 = rep1;
                             rep1 = rep0;
                             rep0 = offset;
                             ip0 += long_len;
@@ -356,7 +356,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                     offset,
                     match_length: mlen as u32,
                 });
-                rep2 = rep1;
+                _rep2 = rep1;
                 rep1 = rep0;
                 rep0 = offset;
                 ip0 += mlen - back;
@@ -418,7 +418,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                     offset,
                     match_length: mlen as u32,
                 });
-                rep2 = rep1;
+                _rep2 = rep1;
                 rep1 = rep0;
                 rep0 = offset;
                 ip0 += mlen - back;
@@ -470,7 +470,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                                 offset,
                                 match_length: (long_len + back) as u32,
                             });
-                            rep2 = rep1;
+                            _rep2 = rep1;
                             rep1 = rep0;
                             rep0 = offset;
                             ip0 += long_len;
@@ -509,7 +509,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                     offset,
                     match_length: mlen as u32,
                 });
-                rep2 = rep1;
+                _rep2 = rep1;
                 rep1 = rep0;
                 rep0 = offset;
                 ip0 += mlen - back;

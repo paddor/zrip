@@ -31,7 +31,9 @@
 //! [`FrameEncoder`] and [`FrameDecoder`] implement [`std::io::Write`] and
 //! [`std::io::Read`] for streaming compression and decompression.
 //!
-//! ```
+//! ```no_run
+//! # #[cfg(feature = "std")]
+//! # {
 //! use std::io::{Write, Read};
 //!
 //! let mut encoder = zrip::FrameEncoder::new(Vec::new(), 1).unwrap();
@@ -42,6 +44,7 @@
 //! let mut output = Vec::new();
 //! decoder.read_to_end(&mut output).unwrap();
 //! assert_eq!(&output, b"streaming data");
+//! # }
 //! ```
 //!
 //! # Buffer reuse
@@ -75,8 +78,11 @@ pub use zrip_core::dict::Dictionary;
 pub use zrip_encode::strategy::{DEFAULT_LEVEL, LevelParams};
 
 pub const DEFAULT_DECOMPRESS_LIMIT: usize = usize::MAX;
+pub use zrip_core::SAFE_DECOMPRESS_LIMIT;
 
+#[doc(hidden)]
 pub use zrip_decode as decode;
+#[doc(hidden)]
 pub use zrip_encode as encode;
 
 #[cfg(feature = "alloc")]
@@ -90,6 +96,14 @@ pub fn decompress_with_dict(
     dict: &zrip_core::dict::Dictionary,
 ) -> Result<alloc::vec::Vec<u8>, DecompressError> {
     zrip_decode::decompress_with_dict(input, Some(dict))
+}
+
+#[cfg(feature = "alloc")]
+pub fn decompress_with_limit(
+    input: &[u8],
+    max_output_size: usize,
+) -> Result<alloc::vec::Vec<u8>, DecompressError> {
+    zrip_decode::decompress_with_limit(input, max_output_size)
 }
 
 #[cfg(feature = "alloc")]
@@ -130,7 +144,9 @@ pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usiz
 #[must_use]
 pub fn compress_bound(input_len: usize) -> usize {
     let num_blocks = input_len / zrip_core::frame::MAX_BLOCK_SIZE + 1;
-    input_len + num_blocks * 3 + 18
+    input_len
+        .saturating_add(num_blocks.saturating_mul(3))
+        .saturating_add(18)
 }
 
 #[cfg(feature = "std")]

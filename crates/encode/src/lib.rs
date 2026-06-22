@@ -25,6 +25,53 @@ use zrip_core::error::CompressError;
 use zrip_core::frame::{MAX_BLOCK_SIZE, ZSTD_MAGIC};
 use zrip_core::xxhash::xxh64;
 
+pub(crate) fn write_frame_header(output: &mut Vec<u8>, content_size: usize, dict_id: Option<u32>) {
+    output.extend_from_slice(&ZSTD_MAGIC.to_le_bytes());
+
+    let fcs_size = if content_size <= 255 {
+        1
+    } else if content_size <= 0xFFFF + 256 {
+        2
+    } else if content_size <= 0xFFFF_FFFF {
+        4
+    } else {
+        8
+    };
+    let fcs_flag: u8 = match fcs_size {
+        1 => 0,
+        2 => 1,
+        4 => 2,
+        _ => 3,
+    };
+
+    let dict_id_flag: u8 = match dict_id {
+        None => 0,
+        Some(id) if id <= 0xFF => 1,
+        Some(id) if id <= 0xFFFF => 2,
+        Some(_) => 3,
+    };
+
+    let descriptor = 0x20 | 0x04 | (fcs_flag << 6) | dict_id_flag;
+    output.push(descriptor);
+
+    match dict_id {
+        Some(id) if id <= 0xFF => output.push(id as u8),
+        Some(id) if id <= 0xFFFF => output.extend_from_slice(&(id as u16).to_le_bytes()),
+        Some(id) => output.extend_from_slice(&id.to_le_bytes()),
+        None => {}
+    }
+
+    match fcs_size {
+        1 => output.push(content_size as u8),
+        2 => {
+            let v = (content_size - 256) as u16;
+            output.extend_from_slice(&v.to_le_bytes());
+        }
+        4 => output.extend_from_slice(&(content_size as u32).to_le_bytes()),
+        _ => output.extend_from_slice(&(content_size as u64).to_le_bytes()),
+    }
+}
+
 pub(crate) fn block_looks_incompressible(data: &[u8]) -> bool {
     const SAMPLE: usize = 1024;
     const DISTINCT_THRESHOLD: u32 = 200;
@@ -64,8 +111,8 @@ pub fn compress_with_params(
 }
 
 pub fn compress(input: &[u8], level: i32) -> Result<Vec<u8>, CompressError> {
-    let mut params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
-    clamp_params_to_src_size(&mut params, input.len());
+    let params = strategy::level_params_for_size(level, input.len())
+        .ok_or(CompressError::InvalidLevel(level))?;
     compress_inner(input, &params)
 }
 
@@ -77,39 +124,7 @@ fn compress_inner(input: &[u8], params: &strategy::LevelParams) -> Result<Vec<u8
 }
 
 fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec<u8>) {
-    output.extend_from_slice(&ZSTD_MAGIC.to_le_bytes());
-
-    let fcs_size = if input.len() <= 255 {
-        1
-    } else if input.len() <= 0xFFFF + 256 {
-        2
-    } else if input.len() <= 0xFFFF_FFFF {
-        4
-    } else {
-        8
-    };
-
-    let fcs_flag = match fcs_size {
-        1 => 0,
-        2 => 1,
-        4 => 2,
-        8 => 3,
-        _ => unreachable!(),
-    };
-
-    let descriptor = 0x20 | 0x04 | (fcs_flag << 6);
-    output.push(descriptor);
-
-    match fcs_size {
-        1 => output.push(input.len() as u8),
-        2 => {
-            let v = (input.len() - 256) as u16;
-            output.extend_from_slice(&v.to_le_bytes());
-        }
-        4 => output.extend_from_slice(&(input.len() as u32).to_le_bytes()),
-        8 => output.extend_from_slice(&(input.len() as u64).to_le_bytes()),
-        _ => unreachable!(),
-    }
+    write_frame_header(output, input.len(), None);
 
     if input.is_empty() {
         block_encoder::encode_raw_block(&[], true, output);
@@ -211,60 +226,12 @@ pub fn compress_with_dict(
     level: i32,
     dict: &zrip_core::dict::Dictionary,
 ) -> Result<Vec<u8>, CompressError> {
-    let mut params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
-    clamp_params_to_src_size(&mut params, input.len());
+    let total_window = dict.content().len() + input.len();
+    let params = strategy::level_params_for_size(level, total_window)
+        .ok_or(CompressError::InvalidLevel(level))?;
 
     let mut output = Vec::with_capacity(input.len() + 32);
-
-    output.extend_from_slice(&ZSTD_MAGIC.to_le_bytes());
-
-    let fcs_size = if input.len() <= 255 {
-        1
-    } else if input.len() <= 0xFFFF + 256 {
-        2
-    } else if input.len() <= 0xFFFF_FFFF {
-        4
-    } else {
-        8
-    };
-
-    let fcs_flag = match fcs_size {
-        1 => 0,
-        2 => 1,
-        4 => 2,
-        8 => 3,
-        _ => unreachable!(),
-    };
-
-    let dict_id = dict.id();
-    let dict_id_flag = if dict_id <= 0xFF {
-        1u8
-    } else if dict_id <= 0xFFFF {
-        2
-    } else {
-        3
-    };
-
-    let descriptor = 0x20 | 0x04 | (fcs_flag << 6) | dict_id_flag;
-    output.push(descriptor);
-
-    match dict_id_flag {
-        1 => output.push(dict_id as u8),
-        2 => output.extend_from_slice(&(dict_id as u16).to_le_bytes()),
-        3 => output.extend_from_slice(&dict_id.to_le_bytes()),
-        _ => unreachable!(),
-    }
-
-    match fcs_size {
-        1 => output.push(input.len() as u8),
-        2 => {
-            let v = (input.len() - 256) as u16;
-            output.extend_from_slice(&v.to_le_bytes());
-        }
-        4 => output.extend_from_slice(&(input.len() as u32).to_le_bytes()),
-        8 => output.extend_from_slice(&(input.len() as u64).to_le_bytes()),
-        _ => unreachable!(),
-    }
+    write_frame_header(&mut output, input.len(), Some(dict.id()));
 
     if input.is_empty() {
         block_encoder::encode_raw_block(&[], true, &mut output);
@@ -272,6 +239,19 @@ pub fn compress_with_dict(
         let prefix = dict.content();
         let mut rep_offsets = *dict.rep_offsets();
         let mut workspace = block_encoder::BlockEncodeWorkspace::new();
+
+        workspace.prev_ll = dict
+            .ll_table()
+            .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 35));
+        workspace.prev_of = dict
+            .of_table()
+            .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 31));
+        workspace.prev_ml = dict
+            .ml_table()
+            .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 52));
+        workspace.prev_huffman = dict.huf_table().and_then(|(dt, tl)| {
+            zrip_core::huffman::encode::HuffmanEncodeTable::from_decode_table(dt, tl)
+        });
 
         if input.len() <= MAX_BLOCK_SIZE {
             let sequences = match params.strategy {
@@ -399,8 +379,8 @@ pub fn compress_with_dict(
 }
 
 pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usize, CompressError> {
-    let mut params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
-    clamp_params_to_src_size(&mut params, input.len());
+    let params = strategy::level_params_for_size(level, input.len())
+        .ok_or(CompressError::InvalidLevel(level))?;
     let mut buf = Vec::with_capacity(output.len());
     compress_frame(input, &params, &mut buf);
     if buf.len() > output.len() {

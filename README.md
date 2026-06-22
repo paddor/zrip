@@ -4,6 +4,31 @@ Pure Rust zstd codec. Levels -7 through 4 (Fast and DFast strategies).
 Optimized for encode throughput in transfer pipelines that need standard
 zstd frames at high speed.
 
+## Why zrip
+
+**Fastest pure-Rust zstd encoder.** Consistently outperforms other pure-Rust
+zstd implementations on both encode and decode across all supported levels.
+See the [benchmarks below](#performance).
+
+**Negative levels (-7 through -1).** Unlocks zstd's fastest compression tiers,
+useful when throughput matters more than ratio.
+
+**Encapsulated unsafe.** All algorithm and control-flow code is
+`#![forbid(unsafe_code)]`. Unsafe is confined to small, auditable primitives
+modules with `debug_assert!` guards. See [SAFETY.md](SAFETY.md).
+
+**Small codebase.** ~10.5k lines of Rust, roughly a fifth of full-spec
+implementations. Levels above 4 add complexity for compression ratios
+that only matter in archival storage, not transfer pipelines.
+
+**`no_std` + `alloc`.** Works in embedded and kernel contexts with the `alloc`
+feature; `frame` requires `std`.
+
+**Dictionary compression.** COVER and FastCOVER training built in for
+small-message workloads (log lines, JSON records, RPC payloads).
+
+## Performance
+
 ![zstd pipeline benchmark](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/summary.svg)
 
 <details>
@@ -12,6 +37,7 @@ zstd frames at high speed.
 ![per-file pipeline](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/pipeline.svg)
 ![encode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/scatter.svg)
 ![per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/matrix.svg)
+![small input encode throughput](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/small.svg)
 </details>
 
 <details>
@@ -22,22 +48,6 @@ zstd frames at high speed.
 ![aarch64 encode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/scatter.svg)
 ![aarch64 per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/matrix.svg)
 </details>
-
-## Why zrip
-
-**Fastest pure-Rust zstd encoder available.** 72% faster encode than
-structured-zstd 0.0.40 at L3, 33% faster at L1. Faster decode than
-structured-zstd at L3 (40%) and L-1 (21%). 2.9x faster decode than
-ruzstd 0.8 at L1.
-
-**Negative levels (-7..-1) for high-throughput pipelines.** Most zstd
-libraries only expose levels 1+.
-
-**`no_std` + `alloc`.** Works in embedded and kernel contexts with the `alloc`
-feature; `frame` requires `std`.
-
-**Dictionary compression.** COVER and FastCOVER training built in for
-small-message workloads (log lines, JSON records, RPC payloads).
 
 ## API
 

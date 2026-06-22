@@ -15,7 +15,7 @@ pub(crate) mod sequences;
 #[cfg(feature = "std")]
 pub mod streaming;
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub(crate) mod simd_decode;
 
 #[cfg(feature = "alloc")]
@@ -83,6 +83,30 @@ pub(crate) fn skip_skippable_frame(data: &[u8]) -> Option<usize> {
 
 pub fn decompress(input: &[u8]) -> Result<Vec<u8>, DecompressError> {
     decompress_with_dict(input, None)
+}
+
+/// Decompress with an explicit output size limit.
+///
+/// Returns [`DecompressError::OutputTooSmall`] if the decompressed output would
+/// exceed `max_output_size` bytes. Use [`SAFE_DECOMPRESS_LIMIT`](zrip_core::SAFE_DECOMPRESS_LIMIT)
+/// when processing untrusted input to prevent memory exhaustion attacks.
+pub fn decompress_with_limit(
+    input: &[u8],
+    max_output_size: usize,
+) -> Result<Vec<u8>, DecompressError> {
+    let mut output = Vec::new();
+    let mut ws = Box::new(BlockDecodeWorkspace::new());
+    let mut offset = 0;
+    while offset < input.len() {
+        let remaining = &input[offset..];
+        if let Some(skip_len) = skip_skippable_frame(remaining) {
+            offset += skip_len;
+            continue;
+        }
+        let consumed = decompress_frame(remaining, &mut output, max_output_size, None, &mut ws)?;
+        offset += consumed;
+    }
+    Ok(output)
 }
 
 pub fn decompress_into(input: &[u8], output: &mut Vec<u8>) -> Result<usize, DecompressError> {
@@ -217,7 +241,7 @@ pub(crate) fn decompress_frame(
         if block_size > zrip_core::frame::MAX_BLOCK_SIZE {
             match block_header.block_type {
                 BlockType::Raw | BlockType::Rle => {
-                    return Err(DecompressError::CorruptSequences);
+                    return Err(DecompressError::BlockTooLarge);
                 }
                 BlockType::Compressed => {}
             }
@@ -295,7 +319,7 @@ pub(crate) fn decompress_frame(
 
     if let Some(fcs) = header.frame_content_size {
         if (output.len() - output_start) as u64 != fcs {
-            return Err(DecompressError::CorruptSequences);
+            return Err(DecompressError::FrameSizeMismatch);
         }
     }
 
@@ -355,7 +379,7 @@ fn decode_compressed_block(
                 dict_history,
             )?;
             if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
-                return Err(DecompressError::CorruptSequences);
+                return Err(DecompressError::BlockTooLarge);
             }
             return Ok(());
         }
@@ -373,7 +397,7 @@ fn decode_compressed_block(
                 dict_history,
             )?;
             if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
-                return Err(DecompressError::CorruptSequences);
+                return Err(DecompressError::BlockTooLarge);
             }
             return Ok(());
         }
@@ -389,7 +413,7 @@ fn decode_compressed_block(
         dict_history,
     )?;
     if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
-        return Err(DecompressError::CorruptSequences);
+        return Err(DecompressError::BlockTooLarge);
     }
 
     Ok(())

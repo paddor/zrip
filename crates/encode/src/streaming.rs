@@ -45,6 +45,7 @@ pub struct FrameEncoder<W: Write> {
     first_block: bool,
     hash_table: Vec<u32>,
     hash_long: Vec<u32>,
+    dict_hash: Vec<u32>,
     sequences: Vec<Sequence>,
     combined: Vec<u8>,
     block_out: Vec<u8>,
@@ -68,6 +69,7 @@ impl<W: Write> FrameEncoder<W> {
             first_block: false,
             hash_table,
             hash_long,
+            dict_hash: Vec::new(),
             sequences: Vec::new(),
             combined: Vec::new(),
             block_out: Vec::new(),
@@ -78,6 +80,7 @@ impl<W: Write> FrameEncoder<W> {
     pub fn with_dict(writer: W, level: i32, dict: Dictionary) -> Result<Self, CompressError> {
         let params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
         let (hash_table, hash_long) = alloc_hash_tables(&params);
+        let dict_hash = vec![0u32; hash_table.len()];
         let rep_offsets = *dict.rep_offsets();
         Ok(Self {
             inner: writer,
@@ -92,6 +95,7 @@ impl<W: Write> FrameEncoder<W> {
             first_block: true,
             hash_table,
             hash_long,
+            dict_hash,
             sequences: Vec::new(),
             combined: Vec::new(),
             block_out: Vec::new(),
@@ -212,6 +216,7 @@ impl<W: Write> FrameEncoder<W> {
                             &self.params,
                             &self.rep_offsets,
                             prefix,
+                            &mut self.dict_hash,
                             &mut self.hash_table,
                             &mut self.sequences,
                             &mut self.combined,

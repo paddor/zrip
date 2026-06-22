@@ -291,7 +291,7 @@ impl<R: Read> FrameDecoder<R> {
             BlockType::Raw | BlockType::Rle if block_size > MAX_BLOCK_SIZE => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    DecompressError::CorruptSequences,
+                    DecompressError::BlockTooLarge,
                 ));
             }
             _ => {}
@@ -404,7 +404,7 @@ impl<R: Read> FrameDecoder<R> {
                 if self.output_buf.len() - before > MAX_BLOCK_SIZE {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        DecompressError::CorruptSequences,
+                        DecompressError::BlockTooLarge,
                     ));
                 }
                 return Ok(());
@@ -428,7 +428,7 @@ impl<R: Read> FrameDecoder<R> {
                 if self.output_buf.len() - before > MAX_BLOCK_SIZE {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        DecompressError::CorruptSequences,
+                        DecompressError::BlockTooLarge,
                     ));
                 }
                 return Ok(());
@@ -449,7 +449,7 @@ impl<R: Read> FrameDecoder<R> {
         if self.output_buf.len() - before > MAX_BLOCK_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                DecompressError::CorruptSequences,
+                DecompressError::BlockTooLarge,
             ));
         }
         Ok(())

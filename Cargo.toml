@@ -4,7 +4,7 @@ exclude = ["fuzz", "bench"]
 
 [package]
 name = "zrip"
-version = "0.3.4"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Fast, memory-safe Rust implementation of Zstandard compression (levels -7..4)"
@@ -23,9 +23,9 @@ dict_builder = ["std", "zrip-core/dict_builder"]
 nightly = ["zrip-core/nightly", "zrip-encode/nightly", "zrip-decode/nightly"]
 
 [dependencies]
-zrip-core = { version = "0.3.3", path = "crates/core", default-features = false }
-zrip-encode = { version = "0.3.3", path = "crates/encode", default-features = false }
-zrip-decode = { version = "0.3.3", path = "crates/decode", default-features = false }
+zrip-core = { version = "0.4.0", path = "crates/core", default-features = false }
+zrip-encode = { version = "0.4.0", path = "crates/encode", default-features = false }
+zrip-decode = { version = "0.4.0", path = "crates/decode", default-features = false }
 
 [lints]
 workspace = true
@@ -38,6 +38,35 @@ libc = "0.2"
 
 [[example]]
 name = "quickstart"
+required-features = ["std"]
+
+[[example]]
+name = "decode_compare"
+required-features = ["std"]
+
+[[example]]
+name = "mem_profile"
+required-features = ["std"]
+
+[[example]]
+name = "profile_decode"
+required-features = ["std"]
+
+[[example]]
+name = "profile_encode"
+required-features = ["std"]
+
+[[example]]
+name = "profile_czstd"
+required-features = ["std"]
+
+[[example]]
+name = "profile_czstd_decode"
+required-features = ["std"]
+
+[[example]]
+name = "profile_xray"
+required-features = ["std"]
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

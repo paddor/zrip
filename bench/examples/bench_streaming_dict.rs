@@ -52,6 +52,27 @@ fn main() {
                 _ => 1_000,
             };
 
+            // CompressContext with prepared dict (hot-loop path)
+            let dict_ctx = zrip::dict::Dictionary::from_bytes(&dict_buf).unwrap();
+            let mut ctx =
+                zrip::CompressContext::with_dict_for_size(level, dict_ctx, data.len()).unwrap();
+            let mut compressed_ctx = Vec::new();
+            for _ in 0..3 {
+                compressed_ctx = ctx.compress(data).unwrap().to_vec();
+            }
+            let t = Instant::now();
+            for _ in 0..iters {
+                compressed_ctx = ctx.compress(data).unwrap().to_vec();
+            }
+            let ctx_enc_us = t.elapsed().as_nanos() as f64 / iters as f64 / 1000.0;
+            let ctx_ratio = compressed_ctx.len() as f64 / data.len() as f64;
+
+            let t = Instant::now();
+            for _ in 0..iters {
+                let _ = zrip::decompress_with_dict(&compressed_ctx, &dict).unwrap();
+            }
+            let ctx_dec_us = t.elapsed().as_nanos() as f64 / iters as f64 / 1000.0;
+
             // One-shot with dict
             let t = Instant::now();
             let mut compressed_oneshot = Vec::new();
@@ -130,6 +151,14 @@ fn main() {
             let nodict_dec_us = t.elapsed().as_nanos() as f64 / iters as f64 / 1000.0;
 
             let enc_mb_s = |us: f64| data.len() as f64 / us;
+            println!(
+                "  L{level:2} ctx+dict:       enc {:7.1} µs ({:6.1} MB/s)  dec {:7.1} µs ({:6.1} MB/s)  ratio {:.3}",
+                ctx_enc_us,
+                enc_mb_s(ctx_enc_us),
+                ctx_dec_us,
+                enc_mb_s(ctx_dec_us),
+                ctx_ratio
+            );
             println!(
                 "  L{level:2} one-shot+dict:  enc {:7.1} µs ({:6.1} MB/s)  dec {:7.1} µs ({:6.1} MB/s)  ratio {:.3}",
                 oneshot_enc_us,
