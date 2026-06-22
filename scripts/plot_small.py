@@ -32,7 +32,7 @@ SMALL_SUFFIXES = ["_2k", "_8k", "_32k", "_128k"]
 SMALL_SIZES = [2048, 8192, 32768, 131072]
 SIZE_LABELS = ["2K", "8K", "32K", "128K"]
 
-DISPLAY_LEVELS = [1, 3]
+DISPLAY_LEVELS = [-3, -1, 1, 3]
 
 
 def detect_hardware():
@@ -112,7 +112,7 @@ def generate_svg(data):
     svg_w = 950
     n_panels = len(SMALL_PREFIXES)
     panel_w = 230
-    panel_h = 220
+    panel_h = 340
     top_margin = 55 if hw_label else 45
     left_margin = 90
     panel_gap = 70
@@ -234,7 +234,8 @@ def generate_svg(data):
                 if not pts:
                     continue
 
-                dash = "" if level == 1 else ' stroke-dasharray="4,3"'
+                DASHES = {3: "", 1: ' stroke-dasharray="4,3"', -1: ' stroke-dasharray="2,2"', -3: ' stroke-dasharray="6,3,2,3"'}
+                dash = DASHES[level]
                 if len(pts) > 1:
                     path_parts = []
                     for i, (sz, mbs) in enumerate(pts):
@@ -258,7 +259,7 @@ def generate_svg(data):
                 last_sz, last_mbs = pts[-1]
                 xx = map_x(last_sz)
                 yy = map_y(last_mbs)
-                lbl = f"L{level}"
+                lbl = f"L{level}" if level >= 0 else f"L−{abs(level)}"
                 L.append(
                     f'  <text x="{xx + 6:.1f}" y="{yy + 3:.1f}" text-anchor="start"'
                     f' fill="{color}" font-size="8" font-weight="600">{lbl}</text>'
@@ -278,14 +279,17 @@ def generate_svg(data):
     for codec in CODEC_ORDER:
         if codec in data:
             legend_items.append((codec, LABELS[codec]))
-    legend_items.append(("_solid", "solid = L1"))
-    legend_items.append(("_dash", "dashed = L3"))
+    legend_items.append(("_dashdot", "dash-dot = L−3"))
+    legend_items.append(("_dot", "dotted = L−1"))
+    legend_items.append(("_dash", "dashed = L1"))
+    legend_items.append(("_solid", "solid = L3"))
 
     rw = sum(len(lb) * 6.2 + 24 for _, lb in legend_items) + 12 * (len(legend_items) - 1)
     lx = mid_x - rw / 2
     for key, label in legend_items:
         if key.startswith("_"):
-            dash = "" if key == "_solid" else " stroke-dasharray='4,3'"
+            LEG_DASHES = {"_solid": "", "_dash": " stroke-dasharray='4,3'", "_dot": " stroke-dasharray='2,2'", "_dashdot": " stroke-dasharray='6,3,2,3'"}
+            dash = LEG_DASHES[key]
             L.append(
                 f'  <line x1="{lx:.0f}" y1="{leg_y}" x2="{lx + 14:.0f}" y2="{leg_y}"'
                 f' stroke="#7d8590" stroke-width="1.5"{dash}/>'

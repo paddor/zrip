@@ -18,13 +18,13 @@
   <rect x="167.0" y="264.8" width="80.0" height="18.7" fill="#4680c4" rx="1"/>
   <rect x="167.0" y="257.9" width="80.0" height="6.8" fill="#60a5fa" rx="1"/>
   <text x="207.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">C zstd</text>
-  <rect x="279.0" y="273.1" width="80.0" height="31.9" fill="#f87171" rx="1"/>
-  <rect x="279.0" y="252.0" width="80.0" height="21.1" fill="#c45050" rx="1"/>
-  <rect x="279.0" y="240.7" width="80.0" height="11.3" fill="#f87171" rx="1"/>
+  <rect x="279.0" y="265.4" width="80.0" height="39.6" fill="#f87171" rx="1"/>
+  <rect x="279.0" y="236.2" width="80.0" height="29.2" fill="#c45050" rx="1"/>
+  <rect x="279.0" y="222.0" width="80.0" height="14.3" fill="#f87171" rx="1"/>
   <text x="319.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip</text>
-  <rect x="391.0" y="253.6" width="80.0" height="51.4" fill="#f59e0b" rx="1"/>
-  <rect x="391.0" y="227.1" width="80.0" height="26.5" fill="#c47d08" rx="1"/>
-  <rect x="391.0" y="213.2" width="80.0" height="13.8" fill="#f59e0b" rx="1"/>
+  <rect x="391.0" y="255.4" width="80.0" height="49.6" fill="#f59e0b" rx="1"/>
+  <rect x="391.0" y="229.0" width="80.0" height="26.4" fill="#c47d08" rx="1"/>
+  <rect x="391.0" y="215.0" width="80.0" height="14.0" fill="#f59e0b" rx="1"/>
   <text x="431.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">structured-zstd</text>
   <rect x="503.0" y="149.1" width="80.0" height="155.9" fill="#4ade80" rx="1"/>
   <rect x="503.0" y="123.4" width="80.0" height="25.7" fill="#3aaf60" rx="1"/>
@@ -35,7 +35,7 @@
   <rect x="150" y="353" width="12" height="12" fill="#f87171" rx="2"/>
   <text x="168" y="363" fill="#e6edf3" font-size="10" font-weight="500">zrip (encapsulated unsafe, Rust)</text>
   <rect x="360" y="335" width="12" height="12" fill="#f59e0b" rx="2"/>
-  <text x="378" y="345" fill="#e6edf3" font-size="10" font-weight="500">structured-zstd 0.0.41 (unsafe Rust)</text>
+  <text x="378" y="345" fill="#e6edf3" font-size="10" font-weight="500">structured-zstd 0.0.42 (unsafe Rust)</text>
   <rect x="360" y="353" width="12" height="12" fill="#4ade80" rx="2"/>
   <text x="378" y="363" fill="#e6edf3" font-size="10" font-weight="500">ruzstd 0.8.2 (safe Rust)</text>
   <text x="140" y="388" fill="#e6edf3" font-size="9">bright = compress + decompress</text>
