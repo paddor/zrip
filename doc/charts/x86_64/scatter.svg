@@ -78,8 +78,8 @@
   <text x="316.8" y="105.1" text-anchor="end" fill="#f59e0b" font-size="8" font-weight="600">4</text>
   <circle cx="194.6" cy="212.6" r="3.5" fill="#4ade80" stroke="#0d1117" stroke-width="1"/>
   <text x="200.6" y="212.6" text-anchor="start" fill="#4ade80" font-size="8" font-weight="600">L1</text>
-  <circle cx="502.1" cy="225.3" r="3.5" fill="#c084fc" stroke="#0d1117" stroke-width="1"/>
-  <text x="508.1" y="225.3" text-anchor="start" fill="#c084fc" font-size="8" font-weight="600">LZ4</text>
+  <circle cx="496.7" cy="230.7" r="3.5" fill="#c084fc" stroke="#0d1117" stroke-width="1"/>
+  <text x="502.7" y="230.7" text-anchor="start" fill="#c084fc" font-size="8" font-weight="600">LZ4</text>
   <rect x="70" y="370" width="760" height="250" fill="#161b22" rx="4"/>
   <text x="450.0" y="362" text-anchor="middle" fill="#e6edf3" font-size="12" font-weight="600">Medium compressibility</text>
   <line x1="70" y1="606.1" x2="830" y2="606.1" stroke="#21262d" stroke-width="1"/>
@@ -158,8 +158,8 @@
   <text x="188.6" y="408.2" text-anchor="end" fill="#f59e0b" font-size="8" font-weight="600">4</text>
   <circle cx="132.2" cy="512.1" r="3.5" fill="#4ade80" stroke="#0d1117" stroke-width="1"/>
   <text x="138.2" y="512.1" text-anchor="start" fill="#4ade80" font-size="8" font-weight="600">L1</text>
-  <circle cx="411.0" cy="560.9" r="3.5" fill="#c084fc" stroke="#0d1117" stroke-width="1"/>
-  <text x="417.0" y="560.9" text-anchor="start" fill="#c084fc" font-size="8" font-weight="600">LZ4</text>
+  <circle cx="402.9" cy="579.3" r="3.5" fill="#c084fc" stroke="#0d1117" stroke-width="1"/>
+  <text x="408.9" y="579.3" text-anchor="start" fill="#c084fc" font-size="8" font-weight="600">LZ4</text>
   <rect x="70" y="685" width="760" height="250" fill="#161b22" rx="4"/>
   <text x="450.0" y="677" text-anchor="middle" fill="#e6edf3" font-size="12" font-weight="600">Low compressibility</text>
   <line x1="70" y1="914.2" x2="830" y2="914.2" stroke="#21262d" stroke-width="1"/>
@@ -242,8 +242,8 @@
   <text x="137.9" y="753.0" text-anchor="start" fill="#f59e0b" font-size="8" font-weight="600">4</text>
   <circle cx="86.3" cy="842.5" r="3.5" fill="#4ade80" stroke="#0d1117" stroke-width="1"/>
   <text x="92.3" y="842.5" text-anchor="start" fill="#4ade80" font-size="8" font-weight="600">L1</text>
-  <circle cx="651.4" cy="907.7" r="3.5" fill="#c084fc" stroke="#0d1117" stroke-width="1"/>
-  <text x="657.4" y="907.7" text-anchor="start" fill="#c084fc" font-size="8" font-weight="600">LZ4</text>
+  <circle cx="679.8" cy="911.7" r="3.5" fill="#c084fc" stroke="#0d1117" stroke-width="1"/>
+  <text x="685.8" y="911.7" text-anchor="start" fill="#c084fc" font-size="8" font-weight="600">LZ4</text>
   <text x="16" y="495.0" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600" transform="rotate(-90,16,495.0)">compression ratio</text>
   <circle cx="103" cy="975" r="4" fill="#60a5fa"/>
   <text x="111" y="978.5" fill="#e6edf3" font-size="10" font-weight="500">C zstd 1.5.7 (libzstd)</text>
@@ -254,5 +254,5 @@
   <circle cx="186" cy="993" r="4" fill="#4ade80"/>
   <text x="194" y="996.5" fill="#e6edf3" font-size="10" font-weight="500">ruzstd 0.8.2 (safe Rust)</text>
   <circle cx="371" cy="993" r="4" fill="#c084fc"/>
-  <text x="379" y="996.5" fill="#e6edf3" font-size="10" font-weight="500">lz4rip 0.3.1 (encapsulated unsafe, Rust, LZ4)</text>
+  <text x="379" y="996.5" fill="#e6edf3" font-size="10" font-weight="500">lz4rip 0.8.5 (encapsulated unsafe, Rust, LZ4)</text>
 </svg>

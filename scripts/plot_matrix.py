@@ -30,7 +30,7 @@ LABELS = {
     "C zstd":          "C zstd 1.5.7 (libzstd)",
     "zrip":            "zrip (encapsulated unsafe, Rust)",
     "structured-zstd": "structured-zstd 0.0.42 (unsafe Rust)",
-    "lz4rip":          "lz4rip 0.3.1 (encapsulated unsafe, Rust, LZ4)",
+    "lz4rip":          "lz4rip 0.8.5 (encapsulated unsafe, Rust, LZ4)",
 }
 
 LEVELS = [3, 1, -1]

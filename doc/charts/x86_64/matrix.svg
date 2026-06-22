@@ -128,7 +128,7 @@
   <rect x="460" y="850" width="12" height="12" fill="#f59e0b" rx="2"/>
   <text x="478" y="860" fill="#e6edf3" font-size="10" font-weight="500">structured-zstd 0.0.42 (unsafe Rust)</text>
   <rect x="460" y="868" width="12" height="12" fill="#c084fc" rx="2"/>
-  <text x="478" y="878" fill="#e6edf3" font-size="10" font-weight="500">lz4rip 0.3.1 (encapsulated unsafe, Rust, LZ4)</text>
+  <text x="478" y="878" fill="#e6edf3" font-size="10" font-weight="500">lz4rip 0.8.5 (encapsulated unsafe, Rust, LZ4)</text>
   <text x="240" y="903" fill="#e6edf3" font-size="9">bright = compress + decompress</text>
   <text x="480" y="903" fill="#7d8590" font-size="9">dim = transfer @100 MB/s</text>
 </svg>

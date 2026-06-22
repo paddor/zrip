@@ -31,7 +31,7 @@ LABELS = {
     "zrip":            "zrip (encapsulated unsafe, Rust)",
     "structured-zstd": "structured-zstd 0.0.42 (unsafe Rust)",
     "ruzstd":          "ruzstd 0.8.2 (safe Rust)",
-    "lz4rip":          "lz4rip 0.3.1 (encapsulated unsafe, Rust, LZ4)",
+    "lz4rip":          "lz4rip 0.8.5 (encapsulated unsafe, Rust, LZ4)",
 }
 
 # ruzstd only compresses at L1; other levels output raw (1.00x ratio).
