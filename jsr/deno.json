@@ -1,0 +1,10 @@
+{
+  "name": "@paddor/zrip",
+  "version": "0.1.1",
+  "license": "MIT",
+  "exports": "./src/mod.ts",
+  "publish": {
+    "include": ["src/", "deno.json", "LICENSE", "README.md"],
+    "exclude": ["src/pkg/package.json", "!src/pkg/"]
+  }
+}
