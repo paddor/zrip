@@ -62,6 +62,8 @@ pub struct FrameDecoder<R: Read> {
     content_checksum: bool,
     max_output: usize,
     bytes_output: usize,
+    frame_content_size: Option<u64>,
+    frame_bytes: usize,
     dict: Option<Dictionary>,
 }
 
@@ -86,6 +88,8 @@ impl<R: Read> FrameDecoder<R> {
             content_checksum: false,
             max_output,
             bytes_output: 0,
+            frame_content_size: None,
+            frame_bytes: 0,
             dict: None,
         }
     }
@@ -110,6 +114,8 @@ impl<R: Read> FrameDecoder<R> {
             content_checksum: false,
             max_output,
             bytes_output: 0,
+            frame_content_size: None,
+            frame_bytes: 0,
             dict: Some(dict),
         }
     }
@@ -132,6 +138,8 @@ impl<R: Read> FrameDecoder<R> {
         self.hasher = None;
         self.content_checksum = false;
         self.bytes_output = 0;
+        self.frame_content_size = None;
+        self.frame_bytes = 0;
         old
     }
 
@@ -244,6 +252,8 @@ impl<R: Read> FrameDecoder<R> {
             }
         }
 
+        self.frame_content_size = header.frame_content_size;
+        self.frame_bytes = 0;
         self.content_checksum = header.content_checksum;
         self.hasher = if header.content_checksum {
             Some(Xxh64State::new(0))
@@ -257,14 +267,17 @@ impl<R: Read> FrameDecoder<R> {
             if let Some((t, l)) = d.of_table() {
                 st.of_table = promote_of_table(t);
                 st.of_accuracy = l;
+                st.of_set = true;
             }
             if let Some((t, l)) = d.ml_table() {
                 st.ml_table = promote_ml_table(t);
                 st.ml_accuracy = l;
+                st.ml_set = true;
             }
             if let Some((t, l)) = d.ll_table() {
                 st.ll_table = promote_ll_table(t);
                 st.ll_accuracy = l;
+                st.ll_set = true;
             }
             self.seq_tables = st;
             self.ws.huf_valid = false;
@@ -340,6 +353,7 @@ impl<R: Read> FrameDecoder<R> {
             hasher.update(&self.output_buf);
         }
         self.bytes_output += self.output_buf.len();
+        self.frame_bytes += self.output_buf.len();
         if self.bytes_output > self.max_output {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -348,6 +362,14 @@ impl<R: Read> FrameDecoder<R> {
         }
 
         self.state = if last {
+            if let Some(fcs) = self.frame_content_size {
+                if self.frame_bytes as u64 != fcs {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        DecompressError::FrameSizeMismatch,
+                    ));
+                }
+            }
             if self.content_checksum {
                 State::Checksum
             } else {

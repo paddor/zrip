@@ -11,8 +11,9 @@ use zrip_core::fse::table_builder::{
 };
 use zrip_core::fse::{
     FseSeqDecodeEntry, LL_BASELINE_TABLE, LL_BITS_TABLE, LL_DEFAULT_ACCURACY, LL_DEFAULT_DIST,
-    ML_BASELINE_TABLE, ML_BITS_TABLE, ML_DEFAULT_ACCURACY, ML_DEFAULT_DIST, OF_DEFAULT_ACCURACY,
-    OF_DEFAULT_DIST, promote_ll_table, promote_ml_table, promote_of_table,
+    LL_MAX_ACCURACY_LOG, ML_BASELINE_TABLE, ML_BITS_TABLE, ML_DEFAULT_ACCURACY, ML_DEFAULT_DIST,
+    ML_MAX_ACCURACY_LOG, OF_DEFAULT_ACCURACY, OF_DEFAULT_DIST, OF_MAX_ACCURACY_LOG,
+    promote_ll_table, promote_ml_table, promote_of_table,
 };
 
 pub(crate) struct SequenceDecodeTables {
@@ -22,6 +23,9 @@ pub(crate) struct SequenceDecodeTables {
     pub(crate) of_accuracy: u8,
     pub(crate) ml_table: Vec<FseSeqDecodeEntry>,
     pub(crate) ml_accuracy: u8,
+    pub(crate) ll_set: bool,
+    pub(crate) of_set: bool,
+    pub(crate) ml_set: bool,
 }
 
 impl SequenceDecodeTables {
@@ -42,6 +46,9 @@ impl SequenceDecodeTables {
                 ML_DEFAULT_ACCURACY,
             )),
             ml_accuracy: ML_DEFAULT_ACCURACY,
+            ll_set: false,
+            of_set: false,
+            ml_set: false,
         }
     }
 }
@@ -136,6 +143,9 @@ pub(crate) fn parse_sequence_tables_ws(
     }
 
     let mode_byte = data[0];
+    if mode_byte & 0x03 != 0 {
+        return Err(DecompressError::CorruptSequences);
+    }
     let ll_mode = (mode_byte >> 6) & 0x03;
     let of_mode = (mode_byte >> 4) & 0x03;
     let ml_mode = (mode_byte >> 2) & 0x03;
@@ -157,6 +167,7 @@ pub(crate) fn parse_sequence_tables_ws(
                 ));
             }
             prev.ll_accuracy = LL_DEFAULT_ACCURACY;
+            prev.ll_set = true;
         }
         1 => {
             let sym = reader.read_bits(8)? as usize;
@@ -171,9 +182,13 @@ pub(crate) fn parse_sequence_tables_ws(
                 baseline_value: LL_BASELINE_TABLE[sym],
             });
             prev.ll_accuracy = 0;
+            prev.ll_set = true;
         }
         2 => {
             let acc = parse_fse_table_description_into(&mut reader, 35, &mut ws.fse_dist)?;
+            if acc > LL_MAX_ACCURACY_LOG {
+                return Err(DecompressError::BadFseTable);
+            }
             build_decode_table_into(
                 &ws.fse_dist,
                 acc,
@@ -182,8 +197,13 @@ pub(crate) fn parse_sequence_tables_ws(
             )?;
             prev.ll_table = promote_ll_table(&ws.fse_build_buf);
             prev.ll_accuracy = acc;
+            prev.ll_set = true;
         }
-        _ => {}
+        _ => {
+            if !prev.ll_set {
+                return Err(DecompressError::CorruptSequences);
+            }
+        }
     }
 
     match of_mode {
@@ -201,6 +221,7 @@ pub(crate) fn parse_sequence_tables_ws(
                 ));
             }
             prev.of_accuracy = OF_DEFAULT_ACCURACY;
+            prev.of_set = true;
         }
         1 => {
             let sym = reader.read_bits(8)? as u8;
@@ -215,9 +236,13 @@ pub(crate) fn parse_sequence_tables_ws(
                 baseline_value: 1u32 << sym,
             });
             prev.of_accuracy = 0;
+            prev.of_set = true;
         }
         2 => {
             let acc = parse_fse_table_description_into(&mut reader, 31, &mut ws.fse_dist)?;
+            if acc > OF_MAX_ACCURACY_LOG {
+                return Err(DecompressError::BadFseTable);
+            }
             build_decode_table_into(
                 &ws.fse_dist,
                 acc,
@@ -226,8 +251,13 @@ pub(crate) fn parse_sequence_tables_ws(
             )?;
             prev.of_table = promote_of_table(&ws.fse_build_buf);
             prev.of_accuracy = acc;
+            prev.of_set = true;
         }
-        _ => {}
+        _ => {
+            if !prev.of_set {
+                return Err(DecompressError::CorruptSequences);
+            }
+        }
     }
 
     match ml_mode {
@@ -245,6 +275,7 @@ pub(crate) fn parse_sequence_tables_ws(
                 ));
             }
             prev.ml_accuracy = ML_DEFAULT_ACCURACY;
+            prev.ml_set = true;
         }
         1 => {
             let sym = reader.read_bits(8)? as usize;
@@ -259,9 +290,13 @@ pub(crate) fn parse_sequence_tables_ws(
                 baseline_value: ML_BASELINE_TABLE[sym],
             });
             prev.ml_accuracy = 0;
+            prev.ml_set = true;
         }
         2 => {
             let acc = parse_fse_table_description_into(&mut reader, 52, &mut ws.fse_dist)?;
+            if acc > ML_MAX_ACCURACY_LOG {
+                return Err(DecompressError::BadFseTable);
+            }
             build_decode_table_into(
                 &ws.fse_dist,
                 acc,
@@ -270,8 +305,13 @@ pub(crate) fn parse_sequence_tables_ws(
             )?;
             prev.ml_table = promote_ml_table(&ws.fse_build_buf);
             prev.ml_accuracy = acc;
+            prev.ml_set = true;
         }
-        _ => {}
+        _ => {
+            if !prev.ml_set {
+                return Err(DecompressError::CorruptSequences);
+            }
+        }
     }
 
     Ok(1 + reader.bytes_consumed())

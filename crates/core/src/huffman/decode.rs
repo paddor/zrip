@@ -49,6 +49,10 @@ pub fn decode_single_stream(
         let _ = reader.read_bits(entry.num_bits)?;
     }
 
+    if reader.bits_remaining() != 0 {
+        return Err(DecompressError::BadHuffmanStream);
+    }
+
     Ok(output)
 }
 
@@ -241,6 +245,10 @@ pub(super) fn decode_stream_tail(
         primitives::huf_output_write(output, pos, entry.symbol);
         pos += 1;
         let _ = reader.read_bits(entry.num_bits)?;
+    }
+
+    if reader.bits_remaining() != 0 {
+        return Err(DecompressError::BadHuffmanStream);
     }
 
     Ok(())

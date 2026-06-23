@@ -268,6 +268,10 @@ unsafe fn decode_execute_avx2_inner<const HAS_HISTORY: bool>(
         execute_seq!(literal_length, match_length, offset);
     }
 
+    if rev_reader.bits_remaining() != 0 {
+        return Err(DecompressError::CorruptSequences);
+    }
+
     rep_offsets[0] = rep0;
     rep_offsets[1] = rep1;
     rep_offsets[2] = rep2;
