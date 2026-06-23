@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+## [0.5.1]
+
+### Fixed
+
+- Decoder now enforces per-table accuracy log limits: literal lengths
+  and match lengths max 9, offsets max 8 (RFC 8878 section 3.1.1.3.2.1).
+- Decoder rejects Huffman weight FSE tables with accuracy log > 6
+  (RFC 8878 section 4.2.1).
+- Decoder rejects Huffman streams with leftover bits after decoding.
+- Decoder validates match offset does not exceed total output produced
+  so far (current block + previous blocks + dictionary).
+- Decoder validates sequence execution does not consume more literals
+  than available, and that the last sequence uses all remaining literals.
+- Decoder validates cooked match length and literal length values are
+  within bounds.
+- Decoder rejects Repeat_Mode on first block when no prior FSE table
+  exists.
+
+### Added
+
+- `tests/spec_conformance.rs`: comprehensive test suite covering all
+  new validation paths and existing error paths.
+
+### Changed
+
+- Bumped structured-zstd bench dependency to 0.0.44 and regenerated
+  benchmark charts.
+
 ## [0.5.0]
 
 ### Added
