@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "nightly", feature(optimize_attribute))]
+#![cfg_attr(feature = "paranoid", forbid(unsafe_code))]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -9,13 +10,15 @@ pub(crate) mod block_decoder;
 pub mod context;
 pub(crate) mod exec;
 pub(crate) mod literals;
-pub(crate) mod primitives;
 pub(crate) mod ring_buffer;
 pub(crate) mod sequences;
 #[cfg(feature = "std")]
 pub mod streaming;
 
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    not(feature = "paranoid")
+))]
 pub(crate) mod simd_decode;
 
 #[cfg(feature = "alloc")]
@@ -31,7 +34,10 @@ use zrip_core::error::DecompressError;
 use zrip_core::frame::MAX_WINDOW_SIZE;
 use zrip_core::frame::header::parse_frame_header;
 use zrip_core::huffman::HuffmanDecodeEntry;
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    not(feature = "paranoid")
+))]
 use zrip_core::simd::CpuTier;
 use zrip_core::xxhash::Xxh64State;
 
@@ -366,7 +372,7 @@ fn decode_compressed_block(
 
     let before = output.len();
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
         if zrip_core::simd::cpu_tier() >= CpuTier::Avx2 {
             decode_execute_block_avx2(
@@ -384,7 +390,7 @@ fn decode_compressed_block(
             return Ok(());
         }
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", not(feature = "paranoid")))]
     {
         if zrip_core::simd::cpu_tier() >= CpuTier::Neon {
             decode_execute_block_neon(
@@ -419,7 +425,7 @@ fn decode_compressed_block(
     Ok(())
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
 fn decode_execute_block_avx2(
     seq_data: &[u8],
     num_sequences: u32,
@@ -440,7 +446,7 @@ fn decode_execute_block_avx2(
     )
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", not(feature = "paranoid")))]
 fn decode_execute_block_neon(
     seq_data: &[u8],
     num_sequences: u32,

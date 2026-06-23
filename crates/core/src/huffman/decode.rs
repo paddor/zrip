@@ -72,11 +72,10 @@ pub fn decode_single_stream_vec(
     output.clear();
     output.reserve(output_size);
     primitives::set_vec_len(output, output_size);
-    let result;
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
         if crate::simd::cpu_tier() >= crate::simd::CpuTier::Bmi2 {
-            result = super::decode_4stream::decode_single_stream_bmi2_safe(
+            let result = super::decode_4stream::decode_single_stream_bmi2_safe(
                 table, table_log, data, output,
             );
             if result.is_err() {
@@ -85,7 +84,7 @@ pub fn decode_single_stream_vec(
             return result;
         }
     }
-    result = decode_single_stream_into(table, table_log, data, output);
+    let result = decode_single_stream_into(table, table_log, data, output);
     if result.is_err() {
         output.clear();
     }
@@ -99,7 +98,7 @@ pub fn decode_4_streams(
     output_size: usize,
 ) -> Result<Vec<u8>, DecompressError> {
     let mut output = vec![0u8; output_size];
-    super::decode_4stream::decode_4_streams_core(table, table_log, data, output_size, &mut output)?;
+    decode_4_streams_core_safe(table, table_log, data, output_size, &mut output)?;
     Ok(output)
 }
 
@@ -113,11 +112,10 @@ pub fn decode_4_streams_into(
     output.clear();
     output.reserve(output_size);
     primitives::set_vec_len(output, output_size);
-    let result;
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
         if crate::simd::cpu_tier() >= crate::simd::CpuTier::Bmi2 {
-            result = super::decode_4stream::decode_4_streams_core_bmi2_safe(
+            let result = super::decode_4stream::decode_4_streams_core_bmi2_safe(
                 table,
                 table_log,
                 data,
@@ -130,12 +128,78 @@ pub fn decode_4_streams_into(
             return result;
         }
     }
-    result =
-        super::decode_4stream::decode_4_streams_core(table, table_log, data, output_size, output);
+    let result = decode_4_streams_core_safe(table, table_log, data, output_size, output);
     if result.is_err() {
         output.clear();
     }
     result
+}
+
+#[cfg(not(feature = "paranoid"))]
+fn decode_4_streams_core_safe(
+    table: &[HuffmanDecodeEntry],
+    table_log: u8,
+    data: &[u8],
+    output_size: usize,
+    output: &mut [u8],
+) -> Result<(), DecompressError> {
+    super::decode_4stream::decode_4_streams_core(table, table_log, data, output_size, output)
+}
+
+#[cfg(feature = "paranoid")]
+fn decode_4_streams_core_safe(
+    table: &[HuffmanDecodeEntry],
+    table_log: u8,
+    data: &[u8],
+    output_size: usize,
+    output: &mut [u8],
+) -> Result<(), DecompressError> {
+    use crate::bitstream::reader_reverse::ReverseBitReader;
+
+    if data.len() < 6 {
+        return Err(DecompressError::BadHuffmanStream);
+    }
+
+    let s1_size = u16::from_le_bytes([data[0], data[1]]) as usize;
+    let s2_size = u16::from_le_bytes([data[2], data[3]]) as usize;
+    let s3_size = u16::from_le_bytes([data[4], data[5]]) as usize;
+
+    let jump_table_size = 6;
+    let s1_start = jump_table_size;
+    let s2_start = s1_start + s1_size;
+    let s3_start = s2_start + s2_size;
+    let s4_start = s3_start + s3_size;
+
+    if s4_start > data.len() {
+        return Err(DecompressError::BadHuffmanStream);
+    }
+
+    let seg = output_size.div_ceil(4);
+    if seg * 3 >= output_size {
+        return Err(DecompressError::BadHuffmanStream);
+    }
+    let remaining = output_size - seg * 3;
+
+    let mut r1 = ReverseBitReader::new(&data[s1_start..s2_start])
+        .map_err(|_| DecompressError::BadHuffmanStream)?;
+    let mut r2 = ReverseBitReader::new(&data[s2_start..s3_start])
+        .map_err(|_| DecompressError::BadHuffmanStream)?;
+    let mut r3 = ReverseBitReader::new(&data[s3_start..s4_start])
+        .map_err(|_| DecompressError::BadHuffmanStream)?;
+    let mut r4 =
+        ReverseBitReader::new(&data[s4_start..]).map_err(|_| DecompressError::BadHuffmanStream)?;
+
+    let seg1_end = seg;
+    let seg2_end = seg * 2;
+    let seg3_end = seg * 3;
+    let seg4_end = seg * 3 + remaining;
+
+    decode_stream_tail(table, table_log, &mut r1, &mut output[0..seg1_end])?;
+    decode_stream_tail(table, table_log, &mut r2, &mut output[seg..seg2_end])?;
+    decode_stream_tail(table, table_log, &mut r3, &mut output[seg * 2..seg3_end])?;
+    decode_stream_tail(table, table_log, &mut r4, &mut output[seg * 3..seg4_end])?;
+
+    Ok(())
 }
 
 pub(super) fn decode_stream_tail(

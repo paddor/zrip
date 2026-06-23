@@ -1,9 +1,9 @@
 pub mod scalar;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
 pub mod x86_64;
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", not(feature = "paranoid")))]
 pub mod aarch64;
 
 pub mod copy;
@@ -21,20 +21,25 @@ pub enum CpuTier {
     Neon,
 }
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", not(feature = "paranoid")))]
 static CPU_TIER: std::sync::OnceLock<CpuTier> = std::sync::OnceLock::new();
 
-#[cfg(feature = "std")]
+#[cfg(feature = "paranoid")]
+pub fn cpu_tier() -> CpuTier {
+    CpuTier::Scalar
+}
+
+#[cfg(all(feature = "std", not(feature = "paranoid")))]
 pub fn cpu_tier() -> CpuTier {
     *CPU_TIER.get_or_init(detect_cpu_tier)
 }
 
-#[cfg(not(feature = "std"))]
+#[cfg(all(not(feature = "std"), not(feature = "paranoid")))]
 pub fn cpu_tier() -> CpuTier {
     compile_time_tier()
 }
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", not(feature = "paranoid")))]
 fn detect_cpu_tier() -> CpuTier {
     #[cfg(target_arch = "x86_64")]
     {
@@ -61,7 +66,7 @@ fn detect_cpu_tier() -> CpuTier {
     }
 }
 
-#[cfg(not(feature = "std"))]
+#[cfg(all(not(feature = "std"), not(feature = "paranoid")))]
 fn compile_time_tier() -> CpuTier {
     #[cfg(target_arch = "x86_64")]
     {

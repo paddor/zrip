@@ -30,7 +30,7 @@ fn write_seq_count(output: &mut Vec<u8>, num_seq: u32) {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct PackedSeq {
     extra_bits: u64,
     ll_c: u8,
