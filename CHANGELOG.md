@@ -23,10 +23,15 @@
 ### Added
 
 - `tests/spec_conformance.rs`: comprehensive test suite covering all
-  new validation paths and existing error paths.
+  new decoder validation paths and existing error paths.
+- JSR publish workflow (`.github/workflows/jsr.yml`) with provenance
+  via OIDC. Builds WASM and publishes `@paddor/zrip` on push to main.
 
 ### Changed
 
+- JSR package `@paddor/zrip` bumped to 0.2.0: added package description,
+  JSDoc on all exported symbols (`Compressor`, `Decompressor`,
+  `Dictionary`), and rebuilt WASM artifacts.
 - Bumped structured-zstd bench dependency to 0.0.44 and regenerated
   benchmark charts.
 
