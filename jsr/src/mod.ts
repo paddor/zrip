@@ -55,12 +55,60 @@ import {
   compressBound as wasmCompressBound,
   compressWithDict as wasmCompressWithDict,
   decompressWithDict as wasmDecompressWithDict,
-  Compressor,
-  Decompressor,
-  Dictionary,
+  Compressor as _Compressor,
+  Decompressor as _Decompressor,
+  Dictionary as _Dictionary,
 } from "./pkg/zrip_wasm.js";
 
-export { Compressor, Decompressor, Dictionary };
+/**
+ * Reusable compression context. Amortizes internal allocations across
+ * multiple compress calls. Call {@linkcode Compressor.free | .free()} when done,
+ * or use `using` for automatic disposal.
+ *
+ * @example
+ * ```ts
+ * const compressor = new Compressor(1);
+ * const c1 = compressor.compress(data1);
+ * const c2 = compressor.compress(data2);
+ * compressor.free();
+ * ```
+ */
+export const Compressor: typeof _Compressor = _Compressor;
+/** Type alias for {@linkcode Compressor} instances. */
+export type Compressor = _Compressor;
+
+/**
+ * Reusable decompression context. Amortizes internal allocations across
+ * multiple decompress calls. Call {@linkcode Decompressor.free | .free()} when done,
+ * or use `using` for automatic disposal.
+ *
+ * @example
+ * ```ts
+ * const decompressor = new Decompressor();
+ * const d1 = decompressor.decompress(c1);
+ * const d2 = decompressor.decompress(c2);
+ * decompressor.free();
+ * ```
+ */
+export const Decompressor: typeof _Decompressor = _Decompressor;
+/** Type alias for {@linkcode Decompressor} instances. */
+export type Decompressor = _Decompressor;
+
+/**
+ * Pre-parsed zstd dictionary for use with dictionary compression.
+ * Construct from raw dictionary bytes (trained externally via `zstd --train`
+ * or similar). Reuse across compress/decompress calls.
+ *
+ * @example
+ * ```ts
+ * const dict = new Dictionary(dictBytes);
+ * const compressed = compressWithDict(data, 1, dict);
+ * dict.free();
+ * ```
+ */
+export const Dictionary: typeof _Dictionary = _Dictionary;
+/** Type alias for {@linkcode Dictionary} instances. */
+export type Dictionary = _Dictionary;
 
 // Minimal valid WASM module that uses a v128 instruction.
 // WebAssembly.validate() returns true only if the engine supports simd128.
