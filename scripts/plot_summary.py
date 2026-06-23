@@ -30,7 +30,7 @@ LABELS = {
     "C zstd":          "C zstd 1.5.7 (libzstd)",
     "zrip":            "zrip (encapsulated unsafe, Rust)",
     "zrip paranoid":   "zrip paranoid (safe Rust, no unsafe)",
-    "structured-zstd": "structured-zstd 0.0.42 (unsafe Rust)",
+    "structured-zstd": "structured-zstd 0.0.44 (unsafe Rust)",
     "ruzstd":          "ruzstd 0.8.2 (safe Rust)",
 }
 
