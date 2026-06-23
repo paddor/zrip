@@ -5,6 +5,6 @@
   "exports": "./src/mod.ts",
   "publish": {
     "include": ["src/", "deno.json", "LICENSE"],
-    "exclude": ["src/pkg/package.json"]
+    "exclude": ["src/pkg/package.json", "!src/pkg/"]
   }
 }
