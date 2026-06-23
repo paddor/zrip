@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+## [0.5.0]
+
+### Added
+
+- `paranoid` feature: compiles pure safe Rust with zero unsafe code.
+  `#![forbid(unsafe_code)]` enforced on all four crate roots. Every
+  unchecked operation has a safe alternative behind `#[cfg(feature =
+  "paranoid")]`. SIMD modules gated out entirely; `cpu_tier()` returns
+  `Scalar`. Even with paranoid, zrip L1 encode is >2x faster than
+  ruzstd.
+- CI job for `--features paranoid`: test + clippy.
+- WebAssembly package published as
+  [`@paddor/zrip`](https://jsr.io/@paddor/zrip) on JSR. Scalar and
+  SIMD128 variants with auto-detection. 15% faster encode and 14%
+  faster decode than C zstd compiled to WASM.
+
+### Changed
+
+- Replaced pointer-based `exec.rs` (scalar sequence decoder) with safe
+  index-based implementation using `Vec<u8>` operations. Zero
+  performance impact on default builds (SIMD handles all decode on
+  AVX2/NEON hardware). Deleted `decode/src/primitives.rs` (dead code
+  after this change).
+- Regenerated x86_64 benchmark charts with paranoid data.
+
 ## [0.4.0]
 
 ### Added
