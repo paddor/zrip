@@ -26,6 +26,10 @@ that only matter in archival storage, not transfer pipelines.
 **`no_std` + `alloc`.** Works in embedded and kernel contexts with the `alloc`
 feature; `frame` requires `std`.
 
+**WebAssembly.** Available as [`@paddor/zrip`](https://jsr.io/@paddor/zrip)
+on JSR. Auto-detects WASM SIMD support. 15% faster encode and 14% faster
+decode than C zstd compiled to WASM.
+
 **Dictionary compression.** COVER and FastCOVER training built in for
 small-message workloads (log lines, JSON records, RPC payloads).
 
