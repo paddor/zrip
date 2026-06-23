@@ -1,3 +1,53 @@
+/**
+ * @module
+ *
+ * Pure Rust zstd codec compiled to WebAssembly. Levels -7 through 4
+ * (Fast and DFast strategies). Optimized for encode throughput in transfer
+ * pipelines that need standard zstd frames at high speed.
+ *
+ * Automatically detects WASM SIMD support and loads the appropriate binary.
+ *
+ * ```ts
+ * import { init, compress, decompress } from "@paddor/zrip";
+ *
+ * await init();
+ *
+ * const data = new TextEncoder().encode("hello world".repeat(1000));
+ * const compressed = compress(data, 1);
+ * const original = decompress(compressed);
+ * ```
+ *
+ * Reusable contexts amortize internal allocations across calls:
+ *
+ * ```ts
+ * import { init, Compressor, Decompressor } from "@paddor/zrip";
+ *
+ * await init();
+ *
+ * const compressor = new Compressor(1);
+ * const c1 = compressor.compress(data1);
+ * const c2 = compressor.compress(data2);
+ * compressor.free();
+ *
+ * const decompressor = new Decompressor();
+ * const d1 = decompressor.decompress(c1);
+ * const d2 = decompressor.decompress(c2);
+ * decompressor.free();
+ * ```
+ *
+ * Dictionary compression for small-message workloads:
+ *
+ * ```ts
+ * import { init, compress, compressWithDict, decompressWithDict, Dictionary } from "@paddor/zrip";
+ *
+ * await init();
+ *
+ * const dict = new Dictionary(dictBytes);
+ * const compressed = compressWithDict(data, 1, dict);
+ * const original = decompressWithDict(compressed, dict);
+ * ```
+ */
+
 import {
   initSync,
   compress as wasmCompress,
@@ -40,7 +90,8 @@ export async function init(): Promise<void> {
 
 /**
  * Initialize synchronously with a pre-loaded WASM binary.
- * Use when you have already loaded the WASM bytes (e.g. via fs.readFileSync in Node.js).
+ * Use when you have already loaded the WASM bytes (e.g. via `Deno.readFileSync`
+ * or `fs.readFileSync` in Node.js).
  */
 export function initSyncFromBytes(bytes: BufferSource): void {
   if (initialized) return;
@@ -49,24 +100,52 @@ export function initSyncFromBytes(bytes: BufferSource): void {
 }
 
 /**
- * Compress data at the given level (-7 to 4). Default level is 1.
- * Returns a standard zstd frame.
+ * Compress data at the given zstd level. Returns a standard zstd frame.
+ *
+ * @param input The data to compress.
+ * @param level Compression level from -7 (fastest) to 4 (best ratio). Default: 1.
+ * @returns Compressed zstd frame as a `Uint8Array`.
+ *
+ * @example
+ * ```ts
+ * const compressed = compress(data);           // level 1
+ * const fast = compress(data, -7);             // fastest
+ * const best = compress(data, 4);              // best ratio
+ * ```
  */
 export function compress(input: Uint8Array, level = 1): Uint8Array {
   return wasmCompress(input, level);
 }
 
-/** Decompress a zstd frame. */
+/**
+ * Decompress a zstd frame.
+ *
+ * @param input Compressed zstd frame.
+ * @returns Decompressed data as a `Uint8Array`.
+ * @throws On invalid, truncated, or corrupted input.
+ */
 export function decompress(input: Uint8Array): Uint8Array {
   return wasmDecompress(input);
 }
 
-/** Upper bound on compressed size for a given input length. */
+/**
+ * Upper bound on compressed size for a given input length.
+ * Useful for pre-allocating output buffers.
+ */
 export function compressBound(inputLen: number): number {
   return wasmCompressBound(inputLen);
 }
 
-/** Compress with a pre-parsed dictionary. */
+/**
+ * Compress with a pre-parsed dictionary. Dictionaries improve compression
+ * ratio on small messages (log lines, JSON records, RPC payloads) that
+ * share common structure.
+ *
+ * @param input The data to compress.
+ * @param level Compression level from -7 to 4.
+ * @param dict A {@linkcode Dictionary} instance.
+ * @returns Compressed zstd frame as a `Uint8Array`.
+ */
 export function compressWithDict(
   input: Uint8Array,
   level: number,
@@ -75,7 +154,14 @@ export function compressWithDict(
   return wasmCompressWithDict(input, level, dict);
 }
 
-/** Decompress with a pre-parsed dictionary. */
+/**
+ * Decompress a zstd frame that was compressed with a dictionary.
+ *
+ * @param input Compressed zstd frame.
+ * @param dict The same {@linkcode Dictionary} used during compression.
+ * @returns Decompressed data as a `Uint8Array`.
+ * @throws On invalid input or dictionary mismatch.
+ */
 export function decompressWithDict(
   input: Uint8Array,
   dict: Dictionary,
