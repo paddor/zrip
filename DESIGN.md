@@ -123,8 +123,11 @@ NEON provides 16-byte equivalents.
 Const-generic `HAS_HISTORY: bool` eliminates dictionary history-check branches
 when no dictionary is present.
 
-Scalar fallback lives in `crates/decode/src/exec.rs` with the same structure but
-pointer-based copies.
+Scalar fallback lives in `crates/decode/src/exec.rs`: index-based sequence
+execution using `Vec<u8>` operations (`extend_from_slice`, `copy_within`, byte
+loop for overlapping matches). This is the sole scalar implementation for both
+default and `paranoid` builds. On hardware with AVX2 or NEON, the SIMD decoder
+handles all blocks and `exec.rs` is never reached.
 
 ## Huffman 4-stream decoder
 
@@ -138,6 +141,18 @@ macros.
 
 BMI2 variant via `#[target_feature(enable = "bmi2")]` for faster bit extraction.
 Slow path finishes remaining symbols one stream at a time near exhaustion.
+
+## `paranoid` feature
+
+`cargo build --features paranoid` adds `#![forbid(unsafe_code)]` to all four
+crate roots. Each `primitives.rs` module has dual `#[cfg(feature = "paranoid")]`
+/ `#[cfg(not(feature = "paranoid"))]` bodies: the paranoid path uses direct
+indexing, `from_le_bytes`, `resize`, and `extend_from_slice` in place of
+unchecked operations. SIMD modules (`core/simd/x86_64/`, `core/simd/aarch64/`,
+`decode/simd_decode/`) are gated out entirely. `cpu_tier()` returns
+`CpuTier::Scalar`, routing all blocks through `exec.rs`. The Huffman 4-stream
+interleaved decoder is replaced by sequential per-stream decode via
+`decode_stream_tail`.
 
 ## Unsafe boundary
 

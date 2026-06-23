@@ -22,6 +22,28 @@ Unsafe is confined to three categories of leaf modules:
    `aarch64/decode.rs`): fused FSE decode + sequence execution with inline
    SIMD operations.
 
+## `paranoid` feature
+
+`cargo build --features paranoid` compiles zrip with `#![forbid(unsafe_code)]`
+on all four crates. Every unsafe block is replaced by a safe alternative:
+
+| Category | Default | Paranoid |
+|:---------|:--------|:---------|
+| Unchecked indexing | `get_unchecked`, `read_unaligned` | Direct indexing, `from_le_bytes` |
+| Vec length | `set_len` | `resize` |
+| SIMD intrinsics | SSE2/AVX2/BMI2/NEON kernels | Gated out; `cpu_tier()` returns `Scalar` |
+| SIMD sequence decoder | Fused FSE+copy with intrinsics | Gated out; scalar `exec.rs` handles all blocks |
+| Huffman 4-stream | Interleaved pointer-based decode | Sequential per-stream decode via `decode_stream_tail` |
+| Wildcopy/copy-match | Raw pointer arithmetic | `extend_from_slice`, `copy_within`, byte loop |
+
+The safe alternatives use the same algorithms and produce identical output.
+Encode throughput drops roughly 20-30%, decode roughly 40-50% (corpus
+dependent). Even with these costs, zrip with `paranoid` outperforms ruzstd on
+both encode and decode.
+
+The feature exists for users who need a guarantee of zero unsafe, or for
+auditing and benchmarking the cost of safe-only codepaths.
+
 ## Why Rust matters here
 
 C zstd's decompression path has had memory safety bugs that Rust's type system

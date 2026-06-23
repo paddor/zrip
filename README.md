@@ -15,9 +15,11 @@ useful when throughput matters more than ratio.
 
 **Encapsulated unsafe.** All algorithm and control-flow code is
 `#![forbid(unsafe_code)]`. Unsafe is confined to small, auditable primitives
-modules with `debug_assert!` guards. See [SAFETY.md](SAFETY.md).
+modules with `debug_assert!` guards. The `paranoid` feature eliminates all
+unsafe entirely, compiling pure safe Rust with zero SIMD intrinsics. See
+[SAFETY.md](SAFETY.md).
 
-**Small codebase.** ~10.5k lines of Rust, roughly a fifth of full-spec
+**Small codebase.** ~12k lines of Rust, roughly a fifth of full-spec
 implementations. Levels above 4 add complexity for compression ratios
 that only matter in archival storage, not transfer pipelines.
 
@@ -140,6 +142,7 @@ let dict = train_dict_fastcover(&samples, 16384, FastCoverParams::default());
 | `frame`        | yes     | Frame header parsing and writing; implies `std` |
 | `alloc`        | yes     | `no_std` + heap via `alloc` crate              |
 | `dict_builder` | no      | COVER/FastCOVER dictionary training            |
+| `paranoid`     | no      | Pure safe Rust: no SIMD, no unchecked indexing  |
 | `nightly`      | no      | `#[optimize]` attributes on hot functions      |
 
 ## Safety
