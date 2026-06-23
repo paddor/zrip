@@ -88,6 +88,10 @@ pub const MAX_SYMBOL: usize = 255;
 pub const MAX_TABLE_LOG: u8 = 12;
 pub const MIN_TABLE_LOG: u8 = 5;
 
+pub const LL_MAX_ACCURACY_LOG: u8 = 9;
+pub const ML_MAX_ACCURACY_LOG: u8 = 9;
+pub const OF_MAX_ACCURACY_LOG: u8 = 8;
+
 pub const LL_MAX_SYMBOL: u8 = 35;
 pub const ML_MAX_SYMBOL: u8 = 52;
 pub const OF_MAX_SYMBOL: u8 = 31;

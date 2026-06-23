@@ -201,14 +201,17 @@ pub(crate) fn decompress_frame(
         if let Some((t, l)) = d.of_table() {
             st.of_table = zrip_core::fse::promote_of_table(t);
             st.of_accuracy = l;
+            st.of_set = true;
         }
         if let Some((t, l)) = d.ml_table() {
             st.ml_table = zrip_core::fse::promote_ml_table(t);
             st.ml_accuracy = l;
+            st.ml_set = true;
         }
         if let Some((t, l)) = d.ll_table() {
             st.ll_table = zrip_core::fse::promote_ll_table(t);
             st.ll_accuracy = l;
+            st.ll_set = true;
         }
         st
     } else {

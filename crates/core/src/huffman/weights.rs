@@ -58,6 +58,9 @@ fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompr
     let mut bit_reader = BitReader::new(compressed);
     let (distribution, accuracy_log) =
         crate::fse::table_builder::parse_fse_table_description(&mut bit_reader, 12)?;
+    if accuracy_log > 6 {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
 
     let table = build_decode_table(&distribution, accuracy_log)
         .map_err(|_| DecompressError::BadHuffmanWeights)?;

@@ -160,6 +160,10 @@ pub(crate) fn decode_execute_sequences(
         execute_seq!(literal_length, match_length, offset);
     }
 
+    if rev_reader.bits_remaining() != 0 {
+        return Err(DecompressError::CorruptSequences);
+    }
+
     if lit_off < literals.len() {
         output.extend_from_slice(&literals[lit_off..]);
     }
