@@ -295,6 +295,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
             // Second shift with step gap
             match_idx = primitives::hash_load(hash_table, h_ip2) as usize;
             h0 = h_ip2;
+            #[allow(unused_variables)]
             let h_next = hash_pos::<HASH_LOG, MLS>(src, ip2, hash_log);
             ip0 = ip1;
             ip1 = ip2;
