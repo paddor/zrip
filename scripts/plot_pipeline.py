@@ -39,6 +39,20 @@ MIN_FILE_SIZE = 1_000_000
 TRANSFER_RATE = 100e6  # 100 MB/s
 
 
+def _apply_profile():
+    from profiles import apply_profile
+    p = apply_profile(sys.argv)
+    if p is None:
+        return
+    global CODEC_ORDER, COLORS, LABELS
+    CODEC_ORDER = p["CODEC_ORDER"]
+    COLORS = p.get("COLORS_TUPLE", p["COLORS"])
+    LABELS = p["LABELS"]
+
+
+_apply_profile()
+
+
 def detect_hardware():
     try:
         cpu = os.environ.get("ZRIP_CPU")
@@ -97,7 +111,9 @@ def nice_step(max_val, target_lines):
 
 
 def load_level_data():
-    cache_dir = os.path.join(os.environ.get("HOME", "."), ".cache", "zrip")
+    from profiles import cache_target
+    cache_dir = os.path.join(
+        os.environ.get("HOME", "."), ".cache", "zrip", cache_target())
     level_dir = os.path.join(cache_dir, f"L{LEVEL}")
     if not os.path.isdir(level_dir):
         return {}
@@ -283,13 +299,13 @@ def generate_svg(data):
     leg_y = panel_tops[-1] + panel_h + 50
     legend_items = [(k, LABELS[k]) for k in codecs if k in COLORS]
     row_h = 18
-    leg_positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
-    leg_col_x = [mid_x - 200, mid_x + 10]
+    n_cols = 2
+    n_leg_rows = (len(legend_items) + n_cols - 1) // n_cols
+    leg_col_x = [mid_x - 220, mid_x + 30]
     for i, (key, label) in enumerate(legend_items):
-        if i >= len(leg_positions):
-            break
-        col, row = leg_positions[i]
-        lx = leg_col_x[col]
+        col = i // n_leg_rows
+        row = i % n_leg_rows
+        lx = leg_col_x[min(col, len(leg_col_x) - 1)]
         ly = leg_y + row * row_h
         main_c, xfer_c = COLORS[key]
         L.append(
@@ -301,8 +317,7 @@ def generate_svg(data):
             f' font-size="10" font-weight="500">{label}</text>'
         )
 
-    n_legend_rows = 2
-    seg_y = leg_y + n_legend_rows * row_h + 8
+    seg_y = leg_y + n_leg_rows * row_h + 8
     seg_items = [
         ("bright = compress + decompress", "#e6edf3"),
         ("dim = transfer @100 MB/s", "#7d8590"),

@@ -59,6 +59,21 @@ GROUPS = [
 
 MIN_FILE_SIZE = 10_000
 
+
+def _apply_profile():
+    from profiles import apply_profile
+    p = apply_profile(sys.argv)
+    if p is None:
+        return
+    global CODEC_ORDER, COLORS, LABELS, LEVEL_FILTER
+    CODEC_ORDER = p["CODEC_ORDER"]
+    COLORS = p["COLORS"]
+    LABELS = p["LABELS"]
+    LEVEL_FILTER = p.get("LEVEL_FILTER", {})
+
+
+_apply_profile()
+
 # Fixed axis ranges so the chart doesn't shift when data changes.
 FIXED_LOG_X_MIN = 1.477  # 10^1.477 ≈ 30 MB/s
 FIXED_LOG_X_MAX = 3.903  # 10^3.903 ≈ 8000 MB/s
@@ -109,7 +124,9 @@ def detect_hardware():
 
 
 def load_all_data():
-    cache_dir = os.path.join(os.environ.get("HOME", "."), ".cache", "zrip")
+    from profiles import cache_target
+    cache_dir = os.path.join(
+        os.environ.get("HOME", "."), ".cache", "zrip", cache_target())
     data = {}
     if not os.path.isdir(cache_dir):
         return data
@@ -429,7 +446,7 @@ def generate_svg(data):
     leg_y = last_bot + 40
     legend_items = [(k, LABELS[k]) for k in CODEC_ORDER if k in data]
     item_widths = [len(label) * 6.2 + 24 for _, label in legend_items]
-    gap = 12
+    gap = 20
 
     # Split into two balanced rows
     total_w = sum(item_widths) + gap * (len(legend_items) - 1)
