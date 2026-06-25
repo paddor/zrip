@@ -534,7 +534,7 @@ impl<R: Read> FrameDecoder<R> {
                     &mut self.rep_offsets,
                     &self.ws.literal_buf,
                     &mut self.output_buf,
-                    dict_history,
+                    history,
                 )
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 if self.output_buf.len() - before > MAX_BLOCK_SIZE {

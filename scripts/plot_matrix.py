@@ -17,7 +17,7 @@ import platform
 import sys
 
 
-CODEC_ORDER = ["C zstd", "zrip", "structured-zstd", "zrip paranoid", "lz4rip"]
+CODEC_ORDER = ["C zstd", "zrip", "structured-zstd", "zrip paranoid"]
 
 COLORS = {
     "C zstd":          ("#60a5fa", "#4680c4"),
@@ -57,6 +57,20 @@ GROUPS = [
 
 MIN_FILE_SIZE = 10_000
 TRANSFER_RATE = 100e6  # 100 MB/s
+
+
+def _apply_profile():
+    from profiles import apply_profile
+    p = apply_profile(sys.argv)
+    if p is None:
+        return
+    global CODEC_ORDER, COLORS, LABELS
+    CODEC_ORDER = p["CODEC_ORDER"]
+    COLORS = p.get("COLORS_TUPLE", p["COLORS"])
+    LABELS = p["LABELS"]
+
+
+_apply_profile()
 
 
 def detect_hardware():
@@ -109,7 +123,9 @@ def nice_step(max_val, target_lines):
 
 
 def load_all_data():
-    cache_dir = os.path.join(os.environ.get("HOME", "."), ".cache", "zrip")
+    from profiles import cache_target
+    cache_dir = os.path.join(
+        os.environ.get("HOME", "."), ".cache", "zrip", cache_target())
     data = {}
     if not os.path.isdir(cache_dir):
         return data
@@ -323,18 +339,17 @@ def generate_svg(data):
                 f' fill="#e6edf3" font-size="11" font-weight="600">{LEVEL_LABELS[level]}</text>'
             )
 
-    # legend (2x2 grid)
+    # legend (dynamic grid, 2 columns)
     leg_y = panel_tops[-1] + panel_h + 35
     legend_items = [(k, LABELS[k]) for k in CODEC_ORDER if k in COLORS]
     row_h = 18
-    leg_positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
-    leg_col_x = [mid_x - 200, mid_x + 10]
-    n_leg_rows = max(row for _, row in leg_positions) + 1
+    n_cols = 2
+    n_leg_rows = (len(legend_items) + n_cols - 1) // n_cols
+    leg_col_x = [mid_x - 220, mid_x + 30]
     for i, (key, label) in enumerate(legend_items):
-        if i >= len(leg_positions):
-            break
-        col, row = leg_positions[i]
-        lx = leg_col_x[col]
+        col = i // n_leg_rows
+        row = i % n_leg_rows
+        lx = leg_col_x[min(col, len(leg_col_x) - 1)]
         ly = leg_y + row * row_h
         main_c, _ = COLORS[key]
         L.append(

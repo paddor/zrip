@@ -39,6 +39,20 @@ MIN_FILE_SIZE = 10_000
 TRANSFER_RATE = 100e6  # 100 MB/s
 
 
+def _apply_profile():
+    from profiles import apply_profile
+    p = apply_profile(sys.argv)
+    if p is None:
+        return
+    global CODEC_ORDER, COLORS, LABELS
+    CODEC_ORDER = p["CODEC_ORDER"]
+    COLORS = p.get("COLORS_TUPLE", p["COLORS"])
+    LABELS = p["LABELS"]
+
+
+_apply_profile()
+
+
 def detect_hardware():
     try:
         cpu = os.environ.get("ZRIP_CPU")
@@ -89,7 +103,9 @@ def nice_step(max_val, target_lines):
 
 
 def load_all_data():
-    cache_dir = os.path.join(os.environ.get("HOME", "."), ".cache", "zrip")
+    from profiles import cache_target
+    cache_dir = os.path.join(
+        os.environ.get("HOME", "."), ".cache", "zrip", cache_target())
     data = {}
     if not os.path.isdir(cache_dir):
         return data
@@ -261,7 +277,7 @@ def generate_svg(data):
         )
 
     leg_y = p_bot + 35
-    leg_col_x = [mid_x - 200, mid_x + 10]
+    leg_col_x = [mid_x - 220, mid_x + 30]
     for i, (key, label) in enumerate(legend_items):
         col = i // leg_rows
         row = i % leg_rows

@@ -82,7 +82,9 @@ def detect_hardware():
 
 
 def load_small_data():
-    cache_dir = os.path.join(os.environ.get("HOME", "."), ".cache", "zrip")
+    from profiles import cache_target
+    cache_dir = os.path.join(
+        os.environ.get("HOME", "."), ".cache", "zrip", cache_target())
     data = {}
     if not os.path.isdir(cache_dir):
         return data

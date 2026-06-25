@@ -1,6 +1,7 @@
 extern crate libc;
 
 use std::io::Write;
+use std::path::PathBuf;
 
 // -7 through 4, skipping 0
 const LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
@@ -185,16 +186,21 @@ fn print_results(results: &[FileResult]) {
     }
 }
 
+fn corpus_path(relative: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
+}
+
 fn main() {
     let target_ns = 20_000_000u64;
     let mut results = Vec::new();
 
-    for &path in FILES {
-        let name = path.rsplit('/').next().unwrap();
-        let data = match std::fs::read(path) {
+    for &rel in FILES {
+        let name = rel.rsplit('/').next().unwrap();
+        let path = corpus_path(rel);
+        let data = match std::fs::read(&path) {
             Ok(d) => d,
             Err(_) => {
-                eprintln!("skipping {path}: not found");
+                eprintln!("skipping {}: not found", path.display());
                 continue;
             }
         };

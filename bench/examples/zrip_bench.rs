@@ -352,26 +352,36 @@ fn bench_c_zstd_dict(
     }
 }
 
+fn bench_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn corpus_path(relative: &str) -> PathBuf {
+    bench_dir().join(relative)
+}
+
 fn ensure_corpus() {
-    for &(path, url) in SILESIA_DOWNLOADS {
-        if std::fs::metadata(path).is_ok() {
+    for &(rel, url) in SILESIA_DOWNLOADS {
+        let path = corpus_path(rel);
+        if path.exists() {
             continue;
         }
         eprintln!("downloading {url} ...");
-        let dir = PathBuf::from(path).parent().unwrap().to_owned();
-        std::fs::create_dir_all(&dir).ok();
+        let dir = path.parent().unwrap();
+        std::fs::create_dir_all(dir).ok();
+        let path_str = path.display();
         let status = Command::new("sh")
             .arg("-c")
-            .arg(format!("curl -fSL '{url}' | bzip2 -d > '{path}'"))
+            .arg(format!("curl -fSL '{url}' | bzip2 -d > '{path_str}'"))
             .status();
         match status {
             Ok(s) if s.success() => {
-                let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-                eprintln!("  saved {path} ({size} bytes)");
+                let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                eprintln!("  saved {path_str} ({size} bytes)");
             }
             _ => {
-                eprintln!("  failed to download {path}, skipping");
-                std::fs::remove_file(path).ok();
+                eprintln!("  failed to download {path_str}, skipping");
+                std::fs::remove_file(&path).ok();
             }
         }
     }
@@ -380,7 +390,8 @@ fn ensure_corpus() {
 fn cache_dir() -> PathBuf {
     let dir = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
         .join(".cache")
-        .join("zrip");
+        .join("zrip")
+        .join(std::env::consts::ARCH);
     std::fs::create_dir_all(&dir).ok();
     dir
 }
@@ -649,7 +660,7 @@ fn main() {
             let source_data = match std::fs::read(&source_path) {
                 Ok(d) => d,
                 Err(_) => {
-                    eprintln!("dict: skipping {source_name} (source {source_path} not found)");
+                    eprintln!("dict: skipping {source_name} (source {} not found)", source_path.display());
                     continue;
                 }
             };
@@ -663,16 +674,17 @@ fn main() {
         }
     }
 
-    for path in &all_paths {
-        let name = path.rsplit('/').next().unwrap();
+    for rel in &all_paths {
+        let name = rel.rsplit('/').next().unwrap();
         if !file_filter.is_empty() && !file_filter.iter().any(|f| f == name) {
             continue;
         }
 
-        let data = match std::fs::read(path) {
+        let path = corpus_path(rel);
+        let data = match std::fs::read(&path) {
             Ok(d) => d,
             Err(_) => {
-                eprintln!("skipping {path}: not found");
+                eprintln!("skipping {}: not found", path.display());
                 continue;
             }
         };
@@ -745,16 +757,17 @@ fn dict_source_name(file_name: &str) -> String {
     base.to_string()
 }
 
-fn dict_source_path(source_name: &str) -> String {
-    match source_name {
-        "hdfs" => "corpus/hdfs.json".into(),
-        "dickens" => "corpus/dickens.txt".into(),
-        "xml_collection" => "corpus/xml_collection.xml".into(),
-        "reymont" => "corpus/reymont.pdf".into(),
-        "compression_1k" => "corpus/compression_1k.txt".into(),
-        "compression_34k" => "corpus/compression_34k.txt".into(),
-        "compression_65k" => "corpus/compression_65k.txt".into(),
-        "compression_66k_JSON" => "corpus/compression_66k_JSON.txt".into(),
-        other => format!("corpus/silesia/{other}"),
-    }
+fn dict_source_path(source_name: &str) -> PathBuf {
+    let rel = match source_name {
+        "hdfs" => "corpus/hdfs.json",
+        "dickens" => "corpus/dickens.txt",
+        "xml_collection" => "corpus/xml_collection.xml",
+        "reymont" => "corpus/reymont.pdf",
+        "compression_1k" => "corpus/compression_1k.txt",
+        "compression_34k" => "corpus/compression_34k.txt",
+        "compression_65k" => "corpus/compression_65k.txt",
+        "compression_66k_JSON" => "corpus/compression_66k_JSON.txt",
+        _ => return corpus_path(&format!("corpus/silesia/{source_name}")),
+    };
+    corpus_path(rel)
 }
