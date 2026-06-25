@@ -171,7 +171,7 @@ pub(crate) fn decompress_frame(
 ) -> Result<usize, DecompressError> {
     let header = parse_frame_header(input)?;
 
-    if header.window_size > MAX_WINDOW_SIZE {
+    if header.window_size > MAX_WINDOW_SIZE && !header.single_segment {
         return Err(DecompressError::WindowTooLarge {
             requested: header.window_size,
             max: MAX_WINDOW_SIZE,

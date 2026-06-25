@@ -5,6 +5,8 @@ use std::io::{self, Write};
 use crate::block_encoder::{self, BlockEncodeWorkspace};
 use crate::dfast;
 use crate::fast;
+#[cfg(feature = "ldm")]
+use crate::ldm::LdmState;
 use crate::strategy::{self, LevelParams, Strategy};
 use zrip_core::Sequence;
 use zrip_core::dict::Dictionary;
@@ -45,43 +47,55 @@ pub struct FrameEncoder<W: Write> {
     first_block: bool,
     hash_table: Vec<u32>,
     hash_long: Vec<u32>,
-    dict_hash: Vec<u32>,
     sequences: Vec<Sequence>,
-    combined: Vec<u8>,
     block_out: Vec<u8>,
+    window_buf: Vec<u8>,
+    #[cfg(feature = "ldm")]
+    ldm_state: Option<LdmState>,
 }
 
 impl<W: Write> FrameEncoder<W> {
     /// Creates a new streaming encoder at the given level (-7..=4).
     pub fn new(writer: W, level: i32) -> Result<Self, CompressError> {
         let params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
-        let (hash_table, hash_long) = alloc_hash_tables(&params);
-        Ok(Self {
-            inner: writer,
-            params,
-            buffer: Vec::new(),
-            rep_offsets: [1, 4, 8],
-            hasher: Xxh64State::new(0),
-            header_written: false,
-            finished: false,
-            workspace: BlockEncodeWorkspace::new(),
-            dict: None,
-            first_block: false,
-            hash_table,
-            hash_long,
-            dict_hash: Vec::new(),
-            sequences: Vec::new(),
-            combined: Vec::new(),
-            block_out: Vec::new(),
-        })
+        Self::from_params(writer, params, None)
+    }
+
+    /// Creates a new streaming encoder with [`Options`](strategy::Options)
+    /// for large windows and/or LDM.
+    pub fn with_options(
+        writer: W,
+        level: i32,
+        opts: &strategy::Options,
+    ) -> Result<Self, CompressError> {
+        let mut params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
+        strategy::apply_options(&mut params, opts);
+        Self::from_params(writer, params, None)
     }
 
     /// Creates a new streaming encoder with a dictionary at the given level (-7..=4).
     pub fn with_dict(writer: W, level: i32, dict: Dictionary) -> Result<Self, CompressError> {
         let params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
+        Self::from_params(writer, params, Some(dict))
+    }
+
+    #[allow(clippy::unnecessary_wraps)]
+    fn from_params(
+        writer: W,
+        params: LevelParams,
+        dict: Option<Dictionary>,
+    ) -> Result<Self, CompressError> {
         let (hash_table, hash_long) = alloc_hash_tables(&params);
-        let dict_hash = vec![0u32; hash_table.len()];
-        let rep_offsets = *dict.rep_offsets();
+        let (rep_offsets, first_block) = match &dict {
+            Some(d) => (*d.rep_offsets(), true),
+            None => ([1, 4, 8], false),
+        };
+        let mut window_buf = Vec::new();
+        if let Some(ref d) = dict {
+            window_buf.extend_from_slice(d.content());
+        }
+        #[cfg(feature = "ldm")]
+        let ldm_state = params.ldm_params.as_ref().map(LdmState::new);
         Ok(Self {
             inner: writer,
             params,
@@ -91,14 +105,15 @@ impl<W: Write> FrameEncoder<W> {
             header_written: false,
             finished: false,
             workspace: BlockEncodeWorkspace::new(),
-            dict: Some(dict),
-            first_block: true,
+            dict,
+            first_block,
             hash_table,
             hash_long,
-            dict_hash,
             sequences: Vec::new(),
-            combined: Vec::new(),
             block_out: Vec::new(),
+            window_buf,
+            #[cfg(feature = "ldm")]
+            ldm_state,
         })
     }
 
@@ -125,6 +140,14 @@ impl<W: Write> FrameEncoder<W> {
         };
         self.hasher = Xxh64State::new(0);
         self.workspace.prev_huffman = None;
+        self.window_buf.clear();
+        if let Some(ref d) = self.dict {
+            self.window_buf.extend_from_slice(d.content());
+        }
+        #[cfg(feature = "ldm")]
+        if let Some(ref mut ldm) = self.ldm_state {
+            ldm.reset();
+        }
         Ok(old)
     }
 
@@ -200,52 +223,71 @@ impl<W: Write> FrameEncoder<W> {
         }
 
         let chunk = core::mem::take(&mut self.buffer);
+        let seed_dict = self.first_block && self.dict.is_some();
+
+        let plen = self.window_buf.len();
+        self.window_buf.extend_from_slice(&chunk);
 
         self.block_out.clear();
         self.block_out.reserve(chunk.len() + 32);
         if crate::block_looks_incompressible(&chunk) {
             block_encoder::encode_raw_block(&chunk, last, &mut self.block_out);
         } else {
-            let use_prefix = self.first_block && self.dict.is_some();
-            if use_prefix {
-                let prefix = self.dict.as_ref().unwrap().content();
+            if seed_dict {
                 match self.params.strategy {
                     Strategy::Fast => {
-                        fast::compress_fast_with_prefix_reuse(
-                            &chunk,
-                            &self.params,
-                            &self.rep_offsets,
-                            prefix,
-                            &mut self.dict_hash,
+                        fast::prefill_hash_table(
+                            &self.window_buf,
+                            plen,
+                            self.params.hash_log,
                             &mut self.hash_table,
-                            &mut self.sequences,
-                            &mut self.combined,
                         );
                     }
                     Strategy::DFast => {
-                        dfast::compress_dfast_with_prefix_reuse(
-                            &chunk,
-                            &self.params,
-                            &self.rep_offsets,
-                            prefix,
+                        dfast::prefill_hash_tables(
+                            &self.window_buf,
+                            plen,
+                            self.params.hash_log,
+                            self.params.chain_log,
+                            self.params.min_match,
                             &mut self.hash_table,
                             &mut self.hash_long,
-                            &mut self.sequences,
-                            &mut self.combined,
                         );
                     }
                 }
-            } else {
+            } else if plen == 0 {
                 self.hash_table.fill(0);
                 if !self.hash_long.is_empty() {
                     self.hash_long.fill(0);
                 }
+            }
+
+            #[cfg(feature = "ldm")]
+            let used_ldm = if let Some(ref mut ldm) = self.ldm_state {
+                ldm.compress_block(
+                    &self.window_buf,
+                    plen,
+                    self.window_buf.len(),
+                    &self.params,
+                    &self.rep_offsets,
+                    &mut self.hash_table,
+                    &mut self.hash_long,
+                    &mut self.sequences,
+                );
+                true
+            } else {
+                false
+            };
+            #[cfg(not(feature = "ldm"))]
+            let used_ldm = false;
+
+            if !used_ldm {
                 match self.params.strategy {
                     Strategy::Fast => {
                         fast::compress_fast_block(
-                            &chunk,
-                            0,
-                            chunk.len(),
+                            &self.window_buf,
+                            plen,
+                            self.window_buf.len(),
                             &self.params,
                             &self.rep_offsets,
                             &mut self.hash_table,
@@ -254,9 +296,9 @@ impl<W: Write> FrameEncoder<W> {
                     }
                     Strategy::DFast => {
                         dfast::compress_dfast_block(
-                            &chunk,
-                            0,
-                            chunk.len(),
+                            &self.window_buf,
+                            plen,
+                            self.window_buf.len(),
                             &self.params,
                             &self.rep_offsets,
                             &mut self.hash_table,
@@ -266,6 +308,7 @@ impl<W: Write> FrameEncoder<W> {
                     }
                 }
             }
+
             if self.params.force_raw_literals {
                 block_encoder::encode_compressed_block_raw(
                     &chunk,
@@ -287,6 +330,21 @@ impl<W: Write> FrameEncoder<W> {
             }
         }
 
+        let window_size = 1usize << self.params.window_log;
+        if self.window_buf.len() > window_size * 2 {
+            let shift = self.window_buf.len() - window_size;
+            reduce_hash_table(&mut self.hash_table, shift as u32);
+            if !self.hash_long.is_empty() {
+                reduce_hash_table(&mut self.hash_long, shift as u32);
+            }
+            #[cfg(feature = "ldm")]
+            if let Some(ref mut ldm) = self.ldm_state {
+                ldm.reduce_positions(shift as u32);
+            }
+            self.window_buf.copy_within(shift.., 0);
+            self.window_buf.truncate(window_size);
+        }
+
         self.first_block = false;
         self.inner.write_all(&self.block_out)?;
         Ok(())
@@ -300,6 +358,16 @@ fn alloc_hash_tables(params: &LevelParams) -> (Vec<u32>, Vec<u32>) {
             vec![0u32; 1usize << params.chain_log],
             vec![0u32; 1usize << params.hash_log],
         ),
+    }
+}
+
+fn reduce_hash_table(table: &mut [u32], shift: u32) {
+    for entry in table.iter_mut() {
+        if *entry < shift {
+            *entry = 0;
+        } else {
+            *entry -= shift;
+        }
     }
 }
 

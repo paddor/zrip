@@ -10,8 +10,8 @@ use crate::exec::decode_execute_sequences;
 use zrip_core::block::{BlockType, parse_block_header};
 use zrip_core::dict::Dictionary;
 use zrip_core::error::DecompressError;
-use zrip_core::frame::MAX_BLOCK_SIZE;
 use zrip_core::frame::header::parse_frame_header;
+use zrip_core::frame::{MAX_BLOCK_SIZE, MAX_WINDOW_SIZE};
 use zrip_core::fse::{promote_ll_table, promote_ml_table, promote_of_table};
 use zrip_core::xxhash::Xxh64State;
 
@@ -69,6 +69,8 @@ pub struct FrameDecoder<R: Read> {
     frame_content_size: Option<u64>,
     frame_bytes: usize,
     dict: Option<Dictionary>,
+    decode_history: Vec<u8>,
+    window_size: usize,
 }
 
 impl<R: Read> FrameDecoder<R> {
@@ -95,6 +97,8 @@ impl<R: Read> FrameDecoder<R> {
             frame_content_size: None,
             frame_bytes: 0,
             dict: None,
+            decode_history: Vec::new(),
+            window_size: 0,
         }
     }
 
@@ -121,6 +125,8 @@ impl<R: Read> FrameDecoder<R> {
             frame_content_size: None,
             frame_bytes: 0,
             dict: Some(dict),
+            decode_history: Vec::new(),
+            window_size: 0,
         }
     }
 
@@ -144,6 +150,8 @@ impl<R: Read> FrameDecoder<R> {
         self.bytes_output = 0;
         self.frame_content_size = None;
         self.frame_bytes = 0;
+        self.decode_history.clear();
+        self.window_size = 0;
         old
     }
 
@@ -247,6 +255,22 @@ impl<R: Read> FrameDecoder<R> {
             }
         }
 
+        let window_size = if header.window_size > MAX_WINDOW_SIZE {
+            if header.single_segment {
+                MAX_WINDOW_SIZE as usize
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    DecompressError::WindowTooLarge {
+                        requested: header.window_size,
+                        max: MAX_WINDOW_SIZE,
+                    },
+                ));
+            }
+        } else {
+            header.window_size as usize
+        };
+
         if let Some(fcs) = header.frame_content_size {
             if fcs as usize > self.max_output {
                 return Err(io::Error::new(
@@ -256,6 +280,8 @@ impl<R: Read> FrameDecoder<R> {
             }
         }
 
+        self.window_size = window_size;
+        self.decode_history.clear();
         self.frame_content_size = header.frame_content_size;
         self.frame_bytes = 0;
         self.content_checksum = header.content_checksum;
@@ -267,6 +293,7 @@ impl<R: Read> FrameDecoder<R> {
 
         if let Some(ref d) = self.dict {
             self.rep_offsets = *d.rep_offsets();
+            self.decode_history.extend_from_slice(d.content());
             let mut st = SequenceDecodeTables::new_default();
             if let Some((t, l)) = d.of_table() {
                 st.of_table = promote_of_table(t);
@@ -365,6 +392,15 @@ impl<R: Read> FrameDecoder<R> {
             ));
         }
 
+        if self.window_size > 0 {
+            self.decode_history.extend_from_slice(&self.output_buf);
+            if self.decode_history.len() > self.window_size {
+                let start = self.decode_history.len() - self.window_size;
+                self.decode_history.copy_within(start.., 0);
+                self.decode_history.truncate(self.window_size);
+            }
+        }
+
         self.state = if last {
             if let Some(fcs) = self.frame_content_size {
                 if self.frame_bytes as u64 != fcs {
@@ -387,10 +423,7 @@ impl<R: Read> FrameDecoder<R> {
     }
 
     fn decode_compressed_block(&mut self, block_size: usize) -> io::Result<()> {
-        let dict_history: &[u8] = match &self.dict {
-            Some(d) => d.content(),
-            None => &[],
-        };
+        let history: &[u8] = &self.decode_history;
         let block_data = &self.read_buf[..block_size];
 
         let lit_consumed = decode_literals_ws(block_data, &mut self.ws)
@@ -429,7 +462,7 @@ impl<R: Read> FrameDecoder<R> {
                     &mut self.rep_offsets,
                     &self.ws.literal_buf,
                     &mut self.output_buf,
-                    dict_history,
+                    history,
                 )
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 if self.output_buf.len() - before > MAX_BLOCK_SIZE {
@@ -453,7 +486,31 @@ impl<R: Read> FrameDecoder<R> {
                     &mut self.rep_offsets,
                     &self.ws.literal_buf,
                     &mut self.output_buf,
-                    dict_history,
+                    history,
+                )
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                if self.output_buf.len() - before > MAX_BLOCK_SIZE {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        DecompressError::BlockTooLarge,
+                    ));
+                }
+                return Ok(());
+            }
+        }
+
+        #[cfg(all(target_arch = "wasm32", not(feature = "paranoid")))]
+        {
+            if zrip_core::simd::cpu_tier() >= CpuTier::Wasm32Simd128 {
+                let before = self.output_buf.len();
+                crate::simd_decode::wasm32::decode::decode_execute_wasm32_safe(
+                    seq_data,
+                    num_sequences,
+                    &self.seq_tables,
+                    &mut self.rep_offsets,
+                    &self.ws.literal_buf,
+                    &mut self.output_buf,
+                    history,
                 )
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 if self.output_buf.len() - before > MAX_BLOCK_SIZE {
@@ -498,7 +555,7 @@ impl<R: Read> FrameDecoder<R> {
             &mut self.rep_offsets,
             &self.ws.literal_buf,
             &mut self.output_buf,
-            dict_history,
+            history,
         )
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         if self.output_buf.len() - before > MAX_BLOCK_SIZE {

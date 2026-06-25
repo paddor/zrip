@@ -36,6 +36,9 @@ pub fn cpu_tier() -> CpuTier {
 
 #[cfg(all(feature = "std", not(feature = "paranoid")))]
 pub fn cpu_tier() -> CpuTier {
+    if cfg!(miri) {
+        return CpuTier::Scalar;
+    }
     *CPU_TIER.get_or_init(detect_cpu_tier)
 }
 

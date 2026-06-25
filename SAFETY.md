@@ -3,7 +3,7 @@
 ## Unsafe boundary
 
 All compression and decompression logic is `#[forbid(unsafe_code)]`. The remaining
-unsafe (~210 blocks across 14 internal modules) performs unchecked memory copies,
+unsafe (~250 blocks across 15 internal modules) performs unchecked memory copies,
 unaligned reads, SIMD intrinsics, and `Vec::set_len` calls whose bounds are proven
 by safe-region margins computed in the algorithm code. Every unsafe block has a
 `debug_assert!` guard. No `unsafe` is exposed in the public API.
@@ -14,13 +14,13 @@ Unsafe is confined to three categories of leaf modules:
    `#[inline(always)]` wrappers around `get_unchecked`, `read_unaligned`,
    `set_len`, and `copy_nonoverlapping`.
 
-2. **`simd/`** submodules (`scalar.rs`, `copy.rs`, `x86_64/*.rs`, `aarch64/*.rs`):
-   intrinsics and raw pointer arithmetic for wildcopy, copy-match, and
-   common-prefix-length.
+2. **`simd/`** submodules (`scalar.rs`, `copy.rs`, `x86_64/*.rs`, `aarch64/*.rs`,
+   `wasm32/*.rs`): intrinsics and raw pointer arithmetic for wildcopy,
+   copy-match, and common-prefix-length.
 
 3. **`simd_decode/`** SIMD sequence decoders (`x86_64/decode.rs`,
-   `aarch64/decode.rs`): fused FSE decode + sequence execution with inline
-   SIMD operations.
+   `aarch64/decode.rs`, `wasm32/decode.rs`): fused FSE decode + sequence
+   execution with inline SIMD operations.
 
 ## `paranoid` feature
 
@@ -31,7 +31,7 @@ on all four crates. Every unsafe block is replaced by a safe alternative:
 |:---------|:--------|:---------|
 | Unchecked indexing | `get_unchecked`, `read_unaligned` | Direct indexing, `from_le_bytes` |
 | Vec length | `set_len` | `resize` |
-| SIMD intrinsics | SSE2/AVX2/BMI2/NEON kernels | Gated out; `cpu_tier()` returns `Scalar` |
+| SIMD intrinsics | SSE2/AVX2/BMI2/NEON/WASM SIMD128 kernels | Gated out; `cpu_tier()` returns `Scalar` |
 | SIMD sequence decoder | Fused FSE+copy with intrinsics | Gated out; scalar `exec.rs` handles all blocks |
 | Huffman 4-stream | Interleaved pointer-based decode | Sequential per-stream decode via `decode_stream_tail` |
 | Wildcopy/copy-match | Raw pointer arithmetic | `extend_from_slice`, `copy_within`, byte loop |

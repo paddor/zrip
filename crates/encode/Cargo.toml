@@ -16,6 +16,7 @@ default = ["std"]
 std = ["alloc", "zrip-core/std"]
 alloc = ["zrip-core/alloc"]
 frame = ["std"]
+ldm = ["std"]
 nightly = ["zrip-core/nightly"]
 paranoid = ["zrip-core/paranoid"]
 

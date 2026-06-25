@@ -1,12 +1,8 @@
 .DS_Store
 /info/
-/target/
-/fuzz/target/
-/fuzz/corpus/
+target/
+corpus/
 /fuzz/artifacts/
-/bench/corpus/
-/bench/target/
 Cargo.lock
 /jsr/src/pkg/
-/jsr/wasm/target/
 /jsr/deno.lock

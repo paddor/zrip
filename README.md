@@ -19,9 +19,9 @@ modules with `debug_assert!` guards. The `paranoid` feature eliminates all
 unsafe entirely, compiling pure safe Rust with zero SIMD intrinsics. See
 [SAFETY.md](SAFETY.md).
 
-**Small codebase.** ~12k lines of Rust, roughly a fifth of full-spec
-implementations. Levels above 4 add complexity for compression ratios
-that only matter in archival storage, not transfer pipelines.
+**Small codebase.** ~14k lines of Rust. Levels above 4 add complexity for
+compression ratios that only matter in archival storage, not transfer
+pipelines.
 
 **`no_std` + `alloc`.** Works in embedded and kernel contexts with the `alloc`
 feature; `frame` requires `std`.
@@ -102,6 +102,36 @@ enc.write_all(b"second frame")?;
 let second = enc.finish()?;
 ```
 
+### Large-window and long distance matching
+
+The normal match finder operates within a sliding window (512 KiB at L1).
+LDM finds matches at distances up to `1 << window_log` bytes by sampling
+positions into a separate hash table. Useful for data with long-range
+repeats: log files, database dumps, source archives. See
+[DESIGN.md](DESIGN.md) for how LDM works.
+
+```rust
+let opts = zrip::Options::default().window_log(24).ldm(true);
+let compressed = zrip::compress_opts(input, 1, &opts)?;
+```
+
+Streaming with LDM:
+
+```rust
+use std::io::Write;
+let opts = zrip::Options::default().window_log(24).ldm(true);
+let mut enc = zrip::FrameEncoder::with_options(Vec::new(), 1, &opts)?;
+enc.write_all(input)?;
+let compressed = enc.finish()?;
+```
+
+`window_log` controls the maximum match distance (24 = 16 MiB, 27 = 128 MiB).
+The main cost is memory: the encoder allocates an 8 MiB LDM hash table plus
+a window buffer of `1 << window_log` bytes, and the decoder allocates a
+window buffer of the same size (declared in the frame header). At
+`window_log=27` that is ~136 MiB on each side. On data without long-range
+repeats, LDM adds overhead with no ratio benefit.
+
 ### Dictionary compression
 
 ```rust
@@ -145,6 +175,7 @@ let dict = train_dict_fastcover(&samples, 16384, FastCoverParams::default());
 | `std`          | yes     | Enables `CompressContext`, `DecompressContext` |
 | `frame`        | yes     | Frame header parsing and writing; implies `std` |
 | `alloc`        | yes     | `no_std` + heap via `alloc` crate              |
+| `ldm`          | yes     | Long distance matching for large-window compression |
 | `dict_builder` | no      | COVER/FastCOVER dictionary training            |
 | `paranoid`     | no      | Pure safe Rust: no SIMD, no unchecked indexing  |
 | `nightly`      | no      | `#[optimize]` attributes on hot functions      |

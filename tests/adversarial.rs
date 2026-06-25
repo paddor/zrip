@@ -1,5 +1,9 @@
 // Adversarial/corruption tests. All use zrip-only (no C zstd).
 
+#[cfg(not(miri))]
+const KNUTH: u32 = 0x9E37_79B1;
+
+#[cfg(not(miri))]
 #[test]
 fn decompress_garbage_bytes_never_panics() {
     for seed in 0u64..500 {
@@ -16,6 +20,7 @@ fn decompress_garbage_bytes_never_panics() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_valid_frame_with_corrupt_blocks_never_panics() {
     let magic = [0x28, 0xB5, 0x2F, 0xFD];
@@ -24,7 +29,7 @@ fn decompress_valid_frame_with_corrupt_blocks_never_panics() {
         let garbage: Vec<u8> = (0..garbage_len)
             .map(|i| {
                 let x = seed
-                    .wrapping_mul(2_654_435_761)
+                    .wrapping_mul(u64::from(KNUTH))
                     .wrapping_add(i as u64 * 1_103_515_245);
                 (x >> 24) as u8
             })
@@ -36,6 +41,7 @@ fn decompress_valid_frame_with_corrupt_blocks_never_panics() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_bit_flipped_frames_never_panic() {
     let original: Vec<u8> = b"the quick brown fox jumps over the lazy dog "
@@ -55,6 +61,7 @@ fn decompress_bit_flipped_frames_never_panic() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_truncated_at_every_byte_never_panics() {
     let original: Vec<u8> = b"ABCDEFGHIJKLMNOP"
@@ -69,10 +76,11 @@ fn decompress_truncated_at_every_byte_never_panics() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_two_byte_flips_never_panic() {
     let original: Vec<u8> = (0..2000u32)
-        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
         .collect();
     let compressed = zrip::compress(&original, 1).unwrap();
     let len = compressed.len();
@@ -88,6 +96,7 @@ fn decompress_two_byte_flips_never_panic() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_zero_filled_after_header_never_panics() {
     let original: Vec<u8> = b"hello world ".iter().cycle().take(4000).copied().collect();
@@ -102,6 +111,7 @@ fn decompress_zero_filled_after_header_never_panics() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_ff_filled_after_header_never_panics() {
     let original: Vec<u8> = b"test data ".iter().cycle().take(4000).copied().collect();
@@ -200,6 +210,7 @@ fn decompress_multiframe_corrupt_never_panics() {
 
 // ===== Sequence/literal corruption =====
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_corrupt_sequence_section_never_panics() {
     let original: Vec<u8> = b"ABCDEFGHIJKLMNOP"
@@ -220,10 +231,11 @@ fn decompress_corrupt_sequence_section_never_panics() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_corrupt_literals_section_never_panics() {
     let original: Vec<u8> = (0..8000u32)
-        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
         .collect();
     let compressed = zrip::compress(&original, 1).unwrap();
 
@@ -239,6 +251,7 @@ fn decompress_corrupt_literals_section_never_panics() {
 
 // ===== Near-valid frames =====
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_frame_content_size_mismatch_never_panics() {
     let original = b"test data for fcs mismatch";

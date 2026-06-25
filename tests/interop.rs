@@ -1,6 +1,9 @@
 // C zstd cross-validation tests. Skipped under Miri (FFI unsupported).
 #![cfg(all(feature = "std", not(miri)))]
 
+const BLOCK: usize = zrip::frame::MAX_BLOCK_SIZE; // 128 KiB
+const KNUTH: u32 = 0x9E37_79B1;
+
 // ===== Encoder: zrip compress -> C decompress =====
 
 #[test]
@@ -25,7 +28,7 @@ fn roundtrip_all_levels_c_cross_validate() {
 #[test]
 fn roundtrip_all_levels_random_c_cross_validate() {
     let original: Vec<u8> = (0..100_000u32)
-        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
         .collect();
     for level in [-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4] {
         let compressed = zrip::compress(&original, level).unwrap();
@@ -104,13 +107,13 @@ fn roundtrip_all_levels_all_patterns_c_cross_validate() {
 #[test]
 fn roundtrip_exact_block_fill_c_cross_validate() {
     for delta in [-2i32, -1, 0, 1, 2] {
-        let size = 128 * 1024 + delta;
+        let size = BLOCK as i32 + delta;
         if size <= 0 {
             continue;
         }
         let size = size as usize;
         let data: Vec<u8> = (0..size as u32)
-            .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
+            .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
             .collect();
         let compressed = zrip::compress(&data, 1).unwrap();
         let c_dec = zstd::decode_all(&compressed[..]).unwrap();
@@ -251,13 +254,7 @@ fn roundtrip_concatenated_frames_c_cross_validate() {
 
 #[test]
 fn roundtrip_block_boundary_sizes_c_cross_validate() {
-    for size in [
-        128 * 1024 - 1,
-        128 * 1024,
-        128 * 1024 + 1,
-        256 * 1024,
-        256 * 1024 + 1,
-    ] {
+    for size in [BLOCK - 1, BLOCK, BLOCK + 1, 2 * BLOCK, 2 * BLOCK + 1] {
         let original: Vec<u8> = b"ABCDEFGH".iter().cycle().take(size).copied().collect();
         let compressed = zrip::compress(&original, 1).unwrap();
         let decompressed =
@@ -302,6 +299,8 @@ fn compress_with_params_roundtrip_c_cross_validate() {
         target_length: 4,
         search_strength: 7,
         force_raw_literals: false,
+        #[cfg(feature = "ldm")]
+        ldm_params: None,
     };
     let compressed = zrip::compress_with_params(&data, &params).unwrap();
     let c_ref = zstd::decode_all(&compressed[..]).unwrap();
@@ -346,7 +345,7 @@ fn rep_offset2_rotation_cross_validate() {
 #[test]
 fn roundtrip_negative_levels_cross_validate() {
     let data: Vec<u8> = (0..100_000u32)
-        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
         .collect();
     for level in [-7, -6, -5, -4, -3, -2, -1] {
         let compressed = zrip::compress(&data, level).unwrap();
@@ -454,7 +453,7 @@ fn decompress_c_zstd_negative_levels() {
 #[test]
 fn decompress_c_zstd_random() {
     let original: Vec<u8> = (0..100_000u32)
-        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
         .collect();
     for level in [1, 3, 5, 9] {
         let compressed = zstd::encode_all(&original[..], level).unwrap();
@@ -549,9 +548,9 @@ fn decompress_c_all_levels_all_patterns() {
 
 #[test]
 fn decompress_c_block_boundary_sizes() {
-    for size in [128 * 1024 - 1, 128 * 1024, 128 * 1024 + 1, 200_000] {
+    for size in [BLOCK - 1, BLOCK, BLOCK + 1, 200_000] {
         let original: Vec<u8> = (0..size as u32)
-            .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
+            .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
             .collect();
         let compressed = zstd::encode_all(&original[..], 1).unwrap();
         let decompressed =
@@ -565,7 +564,7 @@ fn decompress_c_high_entropy() {
     let original: Vec<u8> = (0..50_000u32)
         .map(|i| {
             let x = i
-                .wrapping_mul(2_654_435_761)
+                .wrapping_mul(KNUTH)
                 .wrapping_add(i.wrapping_mul(1_103_515_245));
             (x >> 16) as u8
         })
@@ -608,7 +607,7 @@ fn decompress_c_alternating_compressible_incompressible() {
         if i % 2 == 0 {
             original.extend(std::iter::repeat_n(0x42u8, 250));
         } else {
-            original.extend((0..250u32).map(|j| ((j + i).wrapping_mul(2_654_435_761) >> 24) as u8));
+            original.extend((0..250u32).map(|j| ((j + i).wrapping_mul(KNUTH) >> 24) as u8));
         }
     }
     for level in [1, 3, 9] {
@@ -629,7 +628,7 @@ fn decompress_c_size_sweep() {
                 continue;
             }
             let original: Vec<u8> = (0..s as u32)
-                .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
+                .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
                 .collect();
             let compressed = zstd::encode_all(&original[..], 1).unwrap();
             let decompressed =
@@ -642,7 +641,7 @@ fn decompress_c_size_sweep() {
 #[test]
 fn decompress_c_multiblock_frame() {
     let original: Vec<u8> = (0..200_000u32)
-        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
         .collect();
     for level in [1, 3, 9, 19] {
         let compressed = zstd::encode_all(&original[..], level).unwrap();
@@ -670,8 +669,7 @@ fn decompress_c_long_literal_lengths() {
     let mut data = Vec::with_capacity(50_000);
     for i in 0..50 {
         data.extend(
-            (0..500u32)
-                .map(|j| ((j.wrapping_add(i * 500).wrapping_mul(2_654_435_761)) >> 16) as u8),
+            (0..500u32).map(|j| ((j.wrapping_add(i * 500).wrapping_mul(KNUTH)) >> 16) as u8),
         );
         data.extend(std::iter::repeat_n(0x42u8, 500));
     }
@@ -830,7 +828,7 @@ fn decompress_c_4stream_segment_boundary_sizes() {
         997, 998, 999, 1000, 1001, 1002, 1003, 4093, 4094, 4095, 4096, 4097, 255, 256, 257,
     ] {
         let data: Vec<u8> = (0..output_size)
-            .map(|i| ((i as u32).wrapping_mul(2_654_435_761) >> 24) as u8)
+            .map(|i| ((i as u32).wrapping_mul(KNUTH) >> 24) as u8)
             .collect();
         let compressed = zstd::encode_all(&data[..], 1).unwrap();
         let decompressed =
