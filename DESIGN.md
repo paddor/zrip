@@ -94,13 +94,14 @@ a raw block is emitted.
 
 `crates/core/src/simd/mod.rs` defines a `CpuTier` enum:
 
-| Tier | x86_64 | aarch64 |
-|------|--------|---------|
-| Scalar | Always | Always |
-| Sse2 | `is_x86_feature_detected!` | n/a |
-| Bmi2 | `is_x86_feature_detected!` | n/a |
-| Avx2 | `is_x86_feature_detected!` | n/a |
-| Neon | n/a | `is_aarch64_feature_detected!` |
+| Tier | x86_64 | aarch64 | wasm32 |
+|------|--------|---------|--------|
+| Scalar | Always | Always | Always |
+| Sse2 | `is_x86_feature_detected!` | n/a | n/a |
+| Bmi2 | `is_x86_feature_detected!` | n/a | n/a |
+| Avx2 | `is_x86_feature_detected!` | n/a | n/a |
+| Neon | n/a | `is_aarch64_feature_detected!` | n/a |
+| Wasm32Simd128 | n/a | n/a | `cfg!(target_feature = "simd128")` |
 
 With `std`: runtime detection cached in `OnceLock<CpuTier>`. Without `std`:
 compile-time tier from `cfg!(target_feature)`.
@@ -112,7 +113,8 @@ prefetch, not in the match-finding loop.
 
 ## Fused SIMD sequence decoder
 
-`crates/decode/src/simd_decode/x86_64/decode.rs` and `aarch64/decode.rs`.
+`crates/decode/src/simd_decode/x86_64/decode.rs`, `aarch64/decode.rs`, and
+`wasm32/decode.rs`.
 
 A single function fuses FSE state machine + sequence execution + literal/match
 copy. The inline bitstream reader uses macros (`read_bits!`, `refill_fast!`)
@@ -148,7 +150,7 @@ Slow path finishes remaining symbols one stream at a time near exhaustion.
 crate roots. Each `primitives.rs` module has dual `#[cfg(feature = "paranoid")]`
 / `#[cfg(not(feature = "paranoid"))]` bodies: the paranoid path uses direct
 indexing, `from_le_bytes`, `resize`, and `extend_from_slice` in place of
-unchecked operations. SIMD modules (`core/simd/x86_64/`, `core/simd/aarch64/`,
+unchecked operations. SIMD modules (`core/simd/x86_64/`, `core/simd/aarch64/`, `core/simd/wasm32/`,
 `decode/simd_decode/`) are gated out entirely. `cpu_tier()` returns
 `CpuTier::Scalar`, routing all blocks through `exec.rs`. The Huffman 4-stream
 interleaved decoder is replaced by sequential per-stream decode via
@@ -157,7 +159,7 @@ interleaved decoder is replaced by sequential per-stream decode via
 ## Unsafe boundary
 
 All compression and decompression logic is `#[forbid(unsafe_code)]` (30 modules).
-Unsafe is confined to 14 leaf modules in three categories:
+Unsafe is confined to 15 leaf modules in three categories:
 
 1. **`primitives.rs`** (one per crate): `#[inline(always)]` wrappers around
    `get_unchecked`, `read_unaligned`, `set_len`, `copy_nonoverlapping`. Each
@@ -206,12 +208,93 @@ includes magic, descriptor (with content checksum flag), window descriptor, and
 optional dict ID. `finish()` flushes the final block with `last=true` and writes
 the XXH64 content checksum (lower 32 bits).
 
+Cross-block matching: the encoder maintains a persistent window buffer
+(`window_buf`) containing previous blocks' output. Hash table positions reference
+into this combined view, allowing matches across block boundaries. When the
+window buffer grows past the window size, positions are shifted and the buffer
+is compacted.
+
+`Options` API controls window size and LDM: `Options::default().window_log(24).ldm(true)`.
+`FrameEncoder::with_options(writer, level, &opts)` applies these to the frame.
+
 `reset()` finishes the current frame, swaps the writer, and reuses all internal
 buffers (hash tables, workspace, block encoder).
 
 First block with a dictionary uses `compress_fast_with_prefix_reuse` /
 `compress_dfast_with_prefix_reuse`. Subsequent blocks clear hash tables and run
 standard block compression.
+
+## Long distance matching (LDM)
+
+`crates/encode/src/ldm.rs`. Two-pass integration with Fast/DFast strategies.
+
+### Gear hash sampling
+
+The gear hash is a 1-byte-at-a-time rolling hash:
+`rolling = (rolling << 1) + GEAR_TABLE[byte]`, where `GEAR_TABLE` is 256
+random `u64` values. After each byte, `rolling & stop_mask` is checked. When
+it equals zero, the position is a "split point" where LDM samples a candidate.
+`stop_mask` is derived from `hash_rate_log`: it has `hash_rate_log` bits set in
+the upper part of the accumulator, so roughly 1 in `2^hash_rate_log` positions
+trigger a check. At the default `hash_rate_log=6`, about 1 in 64 positions are
+sampled.
+
+The `feed()` method processes input in 4-byte unrolled batches (`LDM_BATCH_SIZE`
+= 64 split points per call) for cache efficiency.
+
+### Hash table
+
+The table stores `LdmEntry` values: `offset: u32` (position in the input) +
+`checksum: u32` (upper 32 bits of xxh64 over `min_match_length` bytes at that
+position). At `hash_log=20`, this is 1M entries = 8 MiB. The table does not
+store input data, so a fixed-size table covers arbitrarily large inputs.
+
+Entries are organized into buckets of `1 << bucket_size_log` slots (default 8).
+The lower bits of the xxh64 select a bucket, the upper 32 bits become the
+checksum. Each bucket has a `u8` write counter in `bucket_offsets[]` that wraps
+with `(counter + 1) & bucket_mask`. This is a per-bucket ring buffer: new
+entries overwrite whichever slot the counter points at, round-robin. No age
+tracking, no LRU.
+
+When a split fires, if an existing entry in the selected bucket has a matching
+checksum, the actual bytes at both positions are compared to confirm a match.
+Backward and forward extension finds the full match length.
+
+### Two-pass compression
+
+First pass: `generate_sequences()` scans the input with the gear hash, probes
+the hash table at each split point, and collects `RawLdmSeq` entries (literal
+length, match length, offset). Second pass: `compress_block()` iterates over
+the LDM sequences. For each gap between LDM matches, the regular Fast or DFast
+compressor runs on that segment and emits short-range sequences. LDM sequences
+and gap-fill sequences are interleaved into the final sequence list.
+
+On the first block, `fill_only()` populates the hash table without searching
+(there is no prior context to match against).
+
+### Parameters
+
+`LdmParams` controls: `hash_log` (table size), `bucket_size_log` (slots per
+bucket), `min_match_length` (minimum bytes for a valid LDM match), and
+`hash_rate_log` (sampling density). `LdmParams::default_for_window_log(wl)`
+computes defaults for a given window size.
+
+### Streaming and cross-block
+
+In streaming mode, `LdmState` persists across blocks: the hash table retains
+entries from previous blocks. `reduce_positions(shift)` subtracts `shift` from
+all stored offsets when the window buffer compacts, discarding entries that
+would point before the new buffer start.
+
+### Memory and decoder impact
+
+The encoder allocates the 8 MiB LDM hash table plus a window buffer of
+`1 << window_log` bytes. The decoder does not know LDM was used. LDM sequences
+are standard zstd sequences with larger offsets. The decoder allocates a window
+buffer matching the `window_size` declared in the frame header, which is set by
+`window_log`. At `window_log=27` this is ~128 MiB on each side.
+
+Enable via `Options::ldm(true)` (requires the `ldm` feature, on by default).
 
 ## Scope
 

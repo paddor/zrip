@@ -8,7 +8,7 @@ edition = "2024"
 paranoid = ["zrip/paranoid"]
 
 [dependencies]
-zrip = { path = "..", features = ["dict_builder"] }
+zrip = { path = "..", features = ["dict_builder", "ldm"] }
 zstd = "0.13"
 zstd-safe = "7"
 binggan = "0.14"

@@ -1,0 +1,14 @@
+[package]
+name = "zrip-bench-wasm"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+zrip = { path = "../.." }
+zstd = { version = "0.13", optional = true }
+
+[features]
+default = []
+czstd = ["zstd"]
+paranoid = ["zrip/paranoid"]

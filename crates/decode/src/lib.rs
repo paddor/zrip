@@ -16,7 +16,11 @@ pub(crate) mod sequences;
 pub mod streaming;
 
 #[cfg(all(
-    any(target_arch = "x86_64", target_arch = "aarch64"),
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    ),
     not(feature = "paranoid")
 ))]
 pub(crate) mod simd_decode;
@@ -35,7 +39,11 @@ use zrip_core::frame::MAX_WINDOW_SIZE;
 use zrip_core::frame::header::parse_frame_header;
 use zrip_core::huffman::HuffmanDecodeEntry;
 #[cfg(all(
-    any(target_arch = "x86_64", target_arch = "aarch64"),
+    any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    ),
     not(feature = "paranoid")
 ))]
 use zrip_core::simd::CpuTier;
@@ -163,7 +171,7 @@ pub(crate) fn decompress_frame(
 ) -> Result<usize, DecompressError> {
     let header = parse_frame_header(input)?;
 
-    if header.window_size > MAX_WINDOW_SIZE {
+    if header.window_size > MAX_WINDOW_SIZE && !header.single_segment {
         return Err(DecompressError::WindowTooLarge {
             requested: header.window_size,
             max: MAX_WINDOW_SIZE,
@@ -411,6 +419,24 @@ fn decode_compressed_block(
             return Ok(());
         }
     }
+    #[cfg(all(target_arch = "wasm32", not(feature = "paranoid")))]
+    {
+        if zrip_core::simd::cpu_tier() >= CpuTier::Wasm32Simd128 {
+            decode_execute_block_wasm32(
+                seq_data,
+                num_sequences,
+                seq_tables,
+                rep_offsets,
+                &ws.literal_buf,
+                output,
+                dict_history,
+            )?;
+            if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
+                return Err(DecompressError::BlockTooLarge);
+            }
+            return Ok(());
+        }
+    }
 
     decode_execute_sequences(
         seq_data,
@@ -460,6 +486,27 @@ fn decode_execute_block_neon(
     history: &[u8],
 ) -> Result<(), DecompressError> {
     crate::simd_decode::aarch64::decode::decode_execute_neon_safe(
+        seq_data,
+        num_sequences,
+        tables,
+        rep_offsets,
+        literals,
+        output,
+        history,
+    )
+}
+
+#[cfg(all(target_arch = "wasm32", not(feature = "paranoid")))]
+fn decode_execute_block_wasm32(
+    seq_data: &[u8],
+    num_sequences: u32,
+    tables: &mut SequenceDecodeTables,
+    rep_offsets: &mut [u32; 3],
+    literals: &[u8],
+    output: &mut Vec<u8>,
+    history: &[u8],
+) -> Result<(), DecompressError> {
+    crate::simd_decode::wasm32::decode::decode_execute_wasm32_safe(
         seq_data,
         num_sequences,
         tables,

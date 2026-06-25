@@ -9,6 +9,28 @@ pub enum Strategy {
     DFast,
 }
 
+/// Parameters for Long Distance Matching.
+#[derive(Debug, Clone, Copy)]
+pub struct LdmParams {
+    pub hash_log: u32,
+    pub bucket_size_log: u32,
+    pub min_match_length: u32,
+    pub hash_rate_log: u32,
+}
+
+impl LdmParams {
+    pub fn default_for_window_log(window_log: u32) -> Self {
+        let hash_log = 20u32.min(window_log.saturating_sub(1));
+        let hash_rate_log = window_log.saturating_sub(hash_log).max(7);
+        Self {
+            hash_log,
+            bucket_size_log: 4,
+            min_match_length: 64,
+            hash_rate_log,
+        }
+    }
+}
+
 /// Compression parameters for a specific level.
 ///
 /// Obtain via [`level_params`] or construct directly for custom tuning.
@@ -25,6 +47,23 @@ pub struct LevelParams {
     pub target_length: u32,
     pub search_strength: u32,
     pub force_raw_literals: bool,
+    #[cfg(feature = "ldm")]
+    pub ldm_params: Option<LdmParams>,
+}
+
+impl LevelParams {
+    #[must_use]
+    pub fn with_window_log(mut self, window_log: u32) -> Self {
+        self.window_log = window_log;
+        self
+    }
+
+    #[cfg(feature = "ldm")]
+    #[must_use]
+    pub fn with_ldm(mut self, params: LdmParams) -> Self {
+        self.ldm_params = Some(params);
+        self
+    }
 }
 
 /// Default compression level used when level 0 is requested.
@@ -74,6 +113,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             target_length: 7,
             search_strength: 7,
             force_raw_literals: true,
+            #[cfg(feature = "ldm")]
+            ldm_params: None,
         },
         -6 => LevelParams {
             strategy: Strategy::Fast,
@@ -85,6 +126,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             target_length: 7,
             search_strength: 7,
             force_raw_literals: false,
+            #[cfg(feature = "ldm")]
+            ldm_params: None,
         },
         -5 => LevelParams {
             strategy: Strategy::Fast,
@@ -96,6 +139,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             target_length: 6,
             search_strength: 7,
             force_raw_literals: false,
+            #[cfg(feature = "ldm")]
+            ldm_params: None,
         },
         -4 => LevelParams {
             strategy: Strategy::Fast,
@@ -107,6 +152,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             target_length: 5,
             search_strength: 7,
             force_raw_literals: false,
+            #[cfg(feature = "ldm")]
+            ldm_params: None,
         },
         -3 => LevelParams {
             strategy: Strategy::Fast,
@@ -118,6 +165,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             target_length: 4,
             search_strength: 7,
             force_raw_literals: false,
+            #[cfg(feature = "ldm")]
+            ldm_params: None,
         },
         -2 => LevelParams {
             strategy: Strategy::Fast,
@@ -129,6 +178,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             target_length: 3,
             search_strength: 7,
             force_raw_literals: false,
+            #[cfg(feature = "ldm")]
+            ldm_params: None,
         },
         -1 => LevelParams {
             strategy: Strategy::Fast,
@@ -140,6 +191,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             target_length: 2,
             search_strength: 7,
             force_raw_literals: false,
+            #[cfg(feature = "ldm")]
+            ldm_params: None,
         },
         1 => LevelParams {
             strategy: Strategy::Fast,
@@ -151,6 +204,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             target_length: 1,
             search_strength: 8,
             force_raw_literals: false,
+            #[cfg(feature = "ldm")]
+            ldm_params: None,
         },
         2 => LevelParams {
             strategy: Strategy::Fast,
@@ -162,6 +217,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             target_length: 1,
             search_strength: 8,
             force_raw_literals: false,
+            #[cfg(feature = "ldm")]
+            ldm_params: None,
         },
         3 => LevelParams {
             strategy: Strategy::DFast,
@@ -173,6 +230,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             target_length: 1,
             search_strength: 5,
             force_raw_literals: false,
+            #[cfg(feature = "ldm")]
+            ldm_params: None,
         },
         4 => LevelParams {
             strategy: Strategy::DFast,
@@ -184,7 +243,45 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             target_length: 1,
             search_strength: 6,
             force_raw_literals: false,
+            #[cfg(feature = "ldm")]
+            ldm_params: None,
         },
         _ => return None,
     })
+}
+
+/// Options for large-window and LDM compression, orthogonal to level.
+///
+/// Pass to [`compress_opts`](crate::compress_opts) or
+/// [`FrameEncoder::with_options`](crate::streaming::FrameEncoder::with_options).
+#[derive(Debug, Clone, Default)]
+pub struct Options {
+    pub(crate) window_log: Option<u32>,
+    #[cfg_attr(not(feature = "ldm"), allow(dead_code))]
+    pub(crate) ldm: bool,
+}
+
+impl Options {
+    #[must_use]
+    pub fn window_log(mut self, log: u32) -> Self {
+        self.window_log = Some(log);
+        self
+    }
+
+    #[cfg(feature = "ldm")]
+    #[must_use]
+    pub fn ldm(mut self, enable: bool) -> Self {
+        self.ldm = enable;
+        self
+    }
+}
+
+pub fn apply_options(params: &mut LevelParams, opts: &Options) {
+    if let Some(wl) = opts.window_log {
+        params.window_log = wl;
+    }
+    #[cfg(feature = "ldm")]
+    if opts.ldm {
+        params.ldm_params = Some(LdmParams::default_for_window_log(params.window_log));
+    }
 }

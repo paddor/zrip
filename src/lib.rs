@@ -47,6 +47,18 @@
 //! # }
 //! ```
 //!
+//! # Long distance matching
+//!
+//! For data with long-range repetitions, enable LDM via [`Options`]:
+//!
+//! ```no_run
+//! # #[cfg(feature = "ldm")]
+//! # {
+//! let opts = zrip::Options::default().window_log(24).ldm(true);
+//! let compressed = zrip::compress_opts(b"data with long-range repeats", 1, &opts).unwrap();
+//! # }
+//! ```
+//!
 //! # Buffer reuse
 //!
 //! For repeated compression/decompression, [`CompressContext`] and
@@ -58,6 +70,7 @@
 //! - **`std`** (default): enables `alloc` and standard library support.
 //! - **`alloc`**: `no_std` with heap allocation (`Vec`, etc.).
 //! - **`frame`** (default): frame header parsing/writing; implies `std`.
+//! - **`ldm`** (default): long distance matching for large-window compression.
 //! - **`dict_builder`**: COVER/FastCOVER dictionary training.
 //! - **`nightly`**: `#[optimize]` attributes for hot paths.
 
@@ -76,7 +89,7 @@ pub use zrip_core::dict;
 #[cfg(feature = "alloc")]
 pub use zrip_core::dict::Dictionary;
 #[cfg(feature = "alloc")]
-pub use zrip_encode::strategy::{DEFAULT_LEVEL, LevelParams};
+pub use zrip_encode::strategy::{DEFAULT_LEVEL, LdmParams, LevelParams, Options};
 
 pub const DEFAULT_DECOMPRESS_LIMIT: usize = usize::MAX;
 pub use zrip_core::SAFE_DECOMPRESS_LIMIT;
@@ -126,6 +139,15 @@ pub fn compress_with_params(
     params: &zrip_encode::strategy::LevelParams,
 ) -> Result<alloc::vec::Vec<u8>, CompressError> {
     zrip_encode::compress_with_params(input, params)
+}
+
+#[cfg(feature = "alloc")]
+pub fn compress_opts(
+    input: &[u8],
+    level: i32,
+    opts: &Options,
+) -> Result<alloc::vec::Vec<u8>, CompressError> {
+    zrip_encode::compress_opts(input, level, opts)
 }
 
 #[cfg(feature = "alloc")]

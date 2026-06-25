@@ -1,5 +1,10 @@
 // Pure zrip roundtrip tests (no C zstd dependency).
 
+#[cfg(not(miri))]
+const BLOCK: usize = zrip::frame::MAX_BLOCK_SIZE; // 128 KiB
+#[cfg(not(miri))]
+const KNUTH: u32 = 0x9E37_79B1; // xxHash PRIME32_1, used as cheap pseudo-random scatter
+
 #[test]
 fn roundtrip_zrip_compress_decompress() {
     let original: Vec<u8> = (0u8..=255).cycle().take(4096).collect();
@@ -8,6 +13,7 @@ fn roundtrip_zrip_compress_decompress() {
     assert_eq!(decompressed, original);
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_all_levels_repetitive() {
     let original: Vec<u8> = b"ABCDEFGH".iter().cycle().take(200_000).copied().collect();
@@ -19,10 +25,11 @@ fn roundtrip_all_levels_repetitive() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_all_levels_random() {
     let original: Vec<u8> = (0..100_000u32)
-        .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
+        .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
         .collect();
     for level in [-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4] {
         let compressed = zrip::compress(&original, level).unwrap();
@@ -32,6 +39,7 @@ fn roundtrip_all_levels_random() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_zeros() {
     let original = vec![0u8; 100_000];
@@ -58,6 +66,7 @@ fn roundtrip_small() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_large() {
     let original: Vec<u8> = b"ABCDEFGH".iter().cycle().take(200_000).copied().collect();
@@ -66,6 +75,7 @@ fn roundtrip_large() {
     assert_eq!(decompressed, original);
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_all_same_bytes() {
     for b in [0u8, 1, 127, 128, 254, 255] {
@@ -76,15 +86,10 @@ fn roundtrip_all_same_bytes() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_block_boundary_sizes() {
-    for size in [
-        128 * 1024 - 1,
-        128 * 1024,
-        128 * 1024 + 1,
-        256 * 1024,
-        256 * 1024 + 1,
-    ] {
+    for size in [BLOCK - 1, BLOCK, BLOCK + 1, 2 * BLOCK, 2 * BLOCK + 1] {
         let original: Vec<u8> = b"ABCDEFGH".iter().cycle().take(size).copied().collect();
         let compressed = zrip::compress(&original, 1).unwrap();
         let decompressed =
@@ -93,6 +98,7 @@ fn roundtrip_block_boundary_sizes() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_single_bytes() {
     for b in 0u8..=255 {
@@ -104,6 +110,7 @@ fn roundtrip_single_bytes() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_size_sweep() {
     for exp in 0..=17 {
@@ -116,6 +123,7 @@ fn roundtrip_size_sweep() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_all_levels_all_patterns() {
     let patterns: Vec<(&str, Vec<u8>)> = vec![
@@ -157,16 +165,17 @@ fn roundtrip_all_levels_all_patterns() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_exact_block_fill() {
     for delta in [-2i32, -1, 0, 1, 2] {
-        let size = 128 * 1024 + delta;
+        let size = BLOCK as i32 + delta;
         if size <= 0 {
             continue;
         }
         let size = size as usize;
         let data: Vec<u8> = (0..size as u32)
-            .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
+            .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
             .collect();
         let compressed = zrip::compress(&data, 1).unwrap();
         let decompressed = zrip::decompress(&compressed).unwrap();
@@ -174,6 +183,7 @@ fn roundtrip_exact_block_fill() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_incompressible_random() {
     let data: Vec<u8> = (0..50_000u64)
@@ -192,6 +202,7 @@ fn roundtrip_incompressible_random() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_mixed_compressible_incompressible() {
     let mut data = Vec::with_capacity(100_000);
@@ -217,6 +228,7 @@ fn roundtrip_mixed_compressible_incompressible() {
 
 // ===== Zero literal length sequences =====
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_zero_literal_lengths() {
     let data = vec![0xABu8; 200_000];
@@ -228,6 +240,7 @@ fn roundtrip_zero_literal_lengths() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_alternating_rep_offsets_ll0() {
     let mut data = Vec::with_capacity(100_000);
@@ -253,6 +266,7 @@ fn roundtrip_alternating_rep_offsets_ll0() {
 
 // ===== Edge-case match lengths =====
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_match_length_boundaries() {
     let mut data = Vec::with_capacity(200_000);
@@ -279,6 +293,7 @@ fn roundtrip_match_length_boundaries() {
 
 // ===== RLE-mode FSE tables =====
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_single_symbol_distribution() {
     let mut data = Vec::with_capacity(100_000);
@@ -297,6 +312,7 @@ fn roundtrip_single_symbol_distribution() {
 
 // ===== Large literal lengths =====
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_large_literal_runs() {
     let mut data = Vec::with_capacity(200_000);
@@ -335,6 +351,7 @@ fn decompress_empty_input() {
     assert!(result.is_empty());
 }
 
+#[cfg(not(miri))]
 #[test]
 fn compress_level_zero_is_default() {
     let data = b"ABCDEFGH".repeat(1000);
@@ -379,11 +396,12 @@ fn checksum_mismatch_detected() {
     assert!(zrip::decompress(&compressed).is_err());
 }
 
+#[cfg(not(miri))]
 #[test]
 fn checksum_various_sizes() {
     for size in [0, 1, 100, 1000, 10000, 100_000] {
         let original: Vec<u8> = (0..size as u32)
-            .map(|i| ((i.wrapping_mul(2_654_435_761)) >> 24) as u8)
+            .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
             .collect();
         let compressed = zrip::compress(&original, 1).unwrap();
         let decompressed = zrip::decompress(&compressed).unwrap();
@@ -391,6 +409,7 @@ fn checksum_various_sizes() {
     }
 }
 
+#[cfg(not(miri))]
 #[test]
 fn checksum_validated_on_multiblock() {
     let data: Vec<u8> = b"checksum test data "
@@ -437,6 +456,7 @@ fn compress_context_roundtrip() {
 
 // ===== Output size limits =====
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_refuses_output_exceeding_max_raw_block() {
     let data = vec![0x42u8; 10_000];
@@ -479,6 +499,7 @@ fn reverse_bit_reader_1_byte() {
 
 // ===== decompress_into =====
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_into_basic() {
     let data = b"Hello, decompress_into!".repeat(1000);
@@ -489,6 +510,7 @@ fn decompress_into_basic() {
     assert_eq!(output, data);
 }
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_into_appends() {
     let data = b"append test data".repeat(500);
@@ -500,6 +522,7 @@ fn decompress_into_appends() {
     assert_eq!(&output[6..], &data[..]);
 }
 
+#[cfg(not(miri))]
 #[test]
 fn decompress_into_preallocated() {
     let data: Vec<u8> = (0..100_000).map(|i| (i % 251) as u8).collect();
@@ -512,9 +535,10 @@ fn decompress_into_preallocated() {
 
 // ===== compress_bound =====
 
+#[cfg(not(miri))]
 #[test]
 fn compress_bound_covers_actual_output() {
-    let sizes = [0, 1, 100, 1024, 128 * 1024, 128 * 1024 + 1, 1_000_000];
+    let sizes = [0, 1, 100, 1024, BLOCK, BLOCK + 1, 1_000_000];
     for &size in &sizes {
         let data: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
         let bound = zrip::compress_bound(size);
@@ -539,6 +563,7 @@ fn compress_bound_edge_cases() {
 
 // ===== compress_with_params =====
 
+#[cfg(not(miri))]
 #[test]
 fn compress_with_params_roundtrip() {
     let data = b"params test".repeat(5000);
@@ -552,12 +577,15 @@ fn compress_with_params_roundtrip() {
         target_length: 4,
         search_strength: 7,
         force_raw_literals: false,
+        #[cfg(feature = "ldm")]
+        ldm_params: None,
     };
     let compressed = zrip::compress_with_params(&data, &params).unwrap();
     let decompressed = zrip::decompress(&compressed).unwrap();
     assert_eq!(decompressed, data);
 }
 
+#[cfg(not(miri))]
 #[test]
 fn compress_with_params_dfast() {
     let data = b"dfast params".repeat(5000);
@@ -571,6 +599,8 @@ fn compress_with_params_dfast() {
         target_length: 1,
         search_strength: 4,
         force_raw_literals: false,
+        #[cfg(feature = "ldm")]
+        ldm_params: None,
     };
     let compressed = zrip::compress_with_params(&data, &params).unwrap();
     let decompressed = zrip::decompress(&compressed).unwrap();
@@ -631,6 +661,7 @@ fn decompress_concatenated_frames() {
     assert_eq!(decompressed, expected);
 }
 
+#[cfg(not(miri))]
 #[test]
 fn roundtrip_concatenated_frames() {
     let data1: Vec<u8> = (0..50_000).map(|i| (i % 251) as u8).collect();
@@ -644,6 +675,39 @@ fn roundtrip_concatenated_frames() {
     let mut expected = data1.clone();
     expected.extend_from_slice(&data2);
     assert_eq!(decoded, expected);
+}
+
+// ===== Block boundary edge cases =====
+
+#[cfg(not(miri))]
+#[test]
+fn roundtrip_exactly_one_block() {
+    let data: Vec<u8> = b"block boundary test pattern! "
+        .iter()
+        .cycle()
+        .take(BLOCK)
+        .copied()
+        .collect();
+    for level in [-7, -1, 1, 3, 4] {
+        let compressed = zrip::compress(&data, level).unwrap();
+        let decompressed =
+            zrip::decompress(&compressed).unwrap_or_else(|e| panic!("level {level}: {e}"));
+        assert_eq!(decompressed, data, "level {level}");
+    }
+}
+
+#[cfg(not(miri))]
+#[test]
+fn roundtrip_incompressible_multiblock() {
+    let data: Vec<u8> = (0..2 * BLOCK as u32)
+        .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
+        .collect();
+    for level in [-7, 1, 3] {
+        let compressed = zrip::compress(&data, level).unwrap();
+        let decompressed =
+            zrip::decompress(&compressed).unwrap_or_else(|e| panic!("level {level}: {e}"));
+        assert_eq!(decompressed, data, "level {level}");
+    }
 }
 
 // ===== Truncated frame =====

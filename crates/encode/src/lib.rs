@@ -10,6 +10,8 @@ pub(crate) mod block_encoder;
 pub mod context;
 pub(crate) mod dfast;
 pub(crate) mod fast;
+#[cfg(feature = "ldm")]
+pub(crate) mod ldm;
 pub(crate) mod primitives;
 pub(crate) mod sequences;
 pub mod strategy;
@@ -117,6 +119,17 @@ pub fn compress(input: &[u8], level: i32) -> Result<Vec<u8>, CompressError> {
     compress_inner(input, &params)
 }
 
+pub fn compress_opts(
+    input: &[u8],
+    level: i32,
+    opts: &strategy::Options,
+) -> Result<Vec<u8>, CompressError> {
+    let mut params = strategy::level_params_for_size(level, input.len())
+        .ok_or(CompressError::InvalidLevel(level))?;
+    strategy::apply_options(&mut params, opts);
+    compress_inner(input, &params)
+}
+
 #[allow(clippy::unnecessary_wraps)]
 fn compress_inner(input: &[u8], params: &strategy::LevelParams) -> Result<Vec<u8>, CompressError> {
     let mut output = Vec::with_capacity(input.len() + 32);
@@ -130,14 +143,17 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
     if input.is_empty() {
         block_encoder::encode_raw_block(&[], true, output);
     } else {
-        let hash_size = 1usize << params.hash_log;
         let mut rep_offsets = [1u32, 4, 8];
         let mut offset = 0;
         let mut sequences = Vec::with_capacity(MAX_BLOCK_SIZE / 8);
         let mut workspace = block_encoder::BlockEncodeWorkspace::new();
 
+        #[cfg(feature = "ldm")]
+        let mut ldm_state = params.ldm_params.as_ref().map(ldm::LdmState::new);
+
         match params.strategy {
             Strategy::Fast => {
+                let hash_size = 1usize << params.hash_log;
                 let mut hash_table = vec![0u32; hash_size];
                 while offset < input.len() {
                     let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
@@ -147,15 +163,37 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
                     if block_looks_incompressible(&input[offset..block_end]) {
                         block_encoder::encode_raw_block(&input[offset..block_end], is_last, output);
                     } else {
-                        fast::compress_fast_block(
-                            input,
-                            offset,
-                            block_end,
-                            params,
-                            &rep_offsets,
-                            &mut hash_table,
-                            &mut sequences,
-                        );
+                        #[cfg(feature = "ldm")]
+                        let used_ldm = if let Some(ref mut ldm) = ldm_state {
+                            let mut empty = Vec::new();
+                            ldm.compress_block(
+                                input,
+                                offset,
+                                block_end,
+                                params,
+                                &rep_offsets,
+                                &mut hash_table,
+                                &mut empty,
+                                &mut sequences,
+                            );
+                            true
+                        } else {
+                            false
+                        };
+                        #[cfg(not(feature = "ldm"))]
+                        let used_ldm = false;
+
+                        if !used_ldm {
+                            fast::compress_fast_block(
+                                input,
+                                offset,
+                                block_end,
+                                params,
+                                &rep_offsets,
+                                &mut hash_table,
+                                &mut sequences,
+                            );
+                        }
                         if params.force_raw_literals {
                             block_encoder::encode_compressed_block_raw(
                                 &input[offset..block_end],
@@ -192,16 +230,37 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
                     if block_looks_incompressible(&input[offset..block_end]) {
                         block_encoder::encode_raw_block(&input[offset..block_end], is_last, output);
                     } else {
-                        dfast::compress_dfast_block(
-                            input,
-                            offset,
-                            block_end,
-                            params,
-                            &rep_offsets,
-                            &mut hash_short,
-                            &mut hash_long,
-                            &mut sequences,
-                        );
+                        #[cfg(feature = "ldm")]
+                        let used_ldm = if let Some(ref mut ldm) = ldm_state {
+                            ldm.compress_block(
+                                input,
+                                offset,
+                                block_end,
+                                params,
+                                &rep_offsets,
+                                &mut hash_short,
+                                &mut hash_long,
+                                &mut sequences,
+                            );
+                            true
+                        } else {
+                            false
+                        };
+                        #[cfg(not(feature = "ldm"))]
+                        let used_ldm = false;
+
+                        if !used_ldm {
+                            dfast::compress_dfast_block(
+                                input,
+                                offset,
+                                block_end,
+                                params,
+                                &rep_offsets,
+                                &mut hash_short,
+                                &mut hash_long,
+                                &mut sequences,
+                            );
+                        }
                         block_encoder::encode_compressed_block(
                             &input[offset..block_end],
                             &sequences,

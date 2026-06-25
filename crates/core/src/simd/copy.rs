@@ -1,7 +1,10 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-#[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "wasm32"),
+    not(feature = "paranoid")
+))]
 use super::CpuTier;
 
 #[inline]
@@ -43,6 +46,18 @@ pub fn append_literals(dst: &mut Vec<u8>, src: &[u8]) {
                 unsafe {
                     let dst_ptr = dst.as_mut_ptr().add(dst_offset);
                     super::aarch64::neon::wildcopy_neon(src.as_ptr(), dst_ptr, len);
+                    dst.set_len(dst_offset + len);
+                }
+                return;
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            if super::cpu_tier() >= CpuTier::Wasm32Simd128 && len >= 16 {
+                unsafe {
+                    let dst_ptr = dst.as_mut_ptr().add(dst_offset);
+                    super::wasm32::simd128::wildcopy_wasm32(src.as_ptr(), dst_ptr, len);
                     dst.set_len(dst_offset + len);
                 }
                 return;
@@ -115,6 +130,12 @@ pub fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
     {
         if a.len() >= 16 && b.len() >= 16 {
             return unsafe { super::aarch64::neon::common_prefix_len_neon(a, b) };
+        }
+    }
+    #[cfg(all(target_arch = "wasm32", not(feature = "paranoid")))]
+    {
+        if super::cpu_tier() >= CpuTier::Wasm32Simd128 && a.len() >= 16 && b.len() >= 16 {
+            return unsafe { super::wasm32::simd128::common_prefix_len_wasm32(a, b) };
         }
     }
     super::scalar::common_prefix_len(a, b)
