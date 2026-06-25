@@ -2,7 +2,7 @@
 name = "zrip-decode"
 version = "0.6.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "zstd decoder for zrip (internal crate)"
 license = "MIT"
 repository = "https://github.com/paddor/zrip"
@@ -21,6 +21,7 @@ paranoid = ["zrip-core/paranoid"]
 
 [dependencies]
 zrip-core = { version = "0.6.0", path = "../core", default-features = false }
+safe_unaligned_simd = "0.2.5"
 
 [dev-dependencies]
 zrip = { path = "../.." }
