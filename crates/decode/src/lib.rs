@@ -366,63 +366,75 @@ fn decode_compressed_block(
 
     let before = output.len();
 
+    let result = decode_sequences_dispatch(
+        seq_data,
+        num_sequences,
+        seq_tables,
+        rep_offsets,
+        &ws.literal_buf,
+        output,
+        dict_history,
+    );
+    result?;
+    if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
+        return Err(DecompressError::BlockTooLarge);
+    }
+
+    Ok(())
+}
+
+#[inline(always)]
+pub(crate) fn decode_sequences_dispatch(
+    seq_data: &[u8],
+    num_sequences: u32,
+    seq_tables: &mut SequenceDecodeTables,
+    rep_offsets: &mut [u32; 3],
+    literals: &[u8],
+    output: &mut Vec<u8>,
+    history: &[u8],
+) -> Result<(), DecompressError> {
     #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
         if zrip_core::simd::cpu_tier() >= CpuTier::Avx2 {
             // SAFETY: AVX2+BMI2 verified by cpu_tier() >= Avx2
-            unsafe {
+            return unsafe {
                 crate::exec::decode_execute_sequences_avx2(
                     seq_data,
                     num_sequences,
                     seq_tables,
                     rep_offsets,
-                    &ws.literal_buf,
+                    literals,
                     output,
-                    dict_history,
+                    history,
                 )
-            }?;
-            if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
-                return Err(DecompressError::BlockTooLarge);
-            }
-            return Ok(());
+            };
         }
     }
 
     #[cfg(all(target_arch = "aarch64", not(feature = "paranoid")))]
     {
         // SAFETY: NEON is mandatory on aarch64
-        unsafe {
+        return unsafe {
             crate::exec::decode_execute_sequences_neon(
                 seq_data,
                 num_sequences,
                 seq_tables,
                 rep_offsets,
-                &ws.literal_buf,
+                literals,
                 output,
-                dict_history,
+                history,
             )
-        }?;
-        if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
-            return Err(DecompressError::BlockTooLarge);
-        }
-        return Ok(());
+        };
     }
 
-    #[cfg(not(all(target_arch = "aarch64", not(feature = "paranoid"))))]
-    {
-        decode_execute_sequences(
-            seq_data,
-            num_sequences,
-            seq_tables,
-            rep_offsets,
-            &ws.literal_buf,
-            output,
-            dict_history,
-        )?;
-        if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
-            return Err(DecompressError::BlockTooLarge);
-        }
-    }
-
-    Ok(())
+    #[allow(unreachable_code)]
+    decode_execute_sequences(
+        seq_data,
+        num_sequences,
+        seq_tables,
+        rep_offsets,
+        literals,
+        output,
+        history,
+    )
 }

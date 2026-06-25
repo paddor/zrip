@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "paranoid", forbid(unsafe_code))]
+#![forbid(unsafe_code)]
 
 use std::io::{self, Read};
 
@@ -6,7 +6,7 @@ use crate::BlockDecodeWorkspace;
 use crate::literals::decode_literals_ws;
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
 
-use crate::exec::decode_execute_sequences;
+use crate::decode_sequences_dispatch;
 use zrip_core::block::{BlockType, parse_block_header};
 use zrip_core::dict::Dictionary;
 use zrip_core::error::DecompressError;
@@ -442,77 +442,23 @@ impl<R: Read> FrameDecoder<R> {
         let seq_data = &table_data[tables_consumed..];
 
         let before = self.output_buf.len();
-
-        #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
-        {
-            if zrip_core::simd::cpu_tier() >= zrip_core::simd::CpuTier::Avx2 {
-                // SAFETY: AVX2+BMI2 verified by cpu_tier() >= Avx2
-                unsafe {
-                    crate::exec::decode_execute_sequences_avx2(
-                        seq_data,
-                        num_sequences,
-                        &self.seq_tables,
-                        &mut self.rep_offsets,
-                        &self.ws.literal_buf,
-                        &mut self.output_buf,
-                        history,
-                    )
-                }
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                if self.output_buf.len() - before > MAX_BLOCK_SIZE {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        DecompressError::BlockTooLarge,
-                    ));
-                }
-                return Ok(());
-            }
+        decode_sequences_dispatch(
+            seq_data,
+            num_sequences,
+            &mut self.seq_tables,
+            &mut self.rep_offsets,
+            &self.ws.literal_buf,
+            &mut self.output_buf,
+            history,
+        )
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        if self.output_buf.len() - before > MAX_BLOCK_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                DecompressError::BlockTooLarge,
+            ));
         }
-
-        #[cfg(all(target_arch = "aarch64", not(feature = "paranoid")))]
-        {
-            // SAFETY: NEON is mandatory on aarch64
-            unsafe {
-                crate::exec::decode_execute_sequences_neon(
-                    seq_data,
-                    num_sequences,
-                    &self.seq_tables,
-                    &mut self.rep_offsets,
-                    &self.ws.literal_buf,
-                    &mut self.output_buf,
-                    history,
-                )
-            }
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            if self.output_buf.len() - before > MAX_BLOCK_SIZE {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    DecompressError::BlockTooLarge,
-                ));
-            }
-            return Ok(());
-        }
-
-        #[cfg(not(all(target_arch = "aarch64", not(feature = "paranoid"))))]
-        {
-            decode_execute_sequences(
-                seq_data,
-                num_sequences,
-                &self.seq_tables,
-                &mut self.rep_offsets,
-                &self.ws.literal_buf,
-                &mut self.output_buf,
-                history,
-            )
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            if self.output_buf.len() - before > MAX_BLOCK_SIZE {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    DecompressError::BlockTooLarge,
-                ));
-            }
-            Ok(())
-        }
+        Ok(())
     }
 
     fn read_checksum(&mut self) -> io::Result<()> {
