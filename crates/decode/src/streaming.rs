@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(feature = "paranoid", forbid(unsafe_code))]
 
 use std::io::{self, Read};
 
@@ -14,16 +14,6 @@ use zrip_core::frame::header::parse_frame_header;
 use zrip_core::frame::{MAX_BLOCK_SIZE, MAX_WINDOW_SIZE};
 use zrip_core::fse::{promote_ll_table, promote_ml_table, promote_of_table};
 use zrip_core::xxhash::Xxh64State;
-
-#[cfg(all(
-    any(
-        target_arch = "x86_64",
-        target_arch = "aarch64",
-        target_arch = "wasm32"
-    ),
-    not(feature = "paranoid")
-))]
-use zrip_core::simd::CpuTier;
 
 enum State {
     FrameHeader,
@@ -451,19 +441,23 @@ impl<R: Read> FrameDecoder<R> {
 
         let seq_data = &table_data[tables_consumed..];
 
+        let before = self.output_buf.len();
+
         #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
         {
-            if zrip_core::simd::cpu_tier() >= CpuTier::Avx2 {
-                let before = self.output_buf.len();
-                crate::simd_decode::x86_64::decode::decode_execute_avx2_safe(
-                    seq_data,
-                    num_sequences,
-                    &self.seq_tables,
-                    &mut self.rep_offsets,
-                    &self.ws.literal_buf,
-                    &mut self.output_buf,
-                    history,
-                )
+            if zrip_core::simd::cpu_tier() >= zrip_core::simd::CpuTier::Avx2 {
+                // SAFETY: AVX2+BMI2 verified by cpu_tier() >= Avx2
+                unsafe {
+                    crate::exec::decode_execute_sequences_avx2(
+                        seq_data,
+                        num_sequences,
+                        &self.seq_tables,
+                        &mut self.rep_offsets,
+                        &self.ws.literal_buf,
+                        &mut self.output_buf,
+                        history,
+                    )
+                }
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 if self.output_buf.len() - before > MAX_BLOCK_SIZE {
                     return Err(io::Error::new(
@@ -477,9 +471,9 @@ impl<R: Read> FrameDecoder<R> {
 
         #[cfg(all(target_arch = "aarch64", not(feature = "paranoid")))]
         {
-            if zrip_core::simd::cpu_tier() >= CpuTier::Neon {
-                let before = self.output_buf.len();
-                crate::simd_decode::aarch64::decode::decode_execute_neon_safe(
+            // SAFETY: NEON is mandatory on aarch64
+            unsafe {
+                crate::exec::decode_execute_sequences_neon(
                     seq_data,
                     num_sequences,
                     &self.seq_tables,
@@ -488,66 +482,17 @@ impl<R: Read> FrameDecoder<R> {
                     &mut self.output_buf,
                     history,
                 )
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                if self.output_buf.len() - before > MAX_BLOCK_SIZE {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        DecompressError::BlockTooLarge,
-                    ));
-                }
-                return Ok(());
             }
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            if self.output_buf.len() - before > MAX_BLOCK_SIZE {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    DecompressError::BlockTooLarge,
+                ));
+            }
+            return Ok(());
         }
 
-        #[cfg(all(target_arch = "wasm32", not(feature = "paranoid")))]
-        {
-            if zrip_core::simd::cpu_tier() >= CpuTier::Wasm32Simd128 {
-                let before = self.output_buf.len();
-                crate::simd_decode::wasm32::decode::decode_execute_wasm32_safe(
-                    seq_data,
-                    num_sequences,
-                    &self.seq_tables,
-                    &mut self.rep_offsets,
-                    &self.ws.literal_buf,
-                    &mut self.output_buf,
-                    history,
-                )
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                if self.output_buf.len() - before > MAX_BLOCK_SIZE {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        DecompressError::BlockTooLarge,
-                    ));
-                }
-                return Ok(());
-            }
-        }
-
-        #[cfg(all(target_arch = "wasm32", not(feature = "paranoid")))]
-        {
-            if zrip_core::simd::cpu_tier() >= CpuTier::Wasm32Simd128 {
-                let before = self.output_buf.len();
-                crate::simd_decode::wasm32::decode::decode_execute_wasm32_safe(
-                    seq_data,
-                    num_sequences,
-                    &self.seq_tables,
-                    &mut self.rep_offsets,
-                    &self.ws.literal_buf,
-                    &mut self.output_buf,
-                    history,
-                )
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                if self.output_buf.len() - before > MAX_BLOCK_SIZE {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        DecompressError::BlockTooLarge,
-                    ));
-                }
-                return Ok(());
-            }
-        }
-
-        let before = self.output_buf.len();
         decode_execute_sequences(
             seq_data,
             num_sequences,

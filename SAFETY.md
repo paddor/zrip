@@ -2,44 +2,35 @@
 
 ## Unsafe boundary
 
-All compression and decompression logic is `#[forbid(unsafe_code)]`. The remaining
-unsafe (~250 blocks across 15 internal modules) performs unchecked memory copies,
-unaligned reads, SIMD intrinsics, and `Vec::set_len` calls whose bounds are proven
-by safe-region margins computed in the algorithm code. Every unsafe block has a
-`debug_assert!` guard. No `unsafe` is exposed in the public API.
+The decoder is `#![forbid(unsafe_code)]` in its implementation (`exec.rs`), with
+only 4 trivial `unsafe` dispatch calls for `#[target_feature]` CPU feature gating
+(proven safe by runtime `cpu_tier()` detection). No `unsafe` is exposed in the
+public API.
 
-Unsafe is confined to three categories of leaf modules:
+Encoder unsafe is confined to `encode/src/primitives.rs` (16 blocks):
+`get_unchecked`, `read_unaligned`, `set_len`, `count_match_raw`, `prefetch`.
+Callers prove bounds at block level. Every block has a `debug_assert!` guard.
 
-1. **`primitives.rs`** in `bitstream/`, `huffman/`, `encode/`, `decode/`, `xxhash/`:
-   `#[inline(always)]` wrappers around `get_unchecked`, `read_unaligned`,
-   `set_len`, and `copy_nonoverlapping`.
-
-2. **`simd/`** submodules (`scalar.rs`, `copy.rs`, `x86_64/*.rs`, `aarch64/*.rs`,
-   `wasm32/*.rs`): intrinsics and raw pointer arithmetic for wildcopy,
-   copy-match, and common-prefix-length.
-
-3. **`simd_decode/`** SIMD sequence decoders (`x86_64/decode.rs`,
-   `aarch64/decode.rs`, `wasm32/decode.rs`): fused FSE decode + sequence
-   execution with inline SIMD operations.
+Core crate unsafe is confined to `primitives.rs` in `bitstream/`, `huffman/`,
+`xxhash/`: `#[inline(always)]` wrappers around `get_unchecked`, `read_unaligned`,
+`set_len`. Same pattern as encoder.
 
 ## `paranoid` feature
 
 `cargo build --features paranoid` compiles zrip with `#![forbid(unsafe_code)]`
-on all four crates. Every unsafe block is replaced by a safe alternative:
+on all four crates. The decoder is already safe by default; `paranoid` affects
+the encoder and core primitives:
 
 | Category | Default | Paranoid |
 |:---------|:--------|:---------|
-| Unchecked indexing | `get_unchecked`, `read_unaligned` | Direct indexing, `from_le_bytes` |
-| Vec length | `set_len` | `resize` |
-| SIMD intrinsics | SSE2/AVX2/BMI2/NEON/WASM SIMD128 kernels | Gated out; `cpu_tier()` returns `Scalar` |
-| SIMD sequence decoder | Fused FSE+copy with intrinsics | Gated out; scalar `exec.rs` handles all blocks |
-| Huffman 4-stream | Interleaved pointer-based decode | Sequential per-stream decode via `decode_stream_tail` |
-| Wildcopy/copy-match | Raw pointer arithmetic | `extend_from_slice`, `copy_within`, byte loop |
+| Encoder indexing | `get_unchecked`, `read_unaligned` | Direct indexing, `from_le_bytes` |
+| Encoder Vec length | `set_len` | `resize` |
+| Decoder AVX2+BMI2 dispatch | `#[target_feature]` wrapper | Gated out; scalar path only |
+| Huffman BMI2 dispatch | `#[target_feature]` wrapper | Gated out; direct call |
 
 The safe alternatives use the same algorithms and produce identical output.
-Encode throughput drops roughly 20-30%, decode roughly 40-50% (corpus
-dependent). Even with these costs, zrip with `paranoid` outperforms ruzstd on
-both encode and decode.
+Encode throughput drops roughly 40% (corpus dependent). Decode throughput is
+unaffected since the decoder is already safe Rust.
 
 The feature exists for users who need a guarantee of zero unsafe, or for
 auditing and benchmarking the cost of safe-only codepaths.
