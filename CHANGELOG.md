@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+## [0.6.0]
+
+### Added
+
+- WASM SIMD128 decode path: fused FSE decode+execute loop
+  (`simd_decode/wasm32/decode.rs`) and core SIMD primitives (wildcopy,
+  copy_match, common_prefix_len) in `simd/wasm32/simd128.rs`. Dispatched
+  via `CpuTier::Wasm32Simd128` at compile time when
+  `target_feature = "simd128"` is enabled.
+- Long distance matching (LDM) encoder (`ldm.rs`): gear hash scan with
+  gap fill via Fast/DFast strategy. Controlled via `Options::ldm(true)`
+  and `Options::window_log(n)`. Enabled by default via the `ldm` feature
+  flag, with zero runtime cost when not activated.
+- Cross-block match references in streaming encoder: matches can now
+  reference data from prior blocks within the window, improving
+  compression ratio on multi-block inputs.
+- `Options` API for configuring `window_log` and `ldm` on
+  `compress_opts()` and `FrameEncoder::with_options()`.
+- wasm32 benchmark charts (`doc/charts/wasm32/`) comparing zrip
+  (SIMD128), zrip paranoid (no SIMD), C zstd (libzstd via wasi-sdk),
+  and structured-zstd.
+- `--profile` flag for plot scripts (`scripts/profiles.py`) enabling
+  per-target chart generation with consistent codec colors and labels.
+- Streaming, LDM, and cross-block matching tests in
+  `tests/streaming.rs`.
+
+### Fixed
+
+- 32-bit overflow in `parse_compressed_header` format-3 branch
+  (`literals.rs`): `(data[4] as usize) << 28` overflows on wasm32
+  where usize is 32 bits. Fixed by accumulating into u64.
+- `cpu_tier()` now returns `Scalar` under Miri to avoid UB from CPUID
+  intrinsics.
+- Unused variable warning on targets without prefetch support.
+
+### Changed
+
+- Bench cache layout restructured to per-target directories
+  (`~/.cache/zrip/{arch}/L{level}/{codec}.jsonl`).
+- Corpus paths resolved via `CARGO_MANIFEST_DIR` so bench downloads
+  land in `bench/corpus/` regardless of working directory.
+- JSR package `@paddor/zrip` bumped to 0.3.0.
+
 ## [0.5.1]
 
 ### Fixed
