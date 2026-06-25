@@ -6,6 +6,9 @@ pub mod x86_64;
 #[cfg(all(target_arch = "aarch64", not(feature = "paranoid")))]
 pub mod aarch64;
 
+#[cfg(all(target_arch = "wasm32", not(feature = "paranoid")))]
+pub mod wasm32;
+
 pub mod copy;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -19,6 +22,8 @@ pub enum CpuTier {
     Avx2,
     #[cfg(target_arch = "aarch64")]
     Neon,
+    #[cfg(target_arch = "wasm32")]
+    Wasm32Simd128,
 }
 
 #[cfg(all(feature = "std", not(feature = "paranoid")))]
@@ -60,7 +65,19 @@ fn detect_cpu_tier() -> CpuTier {
     {
         CpuTier::Neon
     }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(target_arch = "wasm32")]
+    {
+        if cfg!(target_feature = "simd128") {
+            CpuTier::Wasm32Simd128
+        } else {
+            CpuTier::Scalar
+        }
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )))]
     {
         CpuTier::Scalar
     }
@@ -84,7 +101,19 @@ fn compile_time_tier() -> CpuTier {
     {
         CpuTier::Neon
     }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(target_arch = "wasm32")]
+    {
+        if cfg!(target_feature = "simd128") {
+            CpuTier::Wasm32Simd128
+        } else {
+            CpuTier::Scalar
+        }
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )))]
     {
         CpuTier::Scalar
     }

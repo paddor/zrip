@@ -75,12 +75,12 @@ fn parse_compressed_header(data: &[u8]) -> Result<(usize, usize, usize, usize), 
             if data.len() < 5 {
                 return Err(DecompressError::CorruptLiterals);
             }
-            let both = (header_byte as usize >> 4)
-                | ((data[1] as usize) << 4)
-                | ((data[2] as usize) << 12)
-                | ((data[3] as usize) << 20)
-                | ((data[4] as usize) << 28);
-            Ok((both & 0x3FFFF, both >> 18, 4, 5))
+            let both = (header_byte as u64 >> 4)
+                | ((data[1] as u64) << 4)
+                | ((data[2] as u64) << 12)
+                | ((data[3] as u64) << 20)
+                | ((data[4] as u64) << 28);
+            Ok(((both & 0x3FFFF) as usize, (both >> 18) as usize, 4, 5))
         }
         _ => unreachable!(),
     }
