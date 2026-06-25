@@ -55,6 +55,15 @@ small-message workloads (log lines, JSON records, RPC payloads).
 ![aarch64 per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/matrix.svg)
 </details>
 
+<details>
+<summary>wasm32 (wasmtime)</summary>
+
+![wasm32 pipeline summary](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/wasm32/summary.svg)
+![wasm32 per-file pipeline](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/wasm32/pipeline.svg)
+![wasm32 encode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/wasm32/scatter.svg)
+![wasm32 per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/wasm32/matrix.svg)
+</details>
+
 ## API
 
 ```rust
