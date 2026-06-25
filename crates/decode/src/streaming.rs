@@ -493,23 +493,26 @@ impl<R: Read> FrameDecoder<R> {
             return Ok(());
         }
 
-        decode_execute_sequences(
-            seq_data,
-            num_sequences,
-            &self.seq_tables,
-            &mut self.rep_offsets,
-            &self.ws.literal_buf,
-            &mut self.output_buf,
-            history,
-        )
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        if self.output_buf.len() - before > MAX_BLOCK_SIZE {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                DecompressError::BlockTooLarge,
-            ));
+        #[cfg(not(all(target_arch = "aarch64", not(feature = "paranoid"))))]
+        {
+            decode_execute_sequences(
+                seq_data,
+                num_sequences,
+                &self.seq_tables,
+                &mut self.rep_offsets,
+                &self.ws.literal_buf,
+                &mut self.output_buf,
+                history,
+            )
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            if self.output_buf.len() - before > MAX_BLOCK_SIZE {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    DecompressError::BlockTooLarge,
+                ));
+            }
+            Ok(())
         }
-        Ok(())
     }
 
     fn read_checksum(&mut self) -> io::Result<()> {

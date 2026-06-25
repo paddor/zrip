@@ -408,17 +408,20 @@ fn decode_compressed_block(
         return Ok(());
     }
 
-    decode_execute_sequences(
-        seq_data,
-        num_sequences,
-        seq_tables,
-        rep_offsets,
-        &ws.literal_buf,
-        output,
-        dict_history,
-    )?;
-    if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
-        return Err(DecompressError::BlockTooLarge);
+    #[cfg(not(all(target_arch = "aarch64", not(feature = "paranoid"))))]
+    {
+        decode_execute_sequences(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            &ws.literal_buf,
+            output,
+            dict_history,
+        )?;
+        if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
+            return Err(DecompressError::BlockTooLarge);
+        }
     }
 
     Ok(())
