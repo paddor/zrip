@@ -162,6 +162,10 @@ pub(crate) fn decode_execute_sequences(
     }
 
     if lit_off < literals.len() {
+        let remaining = literals.len() - lit_off;
+        if output.len() + remaining + 16 > output.capacity() {
+            return Err(DecompressError::CorruptSequences);
+        }
         fast_extend_from_slice(output, &literals[lit_off..]);
     }
 

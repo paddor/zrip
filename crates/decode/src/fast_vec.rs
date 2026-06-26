@@ -25,26 +25,39 @@ fn copy_8(src: *const u8, dst: *mut u8) {
     }
 }
 
-/// Copy `len` bytes from `src` into the end of `vec` using 16-byte wild copies.
+/// Copy `src` into the end of `vec` using 16-byte chunk copies.
 ///
-/// # Safety contract (upheld by caller via capacity reservation):
-/// - `vec.len() + len + 16 <= vec.capacity()`
-/// - `src` is readable for at least `max(len, 16)` bytes (literal buffer has 32-byte padding)
+/// All reads stay within `src` bounds (no wild over-read).
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 pub(crate) fn fast_extend_from_slice(vec: &mut Vec<u8>, src: &[u8]) {
     let len = src.len();
+    if len == 0 {
+        return;
+    }
     debug_assert!(vec.len() + len + 16 <= vec.capacity());
     unsafe {
         let dst = vec.as_mut_ptr().add(vec.len());
         let sp = src.as_ptr();
-        let mut off = 0usize;
-        loop {
-            copy_16(sp.add(off), dst.add(off));
-            off += 16;
-            if off >= len {
-                break;
+        if len >= 16 {
+            let mut off = 0usize;
+            while off + 16 <= len {
+                copy_16(sp.add(off), dst.add(off));
+                off += 16;
             }
+            if off < len {
+                copy_16(sp.add(len - 16), dst.add(len - 16));
+            }
+        } else if len >= 8 {
+            copy_8(sp, dst);
+            copy_8(sp.add(len - 8), dst.add(len - 8));
+        } else if len >= 4 {
+            let a = (sp as *const u32).read_unaligned();
+            (dst as *mut u32).write_unaligned(a);
+            let b = (sp.add(len - 4) as *const u32).read_unaligned();
+            (dst.add(len - 4) as *mut u32).write_unaligned(b);
+        } else {
+            core::ptr::copy_nonoverlapping(sp, dst, len);
         }
         vec.set_len(vec.len() + len);
     }
