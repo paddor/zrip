@@ -455,3 +455,21 @@ pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usiz
     output[..buf.len()].copy_from_slice(&buf);
     Ok(buf.len())
 }
+
+#[cfg(all(test, miri, not(feature = "paranoid")))]
+mod ub_tests {
+    use super::*;
+
+    #[test]
+    fn public_compress_with_params_accepts_zero_hash_log() {
+        // Issue: LevelParams is public and compress_with_params only clamps log
+        // values downward for the input size. A caller can pass hash_log = 0,
+        // which allocates a one-entry hash table, while release-mode hash shifts
+        // produce indexes derived from the input bytes. The first hash_load then
+        // reaches get_unchecked with an out-of-bounds index.
+        let mut params = strategy::level_params(1).unwrap();
+        params.hash_log = 0;
+        params.chain_log = 0;
+        let _ = compress_with_params(b"abcdefghijklmnop", &params);
+    }
+}
