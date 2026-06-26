@@ -261,13 +261,13 @@ impl<R: Read> FrameDecoder<R> {
             header.window_size as usize
         };
 
-        if let Some(fcs) = header.frame_content_size {
-            if fcs as usize > self.max_output {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    DecompressError::OutputTooSmall,
-                ));
-            }
+        if let Some(fcs) = header.frame_content_size
+            && fcs as usize > self.max_output
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                DecompressError::OutputTooSmall,
+            ));
         }
 
         self.window_size = window_size;
@@ -286,17 +286,17 @@ impl<R: Read> FrameDecoder<R> {
             self.decode_history.extend_from_slice(d.content());
             let mut st = SequenceDecodeTables::new_default();
             if let Some((t, l)) = d.of_table() {
-                st.of_table = promote_of_table(t);
+                st.of_table = crate::sequences::into_table(&promote_of_table(t));
                 st.of_accuracy = l;
                 st.of_set = true;
             }
             if let Some((t, l)) = d.ml_table() {
-                st.ml_table = promote_ml_table(t);
+                st.ml_table = crate::sequences::into_table(&promote_ml_table(t));
                 st.ml_accuracy = l;
                 st.ml_set = true;
             }
             if let Some((t, l)) = d.ll_table() {
-                st.ll_table = promote_ll_table(t);
+                st.ll_table = crate::sequences::into_table(&promote_ll_table(t));
                 st.ll_accuracy = l;
                 st.ll_set = true;
             }
@@ -392,13 +392,13 @@ impl<R: Read> FrameDecoder<R> {
         }
 
         self.state = if last {
-            if let Some(fcs) = self.frame_content_size {
-                if self.frame_bytes as u64 != fcs {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        DecompressError::FrameSizeMismatch,
-                    ));
-                }
+            if let Some(fcs) = self.frame_content_size
+                && self.frame_bytes as u64 != fcs
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    DecompressError::FrameSizeMismatch,
+                ));
             }
             if self.content_checksum {
                 State::Checksum

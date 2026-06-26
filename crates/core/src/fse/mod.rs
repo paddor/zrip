@@ -134,3 +134,13 @@ pub static ML_BASELINE_TABLE: [u32; 53] = [
     28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 41, 43, 47, 51, 59, 67, 83, 99, 131, 259, 515, 1027,
     2051, 4099, 8195, 16387, 32771, 65539,
 ];
+
+pub const FSE_SEQ_TABLE_CAPACITY: usize = 1 << 9;
+pub const FSE_SEQ_TABLE_MASK: u32 = FSE_SEQ_TABLE_CAPACITY as u32 - 1;
+
+pub const FSE_SEQ_DECODE_ENTRY_ZERO: FseSeqDecodeEntry = FseSeqDecodeEntry {
+    base_line: 0,
+    num_bits: 0,
+    extra_bits: 0,
+    baseline_value: 0,
+};

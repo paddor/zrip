@@ -2,7 +2,7 @@
 name = "zrip-decode"
 version = "0.6.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "zstd decoder for zrip (internal crate)"
 license = "MIT"
 repository = "https://github.com/paddor/zrip"
@@ -12,15 +12,17 @@ readme = "README.md"
 workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "simd"]
 std = ["alloc", "zrip-core/std"]
 alloc = ["zrip-core/alloc"]
+simd = ["dep:fearless_simd"]
 frame = ["std"]
 nightly = ["zrip-core/nightly"]
 paranoid = ["zrip-core/paranoid"]
 
 [dependencies]
 zrip-core = { version = "0.6.0", path = "../core", default-features = false }
+fearless_simd = { version = "0.5", optional = true }
 
 [dev-dependencies]
 zrip = { path = "../.." }

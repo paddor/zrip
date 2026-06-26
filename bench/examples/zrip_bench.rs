@@ -660,7 +660,10 @@ fn main() {
             let source_data = match std::fs::read(&source_path) {
                 Ok(d) => d,
                 Err(_) => {
-                    eprintln!("dict: skipping {source_name} (source {} not found)", source_path.display());
+                    eprintln!(
+                        "dict: skipping {source_name} (source {} not found)",
+                        source_path.display()
+                    );
                     continue;
                 }
             };
