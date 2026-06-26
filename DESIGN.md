@@ -92,21 +92,18 @@ a raw block is emitted.
 
 ## CPU feature dispatch
 
-`crates/core/src/simd/mod.rs` defines a `CpuTier` enum (`Bmi2`/`Avx2` variants x86_64 only):
+Two dispatch mechanisms coexist:
 
-| Tier | Detection |
-|------|-----------|
-| Scalar | Always |
-| Bmi2 | `is_x86_feature_detected!("bmi2")` |
-| Avx2 | `is_x86_feature_detected!("avx2")` + BMI2 |
+**Decoder:** `fearless_simd::dispatch!` with a cached `OnceLock<Level>`. The
+macro compiles `decode_execute_sequences` with platform-specific target features
+(AVX2+BMI2 on x86_64, NEON on aarch64, SIMD128 on wasm32) and selects the best
+version at runtime. Zero `unsafe` in user code. With `paranoid` or without
+`std`, the scalar path runs directly.
 
-With `std`: runtime detection cached in `OnceLock<CpuTier>`. Without `std`:
-compile-time tier from `cfg!(target_feature)`.
-
-**Dispatch happens at block boundaries.** The decoder checks `cpu_tier()` once
-per block and calls a `#[target_feature(enable = "avx2,bmi2")]` wrapper that
-inlines the safe decoder implementation, enabling compiler auto-vectorization
-and BMI2 bit manipulation instructions.
+**Huffman BMI2:** `crates/core/src/simd/mod.rs` defines a `CpuTier` enum
+(`Bmi2`/`Avx2` on x86_64). Runtime detection cached in `OnceLock<CpuTier>`.
+The Huffman 4-stream decoder dispatches to a `#[target_feature(enable = "bmi2")]`
+variant for faster bit extraction.
 
 ## Sequence decoder
 
@@ -114,11 +111,12 @@ and BMI2 bit manipulation instructions.
 
 A single safe Rust implementation handles all platforms. FSE state machine +
 sequence execution using `extend_from_slice` for literals and
-`extend_from_within` for match copies. On x86_64 with AVX2+BMI2, a
-`#[target_feature]` wrapper enables the compiler to generate AVX2
-auto-vectorized bitstream operations and BMI2 bit extraction (`shlx`, `shrx`).
-Equivalent wrappers exist for aarch64 (NEON) and wasm32 (SIMD128). Standard
-library `memcpy`/`memmove` already use platform-optimal SIMD for copies.
+`extend_from_within` for match copies (with doubling strategy for overlapping
+copies and RLE special-case for offset-1). `fearless_simd::dispatch!` compiles
+the function with platform target features, enabling the compiler to generate
+BMI2 bit extraction instructions (`shlx`, `shrx`) and auto-vectorize bitstream
+operations. Standard library `memcpy`/`memmove` already use platform-optimal
+SIMD for copies.
 
 ## Huffman 4-stream decoder
 
@@ -136,17 +134,18 @@ Slow path finishes remaining symbols one stream at a time near exhaustion.
 ## `paranoid` feature
 
 `cargo build --features paranoid` adds `#![forbid(unsafe_code)]` to all four
-crate roots. The decoder is already safe by default; `paranoid` affects encoder
-and core `primitives.rs` modules. Each has dual `#[cfg(feature = "paranoid")]`
+crate roots. The decoder is already safe by default; `paranoid` disables
+`fearless_simd` dispatch (scalar path only) and affects encoder and core
+`primitives.rs` modules. Each has dual `#[cfg(feature = "paranoid")]`
 / `#[cfg(not(feature = "paranoid"))]` bodies: the paranoid path uses direct
 indexing, `from_le_bytes`, `resize`, and `extend_from_slice` in place of
-unchecked operations. BMI2 `#[target_feature]` dispatch is gated out.
+unchecked operations. Huffman BMI2 `#[target_feature]` dispatch is gated out.
 
 ## Unsafe boundary
 
-The decoder implementation is `#![forbid(unsafe_code)]`. The only `unsafe` in
-the decode path is 4 dispatch calls for `#[target_feature]` functions, proven
-safe by runtime `cpu_tier()` detection.
+The decoder implementation is `#![forbid(unsafe_code)]` with zero `unsafe`
+blocks. Platform dispatch is handled by `fearless_simd::dispatch!`, which
+encapsulates `#[target_feature]` calling internally.
 
 Encoder unsafe is confined to `encode/src/primitives.rs`: `#[inline(always)]`
 wrappers around `get_unchecked`, `read_unaligned`, `set_len`. Each function has

@@ -533,19 +533,19 @@ fn encode_literals_section(
 
     let use_4_streams = lits.len() >= 1024;
 
-    if let Some(prev) = prev_huffman.as_ref() {
-        if prev.can_encode(lits) {
-            if use_4_streams {
-                prev.encode_4_streams_into(lits, huf_concat, huf_stream);
-            } else {
-                prev.encode_single_stream_into(lits, huf_concat);
-            }
-            let compressed_size = huf_concat.len();
-            if compressed_size < lits.len() {
-                encode_treeless_literals_header(lits.len(), compressed_size, use_4_streams, output);
-                output.extend_from_slice(huf_concat);
-                return;
-            }
+    if let Some(prev) = prev_huffman.as_ref()
+        && prev.can_encode(lits)
+    {
+        if use_4_streams {
+            prev.encode_4_streams_into(lits, huf_concat, huf_stream);
+        } else {
+            prev.encode_single_stream_into(lits, huf_concat);
+        }
+        let compressed_size = huf_concat.len();
+        if compressed_size < lits.len() {
+            encode_treeless_literals_header(lits.len(), compressed_size, use_4_streams, output);
+            output.extend_from_slice(huf_concat);
+            return;
         }
     }
 

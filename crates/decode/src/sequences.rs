@@ -1,8 +1,5 @@
 #![forbid(unsafe_code)]
 
-#[cfg(feature = "alloc")]
-use alloc::vec::Vec;
-
 use crate::BlockDecodeWorkspace;
 use zrip_core::bitstream::reader::BitReader;
 use zrip_core::error::DecompressError;
@@ -10,18 +7,28 @@ use zrip_core::fse::table_builder::{
     build_decode_table_from_default, build_decode_table_into, parse_fse_table_description_into,
 };
 use zrip_core::fse::{
-    FseSeqDecodeEntry, LL_BASELINE_TABLE, LL_BITS_TABLE, LL_DEFAULT_ACCURACY, LL_DEFAULT_DIST,
-    LL_MAX_ACCURACY_LOG, ML_BASELINE_TABLE, ML_BITS_TABLE, ML_DEFAULT_ACCURACY, ML_DEFAULT_DIST,
-    ML_MAX_ACCURACY_LOG, OF_DEFAULT_ACCURACY, OF_DEFAULT_DIST, OF_MAX_ACCURACY_LOG,
-    promote_ll_table, promote_ml_table, promote_of_table,
+    FSE_SEQ_DECODE_ENTRY_ZERO, FSE_SEQ_TABLE_CAPACITY, FseSeqDecodeEntry, LL_BASELINE_TABLE,
+    LL_BITS_TABLE, LL_DEFAULT_ACCURACY, LL_DEFAULT_DIST, LL_MAX_ACCURACY_LOG, ML_BASELINE_TABLE,
+    ML_BITS_TABLE, ML_DEFAULT_ACCURACY, ML_DEFAULT_DIST, ML_MAX_ACCURACY_LOG, OF_DEFAULT_ACCURACY,
+    OF_DEFAULT_DIST, OF_MAX_ACCURACY_LOG, promote_ll_table, promote_ml_table, promote_of_table,
 };
 
+type SeqTable = [FseSeqDecodeEntry; FSE_SEQ_TABLE_CAPACITY];
+
+const EMPTY_SEQ_TABLE: SeqTable = [FSE_SEQ_DECODE_ENTRY_ZERO; FSE_SEQ_TABLE_CAPACITY];
+
+pub(crate) fn into_table(v: &[FseSeqDecodeEntry]) -> SeqTable {
+    let mut table = EMPTY_SEQ_TABLE;
+    table[..v.len()].copy_from_slice(v);
+    table
+}
+
 pub(crate) struct SequenceDecodeTables {
-    pub(crate) ll_table: Vec<FseSeqDecodeEntry>,
+    pub(crate) ll_table: SeqTable,
     pub(crate) ll_accuracy: u8,
-    pub(crate) of_table: Vec<FseSeqDecodeEntry>,
+    pub(crate) of_table: SeqTable,
     pub(crate) of_accuracy: u8,
-    pub(crate) ml_table: Vec<FseSeqDecodeEntry>,
+    pub(crate) ml_table: SeqTable,
     pub(crate) ml_accuracy: u8,
     pub(crate) ll_set: bool,
     pub(crate) of_set: bool,
@@ -31,20 +38,20 @@ pub(crate) struct SequenceDecodeTables {
 impl SequenceDecodeTables {
     pub(crate) fn new_default() -> Self {
         Self {
-            ll_table: promote_ll_table(&build_decode_table_from_default(
+            ll_table: into_table(&promote_ll_table(&build_decode_table_from_default(
                 &LL_DEFAULT_DIST,
                 LL_DEFAULT_ACCURACY,
-            )),
+            ))),
             ll_accuracy: LL_DEFAULT_ACCURACY,
-            of_table: promote_of_table(&build_decode_table_from_default(
+            of_table: into_table(&promote_of_table(&build_decode_table_from_default(
                 &OF_DEFAULT_DIST,
                 OF_DEFAULT_ACCURACY,
-            )),
+            ))),
             of_accuracy: OF_DEFAULT_ACCURACY,
-            ml_table: promote_ml_table(&build_decode_table_from_default(
+            ml_table: into_table(&promote_ml_table(&build_decode_table_from_default(
                 &ML_DEFAULT_DIST,
                 ML_DEFAULT_ACCURACY,
-            )),
+            ))),
             ml_accuracy: ML_DEFAULT_ACCURACY,
             ll_set: false,
             of_set: false,
@@ -107,31 +114,28 @@ pub(crate) fn compute_offset(
 }
 
 #[cfg(feature = "std")]
-static LL_PREDEFINED: std::sync::LazyLock<Vec<FseSeqDecodeEntry>> =
-    std::sync::LazyLock::new(|| {
-        promote_ll_table(&build_decode_table_from_default(
-            &LL_DEFAULT_DIST,
-            LL_DEFAULT_ACCURACY,
-        ))
-    });
+static LL_PREDEFINED: std::sync::LazyLock<SeqTable> = std::sync::LazyLock::new(|| {
+    into_table(&promote_ll_table(&build_decode_table_from_default(
+        &LL_DEFAULT_DIST,
+        LL_DEFAULT_ACCURACY,
+    )))
+});
 
 #[cfg(feature = "std")]
-static ML_PREDEFINED: std::sync::LazyLock<Vec<FseSeqDecodeEntry>> =
-    std::sync::LazyLock::new(|| {
-        promote_ml_table(&build_decode_table_from_default(
-            &ML_DEFAULT_DIST,
-            ML_DEFAULT_ACCURACY,
-        ))
-    });
+static ML_PREDEFINED: std::sync::LazyLock<SeqTable> = std::sync::LazyLock::new(|| {
+    into_table(&promote_ml_table(&build_decode_table_from_default(
+        &ML_DEFAULT_DIST,
+        ML_DEFAULT_ACCURACY,
+    )))
+});
 
 #[cfg(feature = "std")]
-static OF_PREDEFINED: std::sync::LazyLock<Vec<FseSeqDecodeEntry>> =
-    std::sync::LazyLock::new(|| {
-        promote_of_table(&build_decode_table_from_default(
-            &OF_DEFAULT_DIST,
-            OF_DEFAULT_ACCURACY,
-        ))
-    });
+static OF_PREDEFINED: std::sync::LazyLock<SeqTable> = std::sync::LazyLock::new(|| {
+    into_table(&promote_of_table(&build_decode_table_from_default(
+        &OF_DEFAULT_DIST,
+        OF_DEFAULT_ACCURACY,
+    )))
+});
 
 pub(crate) fn parse_sequence_tables_ws(
     data: &[u8],
@@ -156,15 +160,14 @@ pub(crate) fn parse_sequence_tables_ws(
         0 => {
             #[cfg(feature = "std")]
             {
-                prev.ll_table.clear();
-                prev.ll_table.extend_from_slice(&LL_PREDEFINED);
+                prev.ll_table = *LL_PREDEFINED;
             }
             #[cfg(not(feature = "std"))]
             {
-                prev.ll_table = promote_ll_table(&build_decode_table_from_default(
+                prev.ll_table = into_table(&promote_ll_table(&build_decode_table_from_default(
                     &LL_DEFAULT_DIST,
                     LL_DEFAULT_ACCURACY,
-                ));
+                )));
             }
             prev.ll_accuracy = LL_DEFAULT_ACCURACY;
             prev.ll_set = true;
@@ -174,13 +177,13 @@ pub(crate) fn parse_sequence_tables_ws(
             if sym >= LL_BITS_TABLE.len() {
                 return Err(DecompressError::CorruptSequences);
             }
-            prev.ll_table.clear();
-            prev.ll_table.push(FseSeqDecodeEntry {
+            prev.ll_table = EMPTY_SEQ_TABLE;
+            prev.ll_table[0] = FseSeqDecodeEntry {
                 base_line: 0,
                 num_bits: 0,
                 extra_bits: LL_BITS_TABLE[sym],
                 baseline_value: LL_BASELINE_TABLE[sym],
-            });
+            };
             prev.ll_accuracy = 0;
             prev.ll_set = true;
         }
@@ -195,7 +198,7 @@ pub(crate) fn parse_sequence_tables_ws(
                 &mut ws.fse_build_buf,
                 &mut ws.fse_symbol_next,
             )?;
-            prev.ll_table = promote_ll_table(&ws.fse_build_buf);
+            prev.ll_table = into_table(&promote_ll_table(&ws.fse_build_buf));
             prev.ll_accuracy = acc;
             prev.ll_set = true;
         }
@@ -210,15 +213,14 @@ pub(crate) fn parse_sequence_tables_ws(
         0 => {
             #[cfg(feature = "std")]
             {
-                prev.of_table.clear();
-                prev.of_table.extend_from_slice(&OF_PREDEFINED);
+                prev.of_table = *OF_PREDEFINED;
             }
             #[cfg(not(feature = "std"))]
             {
-                prev.of_table = promote_of_table(&build_decode_table_from_default(
+                prev.of_table = into_table(&promote_of_table(&build_decode_table_from_default(
                     &OF_DEFAULT_DIST,
                     OF_DEFAULT_ACCURACY,
-                ));
+                )));
             }
             prev.of_accuracy = OF_DEFAULT_ACCURACY;
             prev.of_set = true;
@@ -228,13 +230,13 @@ pub(crate) fn parse_sequence_tables_ws(
             if sym > 31 {
                 return Err(DecompressError::CorruptSequences);
             }
-            prev.of_table.clear();
-            prev.of_table.push(FseSeqDecodeEntry {
+            prev.of_table = EMPTY_SEQ_TABLE;
+            prev.of_table[0] = FseSeqDecodeEntry {
                 base_line: 0,
                 num_bits: 0,
                 extra_bits: sym,
                 baseline_value: 1u32 << sym,
-            });
+            };
             prev.of_accuracy = 0;
             prev.of_set = true;
         }
@@ -249,7 +251,7 @@ pub(crate) fn parse_sequence_tables_ws(
                 &mut ws.fse_build_buf,
                 &mut ws.fse_symbol_next,
             )?;
-            prev.of_table = promote_of_table(&ws.fse_build_buf);
+            prev.of_table = into_table(&promote_of_table(&ws.fse_build_buf));
             prev.of_accuracy = acc;
             prev.of_set = true;
         }
@@ -264,15 +266,14 @@ pub(crate) fn parse_sequence_tables_ws(
         0 => {
             #[cfg(feature = "std")]
             {
-                prev.ml_table.clear();
-                prev.ml_table.extend_from_slice(&ML_PREDEFINED);
+                prev.ml_table = *ML_PREDEFINED;
             }
             #[cfg(not(feature = "std"))]
             {
-                prev.ml_table = promote_ml_table(&build_decode_table_from_default(
+                prev.ml_table = into_table(&promote_ml_table(&build_decode_table_from_default(
                     &ML_DEFAULT_DIST,
                     ML_DEFAULT_ACCURACY,
-                ));
+                )));
             }
             prev.ml_accuracy = ML_DEFAULT_ACCURACY;
             prev.ml_set = true;
@@ -282,13 +283,13 @@ pub(crate) fn parse_sequence_tables_ws(
             if sym >= ML_BITS_TABLE.len() {
                 return Err(DecompressError::CorruptSequences);
             }
-            prev.ml_table.clear();
-            prev.ml_table.push(FseSeqDecodeEntry {
+            prev.ml_table = EMPTY_SEQ_TABLE;
+            prev.ml_table[0] = FseSeqDecodeEntry {
                 base_line: 0,
                 num_bits: 0,
                 extra_bits: ML_BITS_TABLE[sym],
                 baseline_value: ML_BASELINE_TABLE[sym],
-            });
+            };
             prev.ml_accuracy = 0;
             prev.ml_set = true;
         }
@@ -303,7 +304,7 @@ pub(crate) fn parse_sequence_tables_ws(
                 &mut ws.fse_build_buf,
                 &mut ws.fse_symbol_next,
             )?;
-            prev.ml_table = promote_ml_table(&ws.fse_build_buf);
+            prev.ml_table = into_table(&promote_ml_table(&ws.fse_build_buf));
             prev.ml_accuracy = acc;
             prev.ml_set = true;
         }

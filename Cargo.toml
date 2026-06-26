@@ -6,7 +6,7 @@ exclude = ["fuzz", "bench", "jsr"]
 name = "zrip"
 version = "0.6.0"
 edition = "2024"
-rust-version = "1.86"
+rust-version = "1.88"
 description = "Fast, memory-safe Rust implementation of Zstandard compression (levels -7..4)"
 license = "MIT"
 repository = "https://github.com/paddor/zrip"
@@ -15,8 +15,9 @@ keywords = ["zstd", "zstandard", "compression", "decompression"]
 include = ["src/**/*", "README.md", "LICENSE", "CHANGELOG.md", "DESIGN.md", "SAFETY.md", "SECURITY.md"]
 
 [features]
-default = ["std", "frame", "ldm"]
+default = ["std", "frame", "ldm", "simd"]
 std = ["alloc", "zrip-core/std", "zrip-encode/std", "zrip-decode/std"]
+simd = ["zrip-decode/simd"]
 alloc = ["zrip-core/alloc", "zrip-encode/alloc", "zrip-decode/alloc"]
 frame = ["std", "zrip-encode/frame", "zrip-decode/frame"]
 ldm = ["std", "zrip-encode/ldm"]

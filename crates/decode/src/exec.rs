@@ -3,9 +3,11 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
+use crate::fast_vec::{fast_extend_from_slice, wild_copy_match};
 use crate::sequences::{SequenceDecodeTables, compute_offset};
 use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
+use zrip_core::fse::FSE_SEQ_TABLE_MASK;
 use zrip_core::hint::{likely, unlikely};
 
 #[allow(unused_assignments)]
@@ -39,10 +41,6 @@ pub(crate) fn decode_execute_sequences(
     let mut op = output.len();
     let op_limit = output.capacity() - WILDCOPY_OVERLENGTH;
     let mut lit_off: usize = 0;
-    let of_mask = ((1u32 << tables.of_accuracy) - 1) as usize;
-    let ml_mask = ((1u32 << tables.ml_accuracy) - 1) as usize;
-    let ll_mask = ((1u32 << tables.ll_accuracy) - 1) as usize;
-
     macro_rules! execute_seq {
         ($literal_length:expr, $match_length:expr, $offset:expr) => {{
             let ll = $literal_length as usize;
@@ -54,12 +52,10 @@ pub(crate) fn decode_execute_sequences(
                 return Err(DecompressError::CorruptLiterals);
             }
 
-            // Append literals
-            output.extend_from_slice(&literals[lit_off..lit_off + ll]);
+            fast_extend_from_slice(output, &literals[lit_off..lit_off + ll]);
             op += ll;
             lit_off += ll;
 
-            // Match copy
             let off = $offset as usize;
             if unlikely(off == 0) {
                 return Err(DecompressError::InvalidOffset);
@@ -69,9 +65,9 @@ pub(crate) fn decode_execute_sequences(
                 return Err(DecompressError::InvalidOffset);
             }
             if likely(off <= out_pos) {
-                copy_match_safe(output, off, ml);
+                wild_copy_match(output, off, ml);
             } else {
-                copy_match_from_history_safe(output, history, off, out_pos, ml);
+                copy_match_from_history(output, history, off, out_pos, ml);
             }
             op += ml;
         }};
@@ -79,9 +75,9 @@ pub(crate) fn decode_execute_sequences(
 
     macro_rules! decode_and_execute_update {
         ($rev_reader:expr, $offsets:expr) => {{
-            let of_e = tables.of_table[of_state as usize & of_mask];
-            let ml_e = tables.ml_table[ml_state as usize & ml_mask];
-            let ll_e = tables.ll_table[ll_state as usize & ll_mask];
+            let of_e = tables.of_table[(of_state & FSE_SEQ_TABLE_MASK) as usize];
+            let ml_e = tables.ml_table[(ml_state & FSE_SEQ_TABLE_MASK) as usize];
+            let ll_e = tables.ll_table[(ll_state & FSE_SEQ_TABLE_MASK) as usize];
 
             let of_extra = $rev_reader.read_bits_branchless(of_e.extra_bits);
             let offset_value = of_e.baseline_value + of_extra;
@@ -122,9 +118,9 @@ pub(crate) fn decode_execute_sequences(
     }
     while seq_idx < last_seq {
         rev_reader.refill();
-        let of_e = tables.of_table[of_state as usize & of_mask];
-        let ml_e = tables.ml_table[ml_state as usize & ml_mask];
-        let ll_e = tables.ll_table[ll_state as usize & ll_mask];
+        let of_e = tables.of_table[(of_state & FSE_SEQ_TABLE_MASK) as usize];
+        let ml_e = tables.ml_table[(ml_state & FSE_SEQ_TABLE_MASK) as usize];
+        let ll_e = tables.ll_table[(ll_state & FSE_SEQ_TABLE_MASK) as usize];
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
@@ -146,9 +142,9 @@ pub(crate) fn decode_execute_sequences(
     // Last sequence: no FSE state update
     {
         rev_reader.refill();
-        let of_e = tables.of_table[of_state as usize & of_mask];
-        let ml_e = tables.ml_table[ml_state as usize & ml_mask];
-        let ll_e = tables.ll_table[ll_state as usize & ll_mask];
+        let of_e = tables.of_table[(of_state & FSE_SEQ_TABLE_MASK) as usize];
+        let ml_e = tables.ml_table[(ml_state & FSE_SEQ_TABLE_MASK) as usize];
+        let ll_e = tables.ll_table[(ll_state & FSE_SEQ_TABLE_MASK) as usize];
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
@@ -166,29 +162,14 @@ pub(crate) fn decode_execute_sequences(
     }
 
     if lit_off < literals.len() {
-        output.extend_from_slice(&literals[lit_off..]);
+        fast_extend_from_slice(output, &literals[lit_off..]);
     }
 
     Ok(())
 }
 
 #[inline(always)]
-fn copy_match_safe(output: &mut Vec<u8>, offset: usize, match_length: usize) {
-    let start = output.len() - offset;
-    if offset >= match_length {
-        output.extend_from_within(start..start + match_length);
-    } else {
-        let mut remaining = match_length;
-        while remaining > 0 {
-            let n = remaining.min(offset);
-            output.extend_from_within(start..start + n);
-            remaining -= n;
-        }
-    }
-}
-
-#[inline(always)]
-fn copy_match_from_history_safe(
+fn copy_match_from_history(
     output: &mut Vec<u8>,
     history: &[u8],
     offset: usize,
@@ -199,54 +180,13 @@ fn copy_match_from_history_safe(
     let history_start = history.len() - history_reach;
     let from_history = history_reach.min(match_length);
 
-    output.extend_from_slice(&history[history_start..history_start + from_history]);
+    fast_extend_from_slice(
+        output,
+        &history[history_start..history_start + from_history],
+    );
 
     let remaining = match_length - from_history;
     if remaining > 0 {
-        copy_match_safe(output, offset, remaining);
+        wild_copy_match(output, offset, remaining);
     }
-}
-
-#[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
-#[target_feature(enable = "avx2,bmi2")]
-pub(crate) fn decode_execute_sequences_avx2(
-    data: &[u8],
-    num_sequences: u32,
-    tables: &SequenceDecodeTables,
-    offsets: &mut [u32; 3],
-    literals: &[u8],
-    output: &mut Vec<u8>,
-    history: &[u8],
-) -> Result<(), DecompressError> {
-    decode_execute_sequences(
-        data,
-        num_sequences,
-        tables,
-        offsets,
-        literals,
-        output,
-        history,
-    )
-}
-
-#[cfg(all(target_arch = "aarch64", not(feature = "paranoid")))]
-#[target_feature(enable = "neon")]
-pub(crate) fn decode_execute_sequences_neon(
-    data: &[u8],
-    num_sequences: u32,
-    tables: &SequenceDecodeTables,
-    offsets: &mut [u32; 3],
-    literals: &[u8],
-    output: &mut Vec<u8>,
-    history: &[u8],
-) -> Result<(), DecompressError> {
-    decode_execute_sequences(
-        data,
-        num_sequences,
-        tables,
-        offsets,
-        literals,
-        output,
-        history,
-    )
 }

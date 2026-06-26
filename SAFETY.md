@@ -2,10 +2,10 @@
 
 ## Unsafe boundary
 
-The decoder is `#![forbid(unsafe_code)]` in its implementation (`exec.rs`), with
-only 4 trivial `unsafe` dispatch calls for `#[target_feature]` CPU feature gating
-(proven safe by runtime `cpu_tier()` detection). No `unsafe` is exposed in the
-public API.
+The decoder has zero `unsafe` blocks. All files in `crates/decode/src/` are
+`#![forbid(unsafe_code)]`. Platform dispatch (AVX2+BMI2 on x86_64, NEON on
+aarch64) is handled by `fearless_simd::dispatch!`, which encapsulates
+`#[target_feature]` calling internally. No `unsafe` is exposed in the public API.
 
 Encoder unsafe is confined to `encode/src/primitives.rs` (16 blocks):
 `get_unchecked`, `read_unaligned`, `set_len`, `count_match_raw`, `prefetch`.
@@ -25,7 +25,7 @@ the encoder and core primitives:
 |:---------|:--------|:---------|
 | Encoder indexing | `get_unchecked`, `read_unaligned` | Direct indexing, `from_le_bytes` |
 | Encoder Vec length | `set_len` | `resize` |
-| Decoder AVX2+BMI2 dispatch | `#[target_feature]` wrapper | Gated out; scalar path only |
+| Decoder dispatch | `fearless_simd::dispatch!` | Gated out; scalar path only |
 | Huffman BMI2 dispatch | `#[target_feature]` wrapper | Gated out; direct call |
 
 The safe alternatives use the same algorithms and produce identical output.

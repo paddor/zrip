@@ -9,6 +9,7 @@ pub(crate) mod block_decoder;
 #[cfg(feature = "std")]
 pub mod context;
 pub(crate) mod exec;
+pub(crate) mod fast_vec;
 pub(crate) mod literals;
 pub(crate) mod ring_buffer;
 pub(crate) mod sequences;
@@ -28,8 +29,6 @@ use zrip_core::error::DecompressError;
 use zrip_core::frame::MAX_WINDOW_SIZE;
 use zrip_core::frame::header::parse_frame_header;
 use zrip_core::huffman::HuffmanDecodeEntry;
-#[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
-use zrip_core::simd::CpuTier;
 use zrip_core::xxhash::Xxh64State;
 
 pub(crate) struct BlockDecodeWorkspace {
@@ -190,17 +189,17 @@ pub(crate) fn decompress_frame(
     let mut seq_tables = if let Some(d) = dict {
         let mut st = SequenceDecodeTables::new_default();
         if let Some((t, l)) = d.of_table() {
-            st.of_table = zrip_core::fse::promote_of_table(t);
+            st.of_table = crate::sequences::into_table(&zrip_core::fse::promote_of_table(t));
             st.of_accuracy = l;
             st.of_set = true;
         }
         if let Some((t, l)) = d.ml_table() {
-            st.ml_table = zrip_core::fse::promote_ml_table(t);
+            st.ml_table = crate::sequences::into_table(&zrip_core::fse::promote_ml_table(t));
             st.ml_accuracy = l;
             st.ml_set = true;
         }
         if let Some((t, l)) = d.ll_table() {
-            st.ll_table = zrip_core::fse::promote_ll_table(t);
+            st.ll_table = crate::sequences::into_table(&zrip_core::fse::promote_ll_table(t));
             st.ll_accuracy = l;
             st.ll_set = true;
         }
@@ -214,13 +213,13 @@ pub(crate) fn decompress_frame(
         [1, 4, 8]
     };
     ws.huf_valid = false;
-    if let Some(d) = dict {
-        if let Some((t, l)) = d.huf_table() {
-            ws.huf_table.clear();
-            ws.huf_table.extend_from_slice(t);
-            ws.huf_table_log = l;
-            ws.huf_valid = true;
-        }
+    if let Some(d) = dict
+        && let Some((t, l)) = d.huf_table()
+    {
+        ws.huf_table.clear();
+        ws.huf_table.extend_from_slice(t);
+        ws.huf_table_log = l;
+        ws.huf_valid = true;
     }
 
     let mut hasher = if header.content_checksum {
@@ -317,10 +316,10 @@ pub(crate) fn decompress_frame(
         }
     }
 
-    if let Some(fcs) = header.frame_content_size {
-        if (output.len() - output_start) as u64 != fcs {
-            return Err(DecompressError::FrameSizeMismatch);
-        }
+    if let Some(fcs) = header.frame_content_size
+        && (output.len() - output_start) as u64 != fcs
+    {
+        return Err(DecompressError::FrameSizeMismatch);
     }
 
     Ok(offset)
@@ -393,29 +392,13 @@ pub(crate) fn decode_sequences_dispatch(
     output: &mut Vec<u8>,
     history: &[u8],
 ) -> Result<(), DecompressError> {
-    #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
+    #[cfg(all(feature = "std", feature = "simd"))]
     {
-        if zrip_core::simd::cpu_tier() >= CpuTier::Avx2 {
-            // SAFETY: AVX2+BMI2 verified by cpu_tier() >= Avx2
-            return unsafe {
-                crate::exec::decode_execute_sequences_avx2(
-                    seq_data,
-                    num_sequences,
-                    seq_tables,
-                    rep_offsets,
-                    literals,
-                    output,
-                    history,
-                )
-            };
-        }
-    }
-
-    #[cfg(all(target_arch = "aarch64", not(feature = "paranoid")))]
-    {
-        // SAFETY: NEON is mandatory on aarch64
-        return unsafe {
-            crate::exec::decode_execute_sequences_neon(
+        use std::sync::OnceLock;
+        static LEVEL: OnceLock<fearless_simd::Level> = OnceLock::new();
+        let level = *LEVEL.get_or_init(fearless_simd::Level::new);
+        return fearless_simd::dispatch!(level, _simd => {
+            decode_execute_sequences(
                 seq_data,
                 num_sequences,
                 seq_tables,
@@ -424,7 +407,7 @@ pub(crate) fn decode_sequences_dispatch(
                 output,
                 history,
             )
-        };
+        });
     }
 
     #[allow(unreachable_code)]

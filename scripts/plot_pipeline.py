@@ -53,45 +53,6 @@ def _apply_profile():
 _apply_profile()
 
 
-def detect_hardware():
-    try:
-        cpu = os.environ.get("ZRIP_CPU")
-        if not cpu:
-            for line in open("/proc/cpuinfo"):
-                if line.startswith("model name"):
-                    cpu = line.split(":", 1)[1].strip()
-                    cpu = cpu.replace("(R)", "").replace("(TM)", "").replace("CPU ", "")
-                    break
-        if cpu:
-            extras = []
-            try:
-                gov = open("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor").read().strip()
-                if gov == "performance":
-                    extras.append("performance governor")
-            except OSError:
-                pass
-            for path, off_val in [
-                ("/sys/devices/system/cpu/intel_pstate/no_turbo", "1"),
-                ("/sys/devices/system/cpu/cpufreq/boost", "0"),
-            ]:
-                try:
-                    if open(path).read().strip() == off_val:
-                        extras.append("turbo off")
-                    break
-                except OSError:
-                    continue
-            if not extras:
-                hw = os.environ.get("ZRIP_HW_EXTRAS")
-                if hw:
-                    extras.extend(hw.split(","))
-            if extras:
-                cpu += ", " + ", ".join(extras)
-            return cpu
-    except OSError:
-        pass
-    return None
-
-
 def human_size(n):
     if n >= 1_000_000:
         return f"{n / 1_000_000:.1f} MB"
@@ -142,6 +103,7 @@ def load_level_data():
 
 
 def generate_svg(data):
+    from profiles import detect_hardware
     hw_label = detect_hardware()
 
     codecs = [c for c in CODEC_ORDER if c in data]
