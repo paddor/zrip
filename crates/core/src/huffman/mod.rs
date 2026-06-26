@@ -1,5 +1,4 @@
 pub mod decode;
-#[cfg(not(feature = "paranoid"))]
 pub(crate) mod decode_4stream;
 pub mod encode;
 pub(crate) mod primitives;

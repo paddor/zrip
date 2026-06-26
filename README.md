@@ -13,11 +13,11 @@ See the [benchmarks below](#performance).
 **Negative levels (-7 through -1).** Unlocks zstd's fastest compression tiers,
 useful when throughput matters more than ratio.
 
-**Encapsulated unsafe.** All algorithm and control-flow code is
-`#![forbid(unsafe_code)]`. Unsafe is confined to small, auditable primitives
-modules with `debug_assert!` guards. The `paranoid` feature eliminates all
-unsafe entirely, compiling pure safe Rust with zero SIMD intrinsics. See
-[SAFETY.md](SAFETY.md).
+**Safe decoder.** The decoder implementation (`exec.rs`) is
+`#![forbid(unsafe_code)]`. The only `unsafe` in the decode crate is 4 dispatch
+calls for `#[target_feature]` CPU feature gating. Encoder unsafe is confined to
+small, auditable `primitives.rs` with `debug_assert!` guards. The `paranoid`
+feature eliminates all remaining unsafe. See [SAFETY.md](SAFETY.md).
 
 **Small codebase.** ~14k lines of Rust. Levels above 4 add complexity for
 compression ratios that only matter in archival storage, not transfer
@@ -27,8 +27,8 @@ pipelines.
 feature; `frame` requires `std`.
 
 **WebAssembly.** Available as [`@paddor/zrip`](https://jsr.io/@paddor/zrip)
-on JSR. Auto-detects WASM SIMD support. 15% faster encode and 14% faster
-decode than C zstd compiled to WASM.
+on JSR. Auto-detects WASM SIMD support. 15% faster encode than C zstd compiled
+to WASM.
 
 **Dictionary compression.** COVER and FastCOVER training built in for
 small-message workloads (log lines, JSON records, RPC payloads).
@@ -186,7 +186,7 @@ let dict = train_dict_fastcover(&samples, 16384, FastCoverParams::default());
 | `alloc`        | yes     | `no_std` + heap via `alloc` crate              |
 | `ldm`          | yes     | Long distance matching for large-window compression |
 | `dict_builder` | no      | COVER/FastCOVER dictionary training            |
-| `paranoid`     | no      | Pure safe Rust: no SIMD, no unchecked indexing  |
+| `paranoid`     | no      | Pure safe Rust: no unchecked indexing, no `#[target_feature]` dispatch |
 | `nightly`      | no      | `#[optimize]` attributes on hot functions      |
 
 ## Safety

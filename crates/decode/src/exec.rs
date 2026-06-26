@@ -9,6 +9,7 @@ use zrip_core::error::DecompressError;
 use zrip_core::hint::{likely, unlikely};
 
 #[allow(unused_assignments)]
+#[inline(always)]
 pub(crate) fn decode_execute_sequences(
     data: &[u8],
     num_sequences: u32,
@@ -175,13 +176,13 @@ pub(crate) fn decode_execute_sequences(
 fn copy_match_safe(output: &mut Vec<u8>, offset: usize, match_length: usize) {
     let start = output.len() - offset;
     if offset >= match_length {
-        let len = output.len();
-        output.resize(len + match_length, 0);
-        output.copy_within(start..start + match_length, len);
+        output.extend_from_within(start..start + match_length);
     } else {
-        for i in 0..match_length {
-            let b = output[start + i % offset];
-            output.push(b);
+        let mut remaining = match_length;
+        while remaining > 0 {
+            let n = remaining.min(offset);
+            output.extend_from_within(start..start + n);
+            remaining -= n;
         }
     }
 }
@@ -204,4 +205,48 @@ fn copy_match_from_history_safe(
     if remaining > 0 {
         copy_match_safe(output, offset, remaining);
     }
+}
+
+#[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
+#[target_feature(enable = "avx2,bmi2")]
+pub(crate) fn decode_execute_sequences_avx2(
+    data: &[u8],
+    num_sequences: u32,
+    tables: &SequenceDecodeTables,
+    offsets: &mut [u32; 3],
+    literals: &[u8],
+    output: &mut Vec<u8>,
+    history: &[u8],
+) -> Result<(), DecompressError> {
+    decode_execute_sequences(
+        data,
+        num_sequences,
+        tables,
+        offsets,
+        literals,
+        output,
+        history,
+    )
+}
+
+#[cfg(all(target_arch = "aarch64", not(feature = "paranoid")))]
+#[target_feature(enable = "neon")]
+pub(crate) fn decode_execute_sequences_neon(
+    data: &[u8],
+    num_sequences: u32,
+    tables: &SequenceDecodeTables,
+    offsets: &mut [u32; 3],
+    literals: &[u8],
+    output: &mut Vec<u8>,
+    history: &[u8],
+) -> Result<(), DecompressError> {
+    decode_execute_sequences(
+        data,
+        num_sequences,
+        tables,
+        offsets,
+        literals,
+        output,
+        history,
+    )
 }
