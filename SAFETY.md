@@ -25,12 +25,13 @@ the encoder and core primitives:
 |:---------|:--------|:---------|
 | Encoder indexing | `get_unchecked`, `read_unaligned` | Direct indexing, `from_le_bytes` |
 | Encoder Vec length | `set_len` | `resize` |
-| Decoder dispatch | `fearless_simd::dispatch!` | Gated out; scalar path only |
-| Huffman BMI2 dispatch | `#[target_feature]` wrapper | Gated out; direct call |
+| Decoder SIMD dispatch | `fearless_simd::dispatch!` | Same (no unsafe needed) |
+| Decoder wild-copy | 16-byte unaligned load/store | `extend_from_slice`, `extend_from_within` |
+| Huffman BMI2 dispatch | `#[target_feature]` wrapper | Gated out; generic call |
 
 The safe alternatives use the same algorithms and produce identical output.
-Encode throughput drops roughly 40% (corpus dependent). Decode throughput is
-unaffected since the decoder is already safe Rust.
+Encode throughput drops roughly 40% (corpus dependent). Decode throughput
+drops roughly 20% due to safe wild-copy fallbacks in `fast_vec.rs`.
 
 The feature exists for users who need a guarantee of zero unsafe, or for
 auditing and benchmarking the cost of safe-only codepaths.

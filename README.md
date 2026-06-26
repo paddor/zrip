@@ -186,7 +186,8 @@ let dict = train_dict_fastcover(&samples, 16384, FastCoverParams::default());
 | `alloc`        | yes     | `no_std` + heap via `alloc` crate              |
 | `ldm`          | yes     | Long distance matching for large-window compression |
 | `dict_builder` | no      | COVER/FastCOVER dictionary training            |
-| `paranoid`     | no      | Pure safe Rust: no unchecked indexing, no SIMD dispatch |
+| `simd`         | yes     | `fearless_simd` runtime dispatch (AVX2+BMI2, NEON, SIMD128) |
+| `paranoid`     | no      | Pure safe Rust: `forbid(unsafe_code)` on all crates    |
 | `nightly`      | no      | `#[optimize]` attributes on hot functions      |
 
 ## Safety
