@@ -51,6 +51,18 @@ rm ~/.cache/zrip/zrip.jsonl
 
 C zstd results are stable across zrip code changes and rarely need rerunning.
 
+### Paranoid mode (safe Rust, no unsafe)
+
+The `paranoid` feature compiles zrip with `forbid(unsafe_code)`. SIMD dispatch
+still works via `fearless_simd` (safe `#[target_feature]` wrappers). It must be benchmarked as a separate build:
+
+```bash
+cargo run --example zrip_bench --release --features paranoid
+```
+
+This produces `zrip_paranoid.jsonl` cache entries. Always run this after the
+normal bench so the chart scripts have data for all codecs.
+
 ### Benchmarking all levels
 
 zrip supports levels -7 through 4. The default bench runs L1 and L3 only.
@@ -64,23 +76,43 @@ cargo run --example zrip_bench --release -- --levels -7,-6,-5,-4,-3,-2,-1,2,4  #
 
 ## Charts
 
-Three plotting scripts in `scripts/`, all reading from `~/.cache/zrip/*.jsonl`:
+Plotting scripts in `scripts/`, all reading from `~/.cache/zrip/*.jsonl`:
 
 | Script | Output | Description |
 |--------|--------|-------------|
 | `plot_scatter.py` | `scatter.svg` | Encode speed vs compression ratio (geomean) |
-| `plot_bench.py` | `bench.svg` | Per-file bar chart |
 | `plot_summary.py` | `summary.svg` | Summary comparison table |
+| `plot_matrix.py` | `matrix.svg` | Per-file/level heatmap matrix |
+| `plot_pipeline.py` | `pipeline.svg` | Encode+decode pipeline throughput |
 
-### Regenerating the scatter chart
+### Regenerating all charts
+
+After any full-corpus benchmark run (including paranoid), regenerate all charts:
 
 ```bash
-ZRIP_HW_EXTRAS="performance governor,turbo off" python3 scripts/plot_scatter.py
+export ZRIP_HW_EXTRAS="performance governor,turbo off"
+python3 scripts/plot_scatter.py doc/charts/x86_64/
+python3 scripts/plot_summary.py doc/charts/x86_64/
+python3 scripts/plot_matrix.py doc/charts/x86_64/
+python3 scripts/plot_pipeline.py doc/charts/x86_64/
 ```
-
-Output goes to `doc/charts/{arch}/scatter.svg`.
 
 The `ZRIP_HW_EXTRAS` env var is required when the CPU governor and turbo state
 cannot be auto-detected (e.g. in a VM or container). It appends the given
 labels to the hardware subtitle in the chart. On bare metal with sysfs access,
 the script detects these automatically.
+
+### Full benchmark + chart workflow
+
+```bash
+rm ~/.cache/zrip/x86_64/*/zrip.jsonl ~/.cache/zrip/x86_64/*/zrip_paranoid.jsonl
+cd bench
+cargo run --example zrip_bench --release -- --impl all
+cargo run --example zrip_bench --release --features paranoid
+cd ..
+export ZRIP_HW_EXTRAS="performance governor,turbo off"
+python3 scripts/plot_scatter.py doc/charts/x86_64/
+python3 scripts/plot_summary.py doc/charts/x86_64/
+python3 scripts/plot_matrix.py doc/charts/x86_64/
+python3 scripts/plot_pipeline.py doc/charts/x86_64/
+```
