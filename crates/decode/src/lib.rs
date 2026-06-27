@@ -421,3 +421,61 @@ pub(crate) fn decode_sequences_dispatch(
         history,
     )
 }
+
+#[cfg(all(test, miri, not(feature = "paranoid")))]
+mod ub_tests {
+    use super::*;
+    use alloc::vec::Vec;
+    use zrip_core::bitstream::writer::BitWriter;
+    use zrip_core::frame::{MAX_BLOCK_SIZE, ZSTD_MAGIC};
+
+    fn push_block_header(out: &mut Vec<u8>, last: bool, block_type: u32, block_size: usize) {
+        let raw = ((block_size as u32) << 3) | (block_type << 1) | u32::from(last);
+        out.push(raw as u8);
+        out.push((raw >> 8) as u8);
+        out.push((raw >> 16) as u8);
+    }
+
+    fn frame_with_oversized_compressed_block_output() -> Vec<u8> {
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&ZSTD_MAGIC.to_le_bytes());
+        frame.push(0x00);
+        frame.push(0x00);
+
+        push_block_header(&mut frame, false, 0, 1);
+        frame.push(b'A');
+
+        let mut block = Vec::new();
+        let trailing_literals = 65usize;
+        block.push(0x04 | (((trailing_literals & 0x0f) as u8) << 4));
+        block.push((trailing_literals >> 4) as u8);
+        block.extend(core::iter::repeat_n(b'B', trailing_literals));
+
+        block.push(1);
+        block.push(0x54);
+        block.extend_from_slice(&[0, 2, 52]);
+
+        let mut seq_bits = BitWriter::new();
+        let ml_extra = MAX_BLOCK_SIZE as u32 - 65_539;
+        seq_bits.write_bits(ml_extra, 16);
+        seq_bits.write_bits(0, 2);
+        seq_bits.close_reverse_stream();
+        block.extend_from_slice(&seq_bits.into_bytes());
+
+        push_block_header(&mut frame, true, 2, block.len());
+        frame.extend_from_slice(&block);
+        frame
+    }
+
+    #[test]
+    fn compressed_block_trailing_literals_overrun_wildcopy_headroom() {
+        // Issue: sequence execution reserves one block plus 64 bytes of wild-copy
+        // headroom and checks each sequence against that limit, but the final
+        // trailing literals are appended afterward without a matching capacity or
+        // block-size check. This safe frame seeds one prior byte, emits a 128 KiB
+        // match at offset 1, then appends 65 literals; miri reports the resulting
+        // out-of-bounds write in fast_extend_from_slice.
+        let frame = frame_with_oversized_compressed_block_output();
+        let _ = decompress(&frame);
+    }
+}

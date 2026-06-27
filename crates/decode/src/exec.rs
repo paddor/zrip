@@ -39,7 +39,8 @@ pub(crate) fn decode_execute_sequences(
     output.reserve(zrip_core::frame::MAX_BLOCK_SIZE + WILDCOPY_OVERLENGTH);
 
     let mut op = output.len();
-    let op_limit = output.capacity() - WILDCOPY_OVERLENGTH;
+    let output_start = op;
+    let op_limit = output_start + zrip_core::frame::MAX_BLOCK_SIZE;
     let mut lit_off: usize = 0;
     macro_rules! execute_seq {
         ($literal_length:expr, $match_length:expr, $offset:expr) => {{
@@ -163,7 +164,7 @@ pub(crate) fn decode_execute_sequences(
 
     if lit_off < literals.len() {
         let remaining = literals.len() - lit_off;
-        if output.len() + remaining + 16 > output.capacity() {
+        if op + remaining > op_limit {
             return Err(DecompressError::CorruptSequences);
         }
         fast_extend_from_slice(output, &literals[lit_off..]);

@@ -16,6 +16,9 @@ pub fn decode_single_stream(
     data: &[u8],
     output_size: usize,
 ) -> Result<Vec<u8>, DecompressError> {
+    if table.len() < (1usize << table_log) {
+        return Err(DecompressError::BadHuffmanStream);
+    }
     let mut reader = ReverseBitReader::new(data).map_err(|_| DecompressError::BadHuffmanStream)?;
 
     let mut output = Vec::with_capacity(output_size);
@@ -62,6 +65,9 @@ pub fn decode_single_stream_into(
     data: &[u8],
     output: &mut [u8],
 ) -> Result<(), DecompressError> {
+    if table.len() < (1usize << table_log) {
+        return Err(DecompressError::BadHuffmanStream);
+    }
     let mut reader = ReverseBitReader::new(data).map_err(|_| DecompressError::BadHuffmanStream)?;
     decode_stream_tail(table, table_log, &mut reader, output)
 }
@@ -73,6 +79,9 @@ pub fn decode_single_stream_vec(
     output_size: usize,
     output: &mut Vec<u8>,
 ) -> Result<(), DecompressError> {
+    if table.len() < (1usize << table_log) {
+        return Err(DecompressError::BadHuffmanStream);
+    }
     output.clear();
     output.reserve(output_size);
     primitives::set_vec_len(output, output_size);
@@ -101,6 +110,9 @@ pub fn decode_4_streams(
     data: &[u8],
     output_size: usize,
 ) -> Result<Vec<u8>, DecompressError> {
+    if table.len() < (1usize << table_log) {
+        return Err(DecompressError::BadHuffmanStream);
+    }
     let mut output = vec![0u8; output_size];
     decode_4_streams_core_safe(table, table_log, data, output_size, &mut output)?;
     Ok(output)
@@ -113,6 +125,9 @@ pub fn decode_4_streams_into(
     output_size: usize,
     output: &mut Vec<u8>,
 ) -> Result<(), DecompressError> {
+    if table.len() < (1usize << table_log) {
+        return Err(DecompressError::BadHuffmanStream);
+    }
     output.clear();
     output.reserve(output_size);
     primitives::set_vec_len(output, output_size);
@@ -195,4 +210,27 @@ pub(super) fn decode_stream_tail(
     }
 
     Ok(())
+}
+
+#[cfg(all(test, miri, not(feature = "paranoid")))]
+mod ub_tests {
+    use super::*;
+    use crate::bitstream::writer::BitWriter;
+
+    #[test]
+    fn public_decode_single_stream_trusts_huffman_table_len() {
+        // Issue: decode_single_stream is a safe public API, but huf_table_lookup
+        // uses get_unchecked and only debug-asserts that the caller supplied at
+        // least 1 << table_log entries. This one-bit stream decodes index 1 from
+        // a one-entry table, so miri reports an out-of-bounds read.
+        let table = [HuffmanDecodeEntry {
+            symbol: 0,
+            num_bits: 1,
+        }];
+        let mut data = BitWriter::new();
+        data.write_bits(1, 1);
+        data.close_reverse_stream();
+
+        let _ = decode_single_stream(&table, 1, &data.into_bytes(), 1);
+    }
 }

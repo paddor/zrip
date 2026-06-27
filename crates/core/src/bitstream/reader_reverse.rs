@@ -138,9 +138,9 @@ impl<'a> ReverseBitReader<'a> {
     #[inline(always)]
     pub fn refill_fast(&mut self) {
         let byte_shift = (self.bits_consumed >> 3) as usize;
-        debug_assert!(self.ptr >= self.limit_ptr);
-        debug_assert!(byte_shift <= self.ptr);
-        debug_assert!(self.ptr - byte_shift + 8 <= self.data.len());
+        if byte_shift > self.ptr || self.ptr - byte_shift + 8 > self.data.len() {
+            return;
+        }
         self.ptr -= byte_shift;
         self.bits_consumed -= (byte_shift as u32) * 8;
         self.container = primitives::read_u64_le_unaligned(self.data, self.ptr);
@@ -227,5 +227,22 @@ mod tests {
         let mut r = ReverseBitReader::new(&bytes).unwrap();
         assert_eq!(r.read_bits(2).unwrap(), 0x3);
         assert_eq!(r.read_bits(8).unwrap(), 0xFF);
+    }
+}
+
+#[cfg(all(test, miri, not(feature = "paranoid")))]
+mod ub_tests {
+    use super::*;
+
+    #[test]
+    fn public_refill_fast_underflows_on_short_stream() {
+        // Issue: refill_fast is a safe public method, but its requirements
+        // (enough consumed bits and at least eight readable bytes after the new
+        // pointer) are enforced only with debug_asserts. On this one-byte stream,
+        // byte_shift is 8 and ptr is 0, so release builds wrap the subtraction
+        // and miri reports the resulting out-of-bounds read_u64_le_unaligned.
+        let data = [0b0000_0001];
+        let mut reader = ReverseBitReader::new(&data).unwrap();
+        reader.refill_fast();
     }
 }
