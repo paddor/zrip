@@ -84,14 +84,19 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
 /// Level 0 is treated as "library default" and maps to level 1.
 pub fn level_params_for_size(level: i32, src_len: usize) -> Option<LevelParams> {
     let mut params = level_params_inner(level)?;
+    params.hash_log = params.hash_log.clamp(HASH_LOG_MIN, HASH_LOG_MAX);
+    params.chain_log = params.chain_log.clamp(HASH_LOG_MIN, HASH_LOG_MAX);
     if (2..usize::MAX).contains(&src_len) {
         let src_log = 32 - ((src_len as u32) - 1).leading_zeros();
-        params.hash_log = params.hash_log.min(src_log);
-        params.chain_log = params.chain_log.min(src_log);
+        params.hash_log = params.hash_log.min(src_log).max(HASH_LOG_MIN);
+        params.chain_log = params.chain_log.min(src_log).max(HASH_LOG_MIN);
         params.window_log = params.window_log.min(src_log);
     }
     Some(params)
 }
+
+pub const HASH_LOG_MIN: u32 = 6;
+pub const HASH_LOG_MAX: u32 = 30;
 
 /// Returns the maximum hash_log for a given level.
 /// Used by CompressContext to pre-allocate hash tables.

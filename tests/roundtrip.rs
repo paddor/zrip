@@ -647,6 +647,30 @@ fn compress_with_params_dfast() {
     assert_eq!(decompressed, data);
 }
 
+#[cfg(not(miri))]
+#[test]
+fn compress_with_params_clamps_degenerate_hash_log() {
+    let data = b"abcdefghijklmnop".repeat(100);
+    let mut params = zrip::encode::strategy::level_params(1).unwrap();
+    params.hash_log = 0;
+    params.chain_log = 0;
+    let compressed = zrip::compress_with_params(&data, &params).unwrap();
+    let decompressed = zrip::decompress(&compressed).unwrap();
+    assert_eq!(decompressed, data);
+}
+
+#[cfg(not(miri))]
+#[test]
+fn compress_with_params_clamps_excessive_hash_log() {
+    let data = b"abcdefghijklmnop".repeat(100);
+    let mut params = zrip::encode::strategy::level_params(1).unwrap();
+    params.hash_log = 40;
+    params.chain_log = 40;
+    let compressed = zrip::compress_with_params(&data, &params).unwrap();
+    let decompressed = zrip::decompress(&compressed).unwrap();
+    assert_eq!(decompressed, data);
+}
+
 // ===== Skippable frames =====
 
 #[test]

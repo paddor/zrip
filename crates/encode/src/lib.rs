@@ -96,10 +96,16 @@ pub(crate) fn block_looks_incompressible(data: &[u8]) -> bool {
 }
 
 pub(crate) fn clamp_params_to_src_size(params: &mut strategy::LevelParams, src_len: usize) {
+    params.hash_log = params
+        .hash_log
+        .clamp(strategy::HASH_LOG_MIN, strategy::HASH_LOG_MAX);
+    params.chain_log = params
+        .chain_log
+        .clamp(strategy::HASH_LOG_MIN, strategy::HASH_LOG_MAX);
     if src_len >= 2 {
         let src_log = 32 - ((src_len as u32) - 1).leading_zeros();
-        params.hash_log = params.hash_log.min(src_log);
-        params.chain_log = params.chain_log.min(src_log);
+        params.hash_log = params.hash_log.min(src_log).max(strategy::HASH_LOG_MIN);
+        params.chain_log = params.chain_log.min(src_log).max(strategy::HASH_LOG_MIN);
         params.window_log = params.window_log.min(src_log);
     }
 }
