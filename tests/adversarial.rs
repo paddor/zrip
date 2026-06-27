@@ -343,7 +343,10 @@ fn read_u32(data: &[u8], off: &mut usize) -> u32 {
 fn fuzz_corpus_dict_generate() {
     let plaintexts = collect_fuzz_corpus_plaintexts();
     if plaintexts.len() < 10 {
-        eprintln!("skipping: only {} decompressible corpus files", plaintexts.len());
+        eprintln!(
+            "skipping: only {} decompressible corpus files",
+            plaintexts.len()
+        );
         return;
     }
     let refs: Vec<&[u8]> = plaintexts.iter().map(|p| p.as_slice()).collect();
