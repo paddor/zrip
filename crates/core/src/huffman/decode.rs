@@ -16,6 +16,9 @@ pub fn decode_single_stream(
     data: &[u8],
     output_size: usize,
 ) -> Result<Vec<u8>, DecompressError> {
+    if table.len() < (1usize << table_log) {
+        return Err(DecompressError::BadHuffmanStream);
+    }
     let mut reader = ReverseBitReader::new(data).map_err(|_| DecompressError::BadHuffmanStream)?;
 
     let mut output = Vec::with_capacity(output_size);
@@ -62,6 +65,9 @@ pub fn decode_single_stream_into(
     data: &[u8],
     output: &mut [u8],
 ) -> Result<(), DecompressError> {
+    if table.len() < (1usize << table_log) {
+        return Err(DecompressError::BadHuffmanStream);
+    }
     let mut reader = ReverseBitReader::new(data).map_err(|_| DecompressError::BadHuffmanStream)?;
     decode_stream_tail(table, table_log, &mut reader, output)
 }
@@ -73,6 +79,9 @@ pub fn decode_single_stream_vec(
     output_size: usize,
     output: &mut Vec<u8>,
 ) -> Result<(), DecompressError> {
+    if table.len() < (1usize << table_log) {
+        return Err(DecompressError::BadHuffmanStream);
+    }
     output.clear();
     output.reserve(output_size);
     primitives::set_vec_len(output, output_size);
@@ -101,6 +110,9 @@ pub fn decode_4_streams(
     data: &[u8],
     output_size: usize,
 ) -> Result<Vec<u8>, DecompressError> {
+    if table.len() < (1usize << table_log) {
+        return Err(DecompressError::BadHuffmanStream);
+    }
     let mut output = vec![0u8; output_size];
     decode_4_streams_core_safe(table, table_log, data, output_size, &mut output)?;
     Ok(output)
@@ -113,6 +125,9 @@ pub fn decode_4_streams_into(
     output_size: usize,
     output: &mut Vec<u8>,
 ) -> Result<(), DecompressError> {
+    if table.len() < (1usize << table_log) {
+        return Err(DecompressError::BadHuffmanStream);
+    }
     output.clear();
     output.reserve(output_size);
     primitives::set_vec_len(output, output_size);
