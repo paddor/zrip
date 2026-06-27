@@ -13,7 +13,10 @@ use alloc::vec::Vec;
 use crate::bitstream::reader::BitReader;
 use crate::error::DecompressError;
 use crate::fse::table_builder::{build_decode_table, parse_fse_table_description};
-use crate::fse::{FseDecodeEntry, LL_MAX_SYMBOL, ML_MAX_SYMBOL, OF_MAX_SYMBOL};
+use crate::fse::{
+    FseDecodeEntry, LL_MAX_ACCURACY_LOG, LL_MAX_SYMBOL, ML_MAX_ACCURACY_LOG, ML_MAX_SYMBOL,
+    OF_MAX_ACCURACY_LOG, OF_MAX_SYMBOL,
+};
 use crate::huffman::HuffmanDecodeEntry;
 use crate::huffman::weights::{build_huffman_decode_table, parse_huffman_weights};
 
@@ -62,13 +65,16 @@ impl Dictionary {
             None
         };
 
-        let (of_table, of_consumed) = parse_dict_fse(&data[pos..], OF_MAX_SYMBOL)?;
+        let (of_table, of_consumed) =
+            parse_dict_fse_checked(&data[pos..], OF_MAX_SYMBOL, OF_MAX_ACCURACY_LOG)?;
         pos += of_consumed;
 
-        let (ml_table, ml_consumed) = parse_dict_fse(&data[pos..], ML_MAX_SYMBOL)?;
+        let (ml_table, ml_consumed) =
+            parse_dict_fse_checked(&data[pos..], ML_MAX_SYMBOL, ML_MAX_ACCURACY_LOG)?;
         pos += ml_consumed;
 
-        let (ll_table, ll_consumed) = parse_dict_fse(&data[pos..], LL_MAX_SYMBOL)?;
+        let (ll_table, ll_consumed) =
+            parse_dict_fse_checked(&data[pos..], LL_MAX_SYMBOL, LL_MAX_ACCURACY_LOG)?;
         pos += ll_consumed;
 
         if pos + 12 > data.len() {
@@ -153,9 +159,10 @@ fn parse_dict_huffman(
 
 #[cfg(feature = "alloc")]
 #[allow(clippy::type_complexity)]
-fn parse_dict_fse(
+fn parse_dict_fse_checked(
     data: &[u8],
     max_symbol: u8,
+    max_accuracy_log: u8,
 ) -> Result<(Option<(Vec<FseDecodeEntry>, u8)>, usize), DecompressError> {
     if data.is_empty() {
         return Err(DecompressError::InvalidDictionary);
@@ -163,10 +170,75 @@ fn parse_dict_fse(
 
     let mut reader = BitReader::new(data);
     let (distribution, accuracy_log) = parse_fse_table_description(&mut reader, max_symbol)?;
+    if accuracy_log > max_accuracy_log {
+        return Err(DecompressError::InvalidDictionary);
+    }
     let consumed = reader.bytes_consumed();
     let table = build_decode_table(&distribution, accuracy_log)
         .map_err(|_| DecompressError::InvalidDictionary)?;
     Ok((Some((table, accuracy_log)), consumed))
+}
+
+#[cfg(all(test, feature = "alloc"))]
+mod tests {
+    use super::*;
+    use crate::fse::table_builder::serialize_fse_table_description;
+
+    fn build_dict_with_of_accuracy(accuracy_log: u8) -> Vec<u8> {
+        let mut dict = Vec::new();
+        dict.extend_from_slice(&DICT_MAGIC.to_le_bytes());
+        dict.extend_from_slice(&1u32.to_le_bytes());
+        // Huffman table: header byte 0 triggers FSE path with compressed_size=0 → error.
+        // Use header byte 128 (direct mode, 1 symbol with weight in upper nibble).
+        dict.push(128);
+        dict.push(0x10); // symbol 0, weight = 1
+
+        // OF FSE table with the specified accuracy_log.
+        // Distribution: symbol 0 gets all probability.
+        let table_size = 1i16 << accuracy_log;
+        let mut dist = vec![0i16; 32];
+        dist[0] = table_size;
+        let of_bytes = serialize_fse_table_description(&dist, accuracy_log);
+        dict.extend_from_slice(&of_bytes);
+
+        // ML FSE table: accuracy_log = 6, symbol 0 gets all probability.
+        let mut ml_dist = vec![0i16; 53];
+        ml_dist[0] = 1 << 6;
+        let ml_bytes = serialize_fse_table_description(&ml_dist, 6);
+        dict.extend_from_slice(&ml_bytes);
+
+        // LL FSE table: accuracy_log = 6, symbol 0 gets all probability.
+        let mut ll_dist = vec![0i16; 36];
+        ll_dist[0] = 1 << 6;
+        let ll_bytes = serialize_fse_table_description(&ll_dist, 6);
+        dict.extend_from_slice(&ll_bytes);
+
+        // Rep offsets: [1, 4, 8]
+        dict.extend_from_slice(&1u32.to_le_bytes());
+        dict.extend_from_slice(&4u32.to_le_bytes());
+        dict.extend_from_slice(&8u32.to_le_bytes());
+
+        // Content (at least 1 byte)
+        dict.extend_from_slice(b"content");
+        dict
+    }
+
+    #[test]
+    fn dict_rejects_oversized_of_accuracy() {
+        let dict_bytes = build_dict_with_of_accuracy(10);
+        let result = Dictionary::from_bytes(&dict_bytes);
+        assert!(
+            result.is_err(),
+            "accuracy_log=10 should be rejected for OF (max=8)"
+        );
+    }
+
+    #[test]
+    fn dict_accepts_valid_of_accuracy() {
+        let dict_bytes = build_dict_with_of_accuracy(8);
+        let result = Dictionary::from_bytes(&dict_bytes);
+        assert!(result.is_ok(), "accuracy_log=8 should be accepted for OF");
+    }
 }
 
 #[cfg(feature = "dict_builder")]

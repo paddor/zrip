@@ -25,26 +25,39 @@ fn copy_8(src: *const u8, dst: *mut u8) {
     }
 }
 
-/// Copy `len` bytes from `src` into the end of `vec` using 16-byte wild copies.
+/// Copy `src` into the end of `vec` using 16-byte chunk copies.
 ///
-/// # Safety contract (upheld by caller via capacity reservation):
-/// - `vec.len() + len + 16 <= vec.capacity()`
-/// - `src` is readable for at least `max(len, 16)` bytes (literal buffer has 32-byte padding)
+/// All reads stay within `src` bounds (no wild over-read).
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 pub(crate) fn fast_extend_from_slice(vec: &mut Vec<u8>, src: &[u8]) {
     let len = src.len();
+    if len == 0 {
+        return;
+    }
     debug_assert!(vec.len() + len + 16 <= vec.capacity());
     unsafe {
         let dst = vec.as_mut_ptr().add(vec.len());
         let sp = src.as_ptr();
-        let mut off = 0usize;
-        loop {
-            copy_16(sp.add(off), dst.add(off));
-            off += 16;
-            if off >= len {
-                break;
+        if len >= 16 {
+            let mut off = 0usize;
+            while off + 16 <= len {
+                copy_16(sp.add(off), dst.add(off));
+                off += 16;
             }
+            if off < len {
+                copy_16(sp.add(len - 16), dst.add(len - 16));
+            }
+        } else if len >= 8 {
+            copy_8(sp, dst);
+            copy_8(sp.add(len - 8), dst.add(len - 8));
+        } else if len >= 4 {
+            let a = (sp as *const u32).read_unaligned();
+            (dst as *mut u32).write_unaligned(a);
+            let b = (sp.add(len - 4) as *const u32).read_unaligned();
+            (dst.add(len - 4) as *mut u32).write_unaligned(b);
+        } else {
+            core::ptr::copy_nonoverlapping(sp, dst, len);
         }
         vec.set_len(vec.len() + len);
     }
@@ -61,13 +74,15 @@ pub(crate) fn fast_extend_from_slice(vec: &mut Vec<u8>, src: &[u8]) {
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 unsafe fn build_pattern_u64(src: *const u8, offset: usize) -> u64 {
+    debug_assert!((2..=7).contains(&offset));
     let mut buf = [0u8; 8];
     unsafe {
-        core::ptr::copy_nonoverlapping(src, buf.as_mut_ptr(), offset);
+        let p = buf.as_mut_ptr();
+        core::ptr::copy_nonoverlapping(src, p, offset);
         let mut have = offset;
         while have < 8 {
             let n = have.min(8 - have);
-            core::ptr::copy_nonoverlapping(buf.as_ptr(), buf.as_mut_ptr().add(have), n);
+            core::ptr::copy_nonoverlapping(p, p.add(have), n);
             have += n;
         }
     }
@@ -153,6 +168,43 @@ pub(crate) fn wild_copy_match(vec: &mut Vec<u8>, offset: usize, len: usize) {
             let src = vec.len() - copied;
             vec.extend_from_within(src..src + n);
             copied += n;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fast_extend_from_slice_all_sizes() {
+        for len in 0..=64 {
+            let src: Vec<u8> = (0..len as u8).collect();
+            let mut dst = Vec::with_capacity(len + 16);
+            fast_extend_from_slice(&mut dst, &src);
+            assert_eq!(dst, src, "len={len}");
+        }
+    }
+
+    #[test]
+    fn wild_copy_match_all_offsets() {
+        for offset in 1..=16 {
+            for len in 1..=32 {
+                let mut v = Vec::with_capacity(offset + len + 16);
+                let seed: Vec<u8> = (0..offset).map(|i| (i as u8).wrapping_mul(37)).collect();
+                v.extend_from_slice(&seed);
+                let mut expected = v.clone();
+                let start = expected.len() - offset;
+                for i in 0..len {
+                    expected.push(expected[start + i % offset]);
+                }
+                wild_copy_match(&mut v, offset, len);
+                assert_eq!(
+                    &v[..offset + len],
+                    &expected[..offset + len],
+                    "offset={offset} len={len}"
+                );
+            }
         }
     }
 }

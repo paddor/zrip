@@ -1,43 +1,41 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 411" font-family="system-ui, -apple-system, sans-serif">
   <rect width="700" height="411" fill="#0d1117"/>
   <text x="350.0" y="22" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">zstd Pipeline @100 MB/s: Corpus geomean, Level 1 (lower is better)</text>
-  <text x="350.0" y="38" text-anchor="middle" fill="#7d8590" font-size="10">wasmtime (wasm32-wasip1)</text>
+  <text x="350.0" y="38" text-anchor="middle" fill="#7d8590" font-size="10">wasmtime (wasm32-wasip1), Linux VM on Intel Core i7-8700B @ 3.20GHz</text>
   <text x="22" y="180.0" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600" transform="rotate(-90,22,180.0)">seconds / GB</text>
-  <line x1="70" y1="259.7" x2="680" y2="259.7" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="259.7" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">2.0</text>
-  <line x1="70" y1="214.4" x2="680" y2="214.4" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="214.4" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">4.0</text>
-  <line x1="70" y1="169.1" x2="680" y2="169.1" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="169.1" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">6.0</text>
-  <line x1="70" y1="123.8" x2="680" y2="123.8" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="123.8" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">8.0</text>
-  <line x1="70" y1="78.5" x2="680" y2="78.5" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="78.5" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">10.0</text>
+  <line x1="70" y1="243.5" x2="680" y2="243.5" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="243.5" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">5.0</text>
+  <line x1="70" y1="181.9" x2="680" y2="181.9" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="181.9" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">10.0</text>
+  <line x1="70" y1="120.4" x2="680" y2="120.4" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="120.4" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">15.0</text>
+  <line x1="70" y1="58.8" x2="680" y2="58.8" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="58.8" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">20.0</text>
   <line x1="70" y1="305" x2="680" y2="305" stroke="#30363d" stroke-width="1.5"/>
-  <rect x="167.0" y="263.1" width="80.0" height="41.9" fill="#60a5fa" rx="1"/>
-  <rect x="167.0" y="180.6" width="80.0" height="82.5" fill="#4680c4" rx="1"/>
-  <rect x="167.0" y="162.6" width="80.0" height="18.0" fill="#60a5fa" rx="1"/>
+  <rect x="167.0" y="243.8" width="80.0" height="61.2" fill="#60a5fa" rx="1"/>
+  <rect x="167.0" y="208.8" width="80.0" height="34.9" fill="#4680c4" rx="1"/>
+  <rect x="167.0" y="185.0" width="80.0" height="23.8" fill="#60a5fa" rx="1"/>
   <text x="207.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">C zstd</text>
-  <rect x="279.0" y="246.8" width="80.0" height="58.2" fill="#f87171" rx="1"/>
-  <rect x="279.0" y="157.1" width="80.0" height="89.7" fill="#c45050" rx="1"/>
-  <rect x="279.0" y="139.2" width="80.0" height="17.9" fill="#f87171" rx="1"/>
+  <rect x="279.0" y="236.7" width="80.0" height="68.3" fill="#f87171" rx="1"/>
+  <rect x="279.0" y="198.2" width="80.0" height="38.5" fill="#c45050" rx="1"/>
+  <rect x="279.0" y="172.4" width="80.0" height="25.8" fill="#f87171" rx="1"/>
   <text x="319.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip</text>
-  <rect x="391.0" y="241.9" width="80.0" height="63.1" fill="#f59e0b" rx="1"/>
-  <rect x="391.0" y="159.3" width="80.0" height="82.6" fill="#c47d08" rx="1"/>
-  <rect x="391.0" y="140.2" width="80.0" height="19.1" fill="#f59e0b" rx="1"/>
+  <rect x="391.0" y="211.2" width="80.0" height="93.8" fill="#f59e0b" rx="1"/>
+  <rect x="391.0" y="176.3" width="80.0" height="34.9" fill="#c47d08" rx="1"/>
+  <rect x="391.0" y="150.5" width="80.0" height="25.8" fill="#f59e0b" rx="1"/>
   <text x="431.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">structured-zstd</text>
-  <rect x="503.0" y="210.5" width="80.0" height="94.5" fill="#f472b6" rx="1"/>
-  <rect x="503.0" y="120.7" width="80.0" height="89.7" fill="#c05a92" rx="1"/>
-  <rect x="503.0" y="87.6" width="80.0" height="33.1" fill="#f472b6" rx="1"/>
+  <rect x="503.0" y="179.5" width="80.0" height="125.5" fill="#f472b6" rx="1"/>
+  <rect x="503.0" y="141.0" width="80.0" height="38.5" fill="#c05a92" rx="1"/>
+  <rect x="503.0" y="87.6" width="80.0" height="53.4" fill="#f472b6" rx="1"/>
   <text x="543.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip paranoid</text>
   <rect x="130" y="335" width="12" height="12" fill="#60a5fa" rx="2"/>
   <text x="148" y="345" fill="#e6edf3" font-size="10" font-weight="500">C zstd 1.5.7 (libzstd wasm)</text>
   <rect x="130" y="353" width="12" height="12" fill="#f87171" rx="2"/>
   <text x="148" y="363" fill="#e6edf3" font-size="10" font-weight="500">zrip (SIMD128)</text>
   <rect x="380" y="335" width="12" height="12" fill="#f59e0b" rx="2"/>
-  <text x="398" y="345" fill="#e6edf3" font-size="10" font-weight="500">structured-zstd 0.0.44</text>
+  <text x="398" y="345" fill="#e6edf3" font-size="10" font-weight="500">structured-zstd 0.0.45</text>
   <rect x="380" y="353" width="12" height="12" fill="#f472b6" rx="2"/>
-  <text x="398" y="363" fill="#e6edf3" font-size="10" font-weight="500">zrip paranoid (no SIMD)</text>
+  <text x="398" y="363" fill="#e6edf3" font-size="10" font-weight="500">zrip paranoid (safe Rust, no unsafe)</text>
   <text x="140" y="388" fill="#e6edf3" font-size="9">bright = compress + decompress</text>
   <text x="380" y="388" fill="#7d8590" font-size="9">dim = transfer @100 MB/s</text>
 </svg>

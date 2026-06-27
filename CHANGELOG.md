@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+## [0.7.0]
+
+### Changed
+
+- Decoder SIMD dispatch replaced with `fearless_simd::dispatch!`. Removed
+  the entire `simd_decode/` directory (3 platform-specific fused decode
+  loops, ~1300 lines) and all platform SIMD primitives in `core/simd/`
+  (~800 lines). A single safe Rust implementation in `exec.rs` now handles
+  all platforms; `fearless_simd` compiles it with the appropriate target
+  features at build time.
+- FSE sequence decode tables changed from `Vec` + raw-pointer
+  `FseSeqTableView` to fixed-size `[FseSeqDecodeEntry; 512]` arrays with
+  `state & 511` indexing. LLVM proves the index is always in bounds,
+  eliminating bounds checks and all associated unsafe. Smaller stack frame
+  (232 bytes vs 296 bytes).
+- Decoder literal and match copies use wild-copy functions in `fast_vec.rs`:
+  16-byte unaligned load/store loops for non-overlapping copies, pattern
+  stamping for small overlapping offsets, `write_bytes` for RLE. Under
+  `paranoid`, these fall back to `extend_from_slice` and
+  `extend_from_within`.
+- `paranoid` feature now gets full SIMD multiversioning via `fearless_simd`
+  (no unsafe needed). Only Huffman BMI2 dispatch and wild-copy are gated
+  out. Paranoid decode throughput improved significantly compared to 0.6.0
+  where SIMD dispatch was unavailable.
+- Bumped structured-zstd bench dependency to 0.0.45 and regenerated all
+  benchmark charts (x86_64, wasm32).
+- Updated DEVELOPMENT.md with paranoid bench instructions and full chart
+  workflow.
+
+### Removed
+
+- `crates/decode/src/simd_decode/` (x86_64, aarch64, wasm32 fused decode).
+- `crates/core/src/simd/` platform modules (avx2, sse2, bmi2, neon,
+  simd128, scalar, copy). Only `CpuTier` enum and `cpu_tier()` remain for
+  Huffman BMI2 dispatch.
+
 ## [0.6.0]
 
 ### Added

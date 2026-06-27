@@ -40,11 +40,11 @@ PROFILES = {
         "LABELS": {
             "C zstd":          "C zstd 1.5.7 (libzstd wasm)",
             "zrip":            "zrip (SIMD128)",
-            "structured-zstd": "structured-zstd 0.0.44",
-            "zrip paranoid":   "zrip paranoid (no SIMD)",
+            "structured-zstd": "structured-zstd 0.0.45",
+            "zrip paranoid":   "zrip paranoid (safe Rust, no unsafe)",
         },
         "LEVEL_FILTER": {},
-        "hw_label": "wasmtime (wasm32-wasip1)",
+        "hw_label": "wasmtime (wasm32-wasip1), Linux VM on Intel Core i7-8700B @ 3.20GHz",
     },
 }
 

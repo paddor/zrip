@@ -97,8 +97,9 @@ Two dispatch mechanisms coexist:
 **Decoder:** `fearless_simd::dispatch!` with a cached `OnceLock<Level>`. The
 macro compiles `decode_execute_sequences` with platform-specific target features
 (AVX2+BMI2 on x86_64, NEON on aarch64, SIMD128 on wasm32) and selects the best
-version at runtime. Zero `unsafe` in user code. With `paranoid` or without
-`std`, the scalar path runs directly.
+version at runtime. Zero `unsafe` in user code. Works under `paranoid` since
+`fearless_simd` requires no unsafe. Without `std` or `simd`, the scalar path
+runs directly.
 
 **Huffman BMI2:** `crates/core/src/simd/mod.rs` defines a `CpuTier` enum
 (`Bmi2`/`Avx2` on x86_64). Runtime detection cached in `OnceLock<CpuTier>`.
@@ -109,14 +110,19 @@ variant for faster bit extraction.
 
 `crates/decode/src/exec.rs` (`#![forbid(unsafe_code)]`).
 
-A single safe Rust implementation handles all platforms. FSE state machine +
-sequence execution using `extend_from_slice` for literals and
-`extend_from_within` for match copies (with doubling strategy for overlapping
-copies and RLE special-case for offset-1). `fearless_simd::dispatch!` compiles
-the function with platform target features, enabling the compiler to generate
-BMI2 bit extraction instructions (`shlx`, `shrx`) and auto-vectorize bitstream
-operations. Standard library `memcpy`/`memmove` already use platform-optimal
-SIMD for copies.
+A single safe Rust implementation handles all platforms. FSE decode tables are
+fixed-size `[FseSeqDecodeEntry; 512]` arrays indexed with `state & 511`, which
+LLVM proves is always in bounds (emits `andl $511` with no bounds check).
+
+Literal copies and match copies use wild-copy functions in `fast_vec.rs`:
+16-byte unaligned load/store loops for non-overlapping copies, with
+pattern-stamping for small overlapping offsets (2..7) and `write_bytes` for
+RLE (offset 1). Under `paranoid`, these fall back to `extend_from_slice` and
+`extend_from_within`.
+
+`fearless_simd::dispatch!` compiles the function with platform target features,
+enabling the compiler to generate BMI2 bit extraction instructions (`shlx`,
+`shrx`) and auto-vectorize bitstream operations.
 
 ## Huffman 4-stream decoder
 
@@ -134,12 +140,15 @@ Slow path finishes remaining symbols one stream at a time near exhaustion.
 ## `paranoid` feature
 
 `cargo build --features paranoid` adds `#![forbid(unsafe_code)]` to all four
-crate roots. The decoder is already safe by default; `paranoid` disables
-`fearless_simd` dispatch (scalar path only) and affects encoder and core
-`primitives.rs` modules. Each has dual `#[cfg(feature = "paranoid")]`
-/ `#[cfg(not(feature = "paranoid"))]` bodies: the paranoid path uses direct
-indexing, `from_le_bytes`, `resize`, and `extend_from_slice` in place of
-unchecked operations. Huffman BMI2 `#[target_feature]` dispatch is gated out.
+crate roots. `fearless_simd` dispatch still works (it requires no unsafe), so
+the decoder gets full SIMD multiversioning under paranoid. What changes:
+
+- Encoder and core `primitives.rs` switch to safe alternatives via dual
+  `#[cfg(feature = "paranoid")]` / `#[cfg(not(feature = "paranoid"))]` bodies:
+  direct indexing, `from_le_bytes`, `resize` in place of unchecked operations.
+- Decoder wild-copy (`fast_vec.rs`) falls back to `extend_from_slice` and
+  `extend_from_within`.
+- Huffman BMI2 `#[target_feature]` dispatch is gated out (uses `unsafe` call).
 
 ## Unsafe boundary
 

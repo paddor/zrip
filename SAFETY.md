@@ -2,16 +2,18 @@
 
 ## Unsafe boundary
 
-The decoder has zero `unsafe` blocks. All files in `crates/decode/src/` are
-`#![forbid(unsafe_code)]`. Platform dispatch (AVX2+BMI2 on x86_64, NEON on
-aarch64) is handled by `fearless_simd::dispatch!`, which encapsulates
-`#[target_feature]` calling internally. No `unsafe` is exposed in the public API.
+**Decoder:** `exec.rs` and `sequences.rs` are `#![forbid(unsafe_code)]`.
+Unsafe decode primitives (unaligned copies, `Vec::set_len`, `build_pattern_u64`)
+live in `decode/src/fast_vec.rs`, gated by `#[cfg(not(feature = "paranoid"))]`
+with `debug_assert!` guards. SIMD dispatch uses `fearless_simd::dispatch!` in
+`lib.rs` (no manual `unsafe` dispatch calls). No `unsafe` is exposed in the
+public API.
 
-Encoder unsafe is confined to `encode/src/primitives.rs` (16 blocks):
+**Encoder:** unsafe is confined to `encode/src/primitives.rs` (16 blocks):
 `get_unchecked`, `read_unaligned`, `set_len`, `count_match_raw`, `prefetch`.
 Callers prove bounds at block level. Every block has a `debug_assert!` guard.
 
-Core crate unsafe is confined to `primitives.rs` in `bitstream/`, `huffman/`,
+**Core:** unsafe is confined to `primitives.rs` in `bitstream/`, `huffman/`,
 `xxhash/`: `#[inline(always)]` wrappers around `get_unchecked`, `read_unaligned`,
 `set_len`. Same pattern as encoder.
 
@@ -25,15 +27,28 @@ the encoder and core primitives:
 |:---------|:--------|:---------|
 | Encoder indexing | `get_unchecked`, `read_unaligned` | Direct indexing, `from_le_bytes` |
 | Encoder Vec length | `set_len` | `resize` |
-| Decoder dispatch | `fearless_simd::dispatch!` | Gated out; scalar path only |
-| Huffman BMI2 dispatch | `#[target_feature]` wrapper | Gated out; direct call |
+| Decoder SIMD dispatch | `fearless_simd::dispatch!` | Same (no unsafe needed) |
+| Decoder wild-copy | 16-byte unaligned load/store | `extend_from_slice`, `extend_from_within` |
+| Huffman BMI2 dispatch | `#[target_feature]` wrapper | Gated out; generic call |
 
 The safe alternatives use the same algorithms and produce identical output.
-Encode throughput drops roughly 40% (corpus dependent). Decode throughput is
-unaffected since the decoder is already safe Rust.
+Encode throughput drops roughly 40% (corpus dependent). Decode throughput
+drops roughly 20% due to safe wild-copy fallbacks in `fast_vec.rs`.
 
 The feature exists for users who need a guarantee of zero unsafe, or for
 auditing and benchmarking the cost of safe-only codepaths.
+
+## Testing
+
+- **Miri** (Stacked Borrows): full suite with 256 seed variations, plus targeted
+  decode-path tests covering every unsafe primitive in `fast_vec.rs` and
+  dict-compressed decode (56 fuzz-corpus-derived frames).
+- **Fuzz** (16 targets, ASAN): round-trip and corruption targets, 3+ hours each.
+- **Adversarial corpus**: 6500+ small/malformed zstd files from prior fuzzing.
+- **Proptest**: property-based round-trips with random data sizes and levels.
+- **C zstd cross-validation**: compress with C, decompress with zrip and vice versa.
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for commands.
 
 ## Why Rust matters here
 
