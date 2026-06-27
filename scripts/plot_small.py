@@ -29,7 +29,7 @@ COLORS = {
 LABELS = {
     "C zstd":          "C zstd (libzstd)",
     "zrip":            "zrip (Rust)",
-    "structured-zstd": "structured-zstd 0.0.44 (Rust)",
+    "structured-zstd": "structured-zstd 0.0.45 (Rust)",
 }
 
 SMALL_PREFIXES = ["dickens", "hdfs", "xml_collection"]
