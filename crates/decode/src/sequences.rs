@@ -194,7 +194,6 @@ pub(crate) fn parse_sequence_tables_ws(
             if sym >= LL_BITS_TABLE.len() {
                 return Err(DecompressError::CorruptSequences);
             }
-            prev.ll_table = EMPTY_SEQ_TABLE;
             prev.ll_table[0] = FseSeqDecodeEntry {
                 base_line: 0,
                 num_bits: 0,
@@ -247,7 +246,6 @@ pub(crate) fn parse_sequence_tables_ws(
             if sym > 31 {
                 return Err(DecompressError::CorruptSequences);
             }
-            prev.of_table = EMPTY_SEQ_TABLE;
             prev.of_table[0] = FseSeqDecodeEntry {
                 base_line: 0,
                 num_bits: 0,
@@ -300,7 +298,6 @@ pub(crate) fn parse_sequence_tables_ws(
             if sym >= ML_BITS_TABLE.len() {
                 return Err(DecompressError::CorruptSequences);
             }
-            prev.ml_table = EMPTY_SEQ_TABLE;
             prev.ml_table[0] = FseSeqDecodeEntry {
                 base_line: 0,
                 num_bits: 0,
