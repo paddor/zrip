@@ -533,6 +533,46 @@ fn decompress_into_preallocated() {
     assert_eq!(output, data);
 }
 
+// ===== Miri-compatible decode path exercisers =====
+
+#[test]
+fn roundtrip_small_offset_matches() {
+    for offset in 2..=8 {
+        let mut data = vec![0u8; offset];
+        for i in 0..offset {
+            data[i] = (i as u8).wrapping_mul(37);
+        }
+        for _ in 0..20 {
+            let tail: Vec<u8> = data[data.len() - offset..].to_vec();
+            data.extend_from_slice(&tail);
+        }
+        let compressed = zrip::compress(&data, 1).unwrap();
+        let decompressed = zrip::decompress(&compressed).unwrap();
+        assert_eq!(decompressed, data, "offset={offset}");
+    }
+}
+
+#[test]
+fn roundtrip_rle_like() {
+    let data = vec![0x42u8; 512];
+    let compressed = zrip::compress(&data, 1).unwrap();
+    let decompressed = zrip::decompress(&compressed).unwrap();
+    assert_eq!(decompressed, data);
+}
+
+#[test]
+fn roundtrip_varied_literal_sizes() {
+    let mut data = Vec::new();
+    for chunk_size in [1, 2, 3, 7, 15, 16, 17, 31, 32, 33, 63] {
+        let chunk: Vec<u8> = (0..chunk_size as u8).collect();
+        data.extend_from_slice(&chunk);
+        data.extend_from_slice(&chunk);
+    }
+    let compressed = zrip::compress(&data, 1).unwrap();
+    let decompressed = zrip::decompress(&compressed).unwrap();
+    assert_eq!(decompressed, data);
+}
+
 // ===== compress_bound =====
 
 #[cfg(not(miri))]
