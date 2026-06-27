@@ -315,10 +315,11 @@ fn collect_fuzz_corpus_plaintexts() -> Vec<Vec<u8>> {
             continue;
         }
         let data = std::fs::read(entry.path()).unwrap();
-        if let Ok(pt) = zrip::decompress(&data) {
-            if !pt.is_empty() && pt.len() <= 4096 {
-                plaintexts.push(pt);
-            }
+        if let Ok(pt) = zrip::decompress(&data)
+            && !pt.is_empty()
+            && pt.len() <= 4096
+        {
+            plaintexts.push(pt);
         }
     }
     plaintexts
@@ -385,12 +386,9 @@ fn fuzz_corpus_dict_generate() {
 /// Miri: load pre-built fixture, decode-only. No dict training, no encode.
 #[test]
 fn fuzz_corpus_dict_decode_miri() {
-    let fixture = match std::fs::read(FIXTURE_PATH) {
-        Ok(f) => f,
-        Err(_) => {
-            eprintln!("skipping: run fuzz_corpus_dict_generate first to create fixture");
-            return;
-        }
+    let Ok(fixture) = std::fs::read(FIXTURE_PATH) else {
+        eprintln!("skipping: run fuzz_corpus_dict_generate first to create fixture");
+        return;
     };
     let mut off = 0;
     let dict_len = read_u32(&fixture, &mut off) as usize;

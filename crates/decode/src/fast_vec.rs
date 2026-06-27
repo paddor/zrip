@@ -74,7 +74,7 @@ pub(crate) fn fast_extend_from_slice(vec: &mut Vec<u8>, src: &[u8]) {
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 unsafe fn build_pattern_u64(src: *const u8, offset: usize) -> u64 {
-    debug_assert!(offset >= 2 && offset <= 7);
+    debug_assert!((2..=7).contains(&offset));
     let mut buf = [0u8; 8];
     unsafe {
         let p = buf.as_mut_ptr();

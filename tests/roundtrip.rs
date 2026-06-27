@@ -539,8 +539,8 @@ fn decompress_into_preallocated() {
 fn roundtrip_small_offset_matches() {
     for offset in 2..=8 {
         let mut data = vec![0u8; offset];
-        for i in 0..offset {
-            data[i] = (i as u8).wrapping_mul(37);
+        for (i, b) in data.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_mul(37);
         }
         for _ in 0..20 {
             let tail: Vec<u8> = data[data.len() - offset..].to_vec();
