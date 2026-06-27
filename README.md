@@ -13,15 +13,16 @@ See the [benchmarks below](#performance).
 **Negative levels (-7 through -1).** Unlocks zstd's fastest compression tiers,
 useful when throughput matters more than ratio.
 
-**Safe decoder.** The entire decode crate is `#![forbid(unsafe_code)]` with zero
-`unsafe` blocks. Platform dispatch uses `fearless_simd` for safe runtime
-multiversioning. Encoder unsafe is confined to small, auditable `primitives.rs`
-with `debug_assert!` guards. The `paranoid` feature eliminates all remaining
-unsafe. See [SAFETY.md](SAFETY.md).
+**Memory safety.** Unsafe is minimized and confined to small, auditable
+primitives modules. The `paranoid` feature eliminates all remaining unsafe.
+See [SAFETY.md](SAFETY.md).
 
 **Small codebase.** ~12k lines of Rust. Levels above 4 add complexity for
 compression ratios that only matter in archival storage, not transfer
 pipelines.
+
+**Dictionary compression.** COVER and FastCOVER training built in for
+small-message workloads (log lines, JSON records, RPC payloads).
 
 **`no_std` + `alloc`.** Works in embedded and kernel contexts with the `alloc`
 feature; `frame` requires `std`.
@@ -29,9 +30,6 @@ feature; `frame` requires `std`.
 **WebAssembly.** Available as [`@paddor/zrip`](https://jsr.io/@paddor/zrip)
 on JSR. Auto-detects WASM SIMD support. 15% faster encode than C zstd compiled
 to WASM.
-
-**Dictionary compression.** COVER and FastCOVER training built in for
-small-message workloads (log lines, JSON records, RPC payloads).
 
 ## Performance
 
