@@ -37,25 +37,42 @@ pub(crate) struct SequenceDecodeTables {
 
 impl SequenceDecodeTables {
     pub(crate) fn new_default() -> Self {
-        Self {
-            ll_table: into_table(&promote_ll_table(&build_decode_table_from_default(
-                &LL_DEFAULT_DIST,
-                LL_DEFAULT_ACCURACY,
-            ))),
-            ll_accuracy: LL_DEFAULT_ACCURACY,
-            of_table: into_table(&promote_of_table(&build_decode_table_from_default(
-                &OF_DEFAULT_DIST,
-                OF_DEFAULT_ACCURACY,
-            ))),
-            of_accuracy: OF_DEFAULT_ACCURACY,
-            ml_table: into_table(&promote_ml_table(&build_decode_table_from_default(
-                &ML_DEFAULT_DIST,
-                ML_DEFAULT_ACCURACY,
-            ))),
-            ml_accuracy: ML_DEFAULT_ACCURACY,
-            ll_set: false,
-            of_set: false,
-            ml_set: false,
+        #[cfg(feature = "std")]
+        {
+            Self {
+                ll_table: *LL_PREDEFINED,
+                ll_accuracy: LL_DEFAULT_ACCURACY,
+                of_table: *OF_PREDEFINED,
+                of_accuracy: OF_DEFAULT_ACCURACY,
+                ml_table: *ML_PREDEFINED,
+                ml_accuracy: ML_DEFAULT_ACCURACY,
+                ll_set: false,
+                of_set: false,
+                ml_set: false,
+            }
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            Self {
+                ll_table: into_table(&promote_ll_table(&build_decode_table_from_default(
+                    &LL_DEFAULT_DIST,
+                    LL_DEFAULT_ACCURACY,
+                ))),
+                ll_accuracy: LL_DEFAULT_ACCURACY,
+                of_table: into_table(&promote_of_table(&build_decode_table_from_default(
+                    &OF_DEFAULT_DIST,
+                    OF_DEFAULT_ACCURACY,
+                ))),
+                of_accuracy: OF_DEFAULT_ACCURACY,
+                ml_table: into_table(&promote_ml_table(&build_decode_table_from_default(
+                    &ML_DEFAULT_DIST,
+                    ML_DEFAULT_ACCURACY,
+                ))),
+                ml_accuracy: ML_DEFAULT_ACCURACY,
+                ll_set: false,
+                of_set: false,
+                ml_set: false,
+            }
         }
     }
 }
