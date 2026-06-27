@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.7.2]
+
+### Fixed
+
+- README: corrected "Safe decoder" claim. The decode crate has unsafe in
+  `fast_vec.rs`; only the `paranoid` feature makes it fully safe.
+- Regenerated small-input benchmark chart with structured-zstd 0.0.45.
+
+## [0.7.1]
+
+### Fixed
+
+- Excluded `jsr/` directory from the published crate package.
+
 ## [0.7.0]
 
 ### Changed
