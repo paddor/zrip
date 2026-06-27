@@ -4,7 +4,7 @@ exclude = ["fuzz", "bench", "jsr"]
 
 [package]
 name = "zrip"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 rust-version = "1.88"
 description = "Fast, memory-safe Rust implementation of Zstandard compression (levels -7..4)"
@@ -12,7 +12,7 @@ license = "MIT"
 repository = "https://github.com/paddor/zrip"
 categories = ["compression"]
 keywords = ["zstd", "zstandard", "compression", "decompression"]
-include = ["src/**/*", "README.md", "LICENSE", "CHANGELOG.md", "DESIGN.md", "SAFETY.md", "SECURITY.md"]
+include = ["src/**/*", "README.md", "LICENSE", "CHANGELOG.md", "DESIGN.md", "SAFETY.md", "SECURITY.md", "!jsr/**"]
 
 [features]
 default = ["std", "frame", "ldm", "simd"]
