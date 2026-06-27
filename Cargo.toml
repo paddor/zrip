@@ -12,7 +12,7 @@ license = "MIT"
 repository = "https://github.com/paddor/zrip"
 categories = ["compression"]
 keywords = ["zstd", "zstandard", "compression", "decompression"]
-include = ["src/**/*", "README.md", "LICENSE", "CHANGELOG.md", "DESIGN.md", "SAFETY.md", "SECURITY.md"]
+include = ["src/**/*", "README.md", "LICENSE", "CHANGELOG.md", "DESIGN.md", "SAFETY.md", "SECURITY.md", "!jsr/**"]
 
 [features]
 default = ["std", "frame", "ldm", "simd"]
