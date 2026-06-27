@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [0.7.3]
+
+### Fixed
+
+- Three UB vulnerabilities found by miri:
+  - `ReverseBitReader::refill_fast` could underflow `ptr` and read out of
+    bounds on short streams. Now returns early instead of relying on
+    `debug_assert!`.
+  - Huffman decode functions trusted `table_log` without checking that the
+    table had enough entries, allowing out-of-bounds `get_unchecked`.
+    All entry points now validate `table.len() >= 1 << table_log`.
+  - Sequence execution did not check trailing-literal length against the
+    block-size limit, allowing `fast_extend_from_slice` to write past the
+    reserved capacity.
+- `compress_with_params` and `level_params_for_size` now clamp `hash_log`
+  and `chain_log` to [6, 30], preventing out-of-bounds hash table access
+  when callers supply extreme values.
+
 ## [0.7.2]
 
 ### Fixed
