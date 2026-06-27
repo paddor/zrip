@@ -285,3 +285,131 @@ fn decompress_block_output_ceiling() {
     ];
     let _ = zrip::decompress(data);
 }
+
+// ===== Fuzz corpus dict round-trip =====
+//
+// Two-phase design:
+//   1. fuzz_corpus_dict_generate (not(miri)): trains a dict from corpus
+//      plaintexts, compresses each with the dict, writes a fixture file
+//      containing raw dict bytes + (plaintext, compressed) pairs.
+//   2. fuzz_corpus_dict_decode_miri (miri): loads the fixture, parses the
+//      dict, decompresses each frame, verifies. No dict training, no
+//      encoding, no filesystem scanning: pure decode-path coverage.
+
+const FIXTURE_PATH: &str = "tests/fixtures/corpus_dict_roundtrip.bin";
+
+#[cfg(feature = "dict_builder")]
+fn collect_fuzz_corpus_plaintexts() -> Vec<Vec<u8>> {
+    let corpus_dir = std::path::Path::new("fuzz/corpus/fuzz_corrupt_decompress");
+    if !corpus_dir.exists() {
+        return Vec::new();
+    }
+    let mut plaintexts = Vec::new();
+    let mut entries: Vec<_> = std::fs::read_dir(corpus_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        if entry.file_type().map_or(true, |t| t.is_dir()) {
+            continue;
+        }
+        let data = std::fs::read(entry.path()).unwrap();
+        if let Ok(pt) = zrip::decompress(&data) {
+            if !pt.is_empty() && pt.len() <= 4096 {
+                plaintexts.push(pt);
+            }
+        }
+    }
+    plaintexts
+}
+
+#[cfg(all(feature = "dict_builder", not(miri)))]
+fn write_u32(out: &mut Vec<u8>, v: u32) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+fn read_u32(data: &[u8], off: &mut usize) -> u32 {
+    let v = u32::from_le_bytes([data[*off], data[*off + 1], data[*off + 2], data[*off + 3]]);
+    *off += 4;
+    v
+}
+
+/// Fixture format: [dict_len:u32][dict_bytes][n_pairs:u32]
+///   per pair: [pt_len:u32][pt_bytes][comp_len:u32][comp_bytes]
+#[cfg(all(feature = "dict_builder", not(miri)))]
+#[test]
+fn fuzz_corpus_dict_generate() {
+    let plaintexts = collect_fuzz_corpus_plaintexts();
+    if plaintexts.len() < 10 {
+        eprintln!("skipping: only {} decompressible corpus files", plaintexts.len());
+        return;
+    }
+    let refs: Vec<&[u8]> = plaintexts.iter().map(|p| p.as_slice()).collect();
+
+    let content = zrip::dict::fastcover::select_segments(
+        &refs,
+        4096,
+        &zrip::dict::fastcover::FastCoverParams::default(),
+    );
+    let dict_bytes = zrip::dict::finalize::finalize_dictionary(&content, &refs, 4096);
+    let dict = zrip::Dictionary::from_bytes(&dict_bytes).unwrap();
+
+    let mut fixture = Vec::new();
+    write_u32(&mut fixture, dict_bytes.len() as u32);
+    fixture.extend_from_slice(&dict_bytes);
+    write_u32(&mut fixture, plaintexts.len() as u32);
+
+    for (i, pt) in plaintexts.iter().enumerate() {
+        let compressed = zrip::compress_with_dict(pt, 1, &dict).unwrap();
+        let decompressed = zrip::decompress_with_dict(&compressed, &dict).unwrap();
+        assert_eq!(&decompressed, pt, "corpus file {i}");
+
+        write_u32(&mut fixture, pt.len() as u32);
+        fixture.extend_from_slice(pt);
+        write_u32(&mut fixture, compressed.len() as u32);
+        fixture.extend_from_slice(&compressed);
+    }
+
+    std::fs::create_dir_all("tests/fixtures").unwrap();
+    std::fs::write(FIXTURE_PATH, &fixture).unwrap();
+    eprintln!(
+        "wrote {}: {} dict bytes, {} pairs, {} total bytes",
+        FIXTURE_PATH,
+        dict_bytes.len(),
+        plaintexts.len(),
+        fixture.len()
+    );
+}
+
+/// Miri: load pre-built fixture, decode-only. No dict training, no encode.
+#[test]
+fn fuzz_corpus_dict_decode_miri() {
+    let fixture = match std::fs::read(FIXTURE_PATH) {
+        Ok(f) => f,
+        Err(_) => {
+            eprintln!("skipping: run fuzz_corpus_dict_generate first to create fixture");
+            return;
+        }
+    };
+    let mut off = 0;
+    let dict_len = read_u32(&fixture, &mut off) as usize;
+    let dict_bytes = &fixture[off..off + dict_len];
+    off += dict_len;
+    let dict = zrip::Dictionary::from_bytes(dict_bytes).unwrap();
+    let n_pairs = read_u32(&fixture, &mut off) as usize;
+
+    for i in 0..n_pairs {
+        let pt_len = read_u32(&fixture, &mut off) as usize;
+        let expected = &fixture[off..off + pt_len];
+        off += pt_len;
+        let comp_len = read_u32(&fixture, &mut off) as usize;
+        let compressed = &fixture[off..off + comp_len];
+        off += comp_len;
+
+        let decompressed = zrip::decompress_with_dict(compressed, &dict).unwrap();
+        assert_eq!(decompressed, expected, "pair {i}");
+    }
+    assert_eq!(off, fixture.len());
+    eprintln!("{n_pairs} corpus dict frames decoded OK");
+}
