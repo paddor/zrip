@@ -74,13 +74,15 @@ pub(crate) fn fast_extend_from_slice(vec: &mut Vec<u8>, src: &[u8]) {
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 unsafe fn build_pattern_u64(src: *const u8, offset: usize) -> u64 {
+    debug_assert!(offset >= 2 && offset <= 7);
     let mut buf = [0u8; 8];
     unsafe {
-        core::ptr::copy_nonoverlapping(src, buf.as_mut_ptr(), offset);
+        let p = buf.as_mut_ptr();
+        core::ptr::copy_nonoverlapping(src, p, offset);
         let mut have = offset;
         while have < 8 {
             let n = have.min(8 - have);
-            core::ptr::copy_nonoverlapping(buf.as_ptr(), buf.as_mut_ptr().add(have), n);
+            core::ptr::copy_nonoverlapping(p, p.add(have), n);
             have += n;
         }
     }
@@ -166,6 +168,43 @@ pub(crate) fn wild_copy_match(vec: &mut Vec<u8>, offset: usize, len: usize) {
             let src = vec.len() - copied;
             vec.extend_from_within(src..src + n);
             copied += n;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fast_extend_from_slice_all_sizes() {
+        for len in 0..=64 {
+            let src: Vec<u8> = (0..len as u8).collect();
+            let mut dst = Vec::with_capacity(len + 16);
+            fast_extend_from_slice(&mut dst, &src);
+            assert_eq!(dst, src, "len={len}");
+        }
+    }
+
+    #[test]
+    fn wild_copy_match_all_offsets() {
+        for offset in 1..=16 {
+            for len in 1..=32 {
+                let mut v = Vec::with_capacity(offset + len + 16);
+                let seed: Vec<u8> = (0..offset).map(|i| (i as u8).wrapping_mul(37)).collect();
+                v.extend_from_slice(&seed);
+                let mut expected = v.clone();
+                let start = expected.len() - offset;
+                for i in 0..len {
+                    expected.push(expected[start + i % offset]);
+                }
+                wild_copy_match(&mut v, offset, len);
+                assert_eq!(
+                    &v[..offset + len],
+                    &expected[..offset + len],
+                    "offset={offset} len={len}"
+                );
+            }
         }
     }
 }
