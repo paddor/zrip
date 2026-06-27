@@ -24,6 +24,41 @@ cargo +nightly fuzz run roundtrip_frame -- -max_len=65536
 cargo +nightly fuzz run c_compress_zrip_decompress
 ```
 
+## Pre-release Miri + fuzz audit
+
+Before tagging a release, run Miri and all fuzz targets for extended duration.
+
+### Miri (256 seeds)
+
+Runs the full test suite under Miri with Stacked Borrows checking, 256 seed
+variations. Takes several hours depending on the number of test binaries.
+
+```bash
+MIRIFLAGS="-Zmiri-symbolic-alignment-check -Zmiri-retag-fields -Zmiri-many-seeds=0..256" \
+  cargo +nightly miri test --no-default-features --features alloc -- --no-capture
+```
+
+### Fuzz all targets (3 hours each, ASAN)
+
+Run every fuzz target with AddressSanitizer for at least 3 hours. Each target
+gets 2 sequential workers (`-jobs=2`).
+
+```bash
+for target in $(ls fuzz/fuzz_targets/*.rs | xargs -I{} basename {} .rs); do
+  cargo +nightly fuzz run "fuzz_${target}" -- -max_total_time=10800 -jobs=2
+done
+```
+
+### Adversarial corpus
+
+If you have an adversarial corpus of small/malformed zstd files (e.g. from
+prior fuzzing campaigns), seed them into the corrupt_decompress target:
+
+```bash
+cargo +nightly fuzz run fuzz_corrupt_decompress /path/to/adversarial/corpus \
+  -- -max_total_time=10800 -jobs=2
+```
+
 ## Benchmarks
 
 ### Quick (synthetic data)

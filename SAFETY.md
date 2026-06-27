@@ -36,6 +36,28 @@ drops roughly 20% due to safe wild-copy fallbacks in `fast_vec.rs`.
 The feature exists for users who need a guarantee of zero unsafe, or for
 auditing and benchmarking the cost of safe-only codepaths.
 
+## Testing
+
+The decoder and encoder are tested with:
+
+- **Miri** (Stacked Borrows, 256 seeds): full test suite under Miri with
+  `-Zmiri-symbolic-alignment-check` and `-Zmiri-retag-fields`, iterated
+  across 256 seed variations to vary allocation and thread scheduling.
+- **Fuzz targets** (16 targets, ASAN, 3+ hours each): round-trip targets
+  cross-validate against C zstd. Corruption targets (`corrupt_decompress`,
+  `corrupt_bitflip`, `corrupt_truncate`, `corrupt_overwrite`, `corrupt_splice`,
+  `corrupt_streaming`, `corrupt_streaming_dict`, `corrupt_dict`,
+  `corrupt_zrip_output`) feed mutated compressed data to the decoder.
+  All built with AddressSanitizer.
+- **Adversarial corpus**: 3000+ small/malformed zstd files from prior fuzzing
+  campaigns, fed to the decoder for 3+ hours under ASAN.
+- **Proptest**: property-based round-trips with random data sizes and levels.
+- **C zstd cross-validation**: compress with C zstd, decompress with zrip
+  (and vice versa) across all levels.
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for instructions on running the full
+pre-release audit.
+
 ## Why Rust matters here
 
 C zstd's decompression path has had memory safety bugs that Rust's type system
