@@ -38,6 +38,21 @@ MIRIFLAGS="-Zmiri-symbolic-alignment-check -Zmiri-retag-fields -Zmiri-many-seeds
   cargo +nightly miri test --no-default-features --features alloc -- --no-capture
 ```
 
+### Miri decode-path (fast, ~20s)
+
+Targeted tests for the unsafe primitives in `fast_vec.rs` and dict decode:
+
+```bash
+cargo +nightly miri test -p zrip-decode fast_vec
+cargo +nightly miri test -- roundtrip_small_offset roundtrip_rle_like roundtrip_varied_literal
+MIRIFLAGS="-Zmiri-disable-isolation" \
+  cargo +nightly miri test -- fuzz_corpus_dict_decode_miri
+```
+
+The dict decode test uses a pre-built fixture (`tests/fixtures/corpus_dict_roundtrip.bin`).
+Regenerate after corpus changes:
+`cargo test --features dict_builder -- fuzz_corpus_dict_generate`
+
 ### Fuzz all targets (3 hours each, ASAN)
 
 Run every fuzz target with AddressSanitizer for at least 3 hours. Each target
