@@ -135,7 +135,18 @@ pub static ML_BASELINE_TABLE: [u32; 53] = [
     2051, 4099, 8195, 16387, 32771, 65539,
 ];
 
-pub const FSE_SEQ_TABLE_CAPACITY: usize = 1 << 9;
+const fn max_seq_accuracy() -> u8 {
+    let mut m = LL_MAX_ACCURACY_LOG;
+    if ML_MAX_ACCURACY_LOG > m {
+        m = ML_MAX_ACCURACY_LOG;
+    }
+    if OF_MAX_ACCURACY_LOG > m {
+        m = OF_MAX_ACCURACY_LOG;
+    }
+    m
+}
+
+pub const FSE_SEQ_TABLE_CAPACITY: usize = 1 << max_seq_accuracy();
 pub const FSE_SEQ_TABLE_MASK: u32 = FSE_SEQ_TABLE_CAPACITY as u32 - 1;
 
 pub const FSE_SEQ_DECODE_ENTRY_ZERO: FseSeqDecodeEntry = FseSeqDecodeEntry {
