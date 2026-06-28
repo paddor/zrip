@@ -1,6 +1,6 @@
 # zrip
 
-Pure Rust zstd codec. Levels -7 through 4 (Fast and DFast strategies).
+Pure Rust zstd codec. Levels -8 through 4 (Fast and DFast strategies).
 Optimized for encode throughput in transfer pipelines that need standard
 zstd frames at high speed.
 
@@ -10,8 +10,10 @@ zstd frames at high speed.
 zstd implementations on both encode and decode across all supported levels.
 See the [benchmarks below](#performance).
 
-**Negative levels (-7 through -1).** Unlocks zstd's fastest compression tiers,
-useful when throughput matters more than ratio.
+**Negative levels (-8 through -1).** Unlocks zstd's fastest compression tiers,
+useful when throughput matters more than ratio. L-8 is zrip's own addition
+beyond C zstd's range: raw literals only, no Huffman table build, approaching
+LZ4-class encode speed while still producing standard zstd frames.
 
 **Memory safety.** Unsafe is minimized and confined to small, auditable
 primitives modules. The `paranoid` feature eliminates all remaining unsafe.
@@ -200,19 +202,20 @@ and corruption resistance (bitflip, splice, truncate, overwrite).
 
 ## Design
 
-[DESIGN.md](DESIGN.md) covers the encode/decode pipeline, SIMD dispatch,
-compile-time specialization, and divergences from C zstd.
+[DESIGN.md](DESIGN.md) covers the encode/decode pipeline, performance
+architecture, SIMD dispatch, compile-time specialization, and divergences
+from C zstd.
 
 ## Levels
 
 | Level | Strategy | Hash table | Min match | Literals | Sequences |
 |------:|:---------|:-----------|:---------:|:---------|:----------|
-| -7 | Fast | 32 KB | 5 | Raw | Predefined FSE |
-| -6..-1 | Fast | 32 KB | 5 | Huffman | Predefined/custom FSE |
+| -8 | Fast | 32 KB | 5 | Raw | Predefined FSE |
+| -7..-1 | Fast | 32 KB | 5 | Huffman | Predefined/custom FSE |
 | 1 | Fast | 64 KB | 4 | Huffman | Predefined/custom FSE |
-| 2 | Fast | 256 KB | 4 | Huffman | Predefined/custom FSE |
-| 3 | DFast | 2x 128 KB | 4 | Huffman | Predefined/custom FSE |
-| 4 | DFast | 2x 256 KB | 4 | Huffman | Predefined/custom FSE |
+| 2 | Fast | 512 KB | 4 | Huffman | Predefined/custom FSE |
+| 3 | DFast | 2x 1 MB | 4 | Huffman | Predefined/custom FSE |
+| 4 | DFast | 2x 2 MB | 4 | Huffman | Predefined/custom FSE |
 
 Level 0 maps to the library default (currently level 1). See
 [DESIGN.md](DESIGN.md) for parameter details and pipeline behavior per level.
