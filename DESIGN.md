@@ -68,13 +68,13 @@ Negative levels trade ratio for throughput by increasing `target_length`
 (skip acceleration). Higher `target_length` means more positions are skipped
 on consecutive match-finding misses.
 
-**L-7** skips Huffman table construction and always emits raw literal blocks
+**L-8** skips Huffman table construction and always emits raw literal blocks
 with predefined FSE tables. This eliminates the most expensive part of the
 encode pipeline (Huffman tree build, stream encoding, custom FSE table
 estimation) at the cost of compression ratio. The result is a valid zstd
 frame that any decoder handles, but with LZ4-class encode throughput.
 
-**L-6 through L2** use the full encode pipeline: Huffman-compressed literals
+**L-7 through L2** use the full encode pipeline: Huffman-compressed literals
 (with treeless reuse across blocks) and predefined or custom FSE tables for
 sequences, whichever produces smaller output.
 

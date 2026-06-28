@@ -14,7 +14,7 @@ use zrip_core::error::DecompressError;
 /// Holds internal buffers (output, Huffman/FSE workspace) across calls.
 /// Useful when decompressing many small frames in a loop.
 ///
-/// ```
+/// ```no_run
 /// let data = b"repeated decompression".repeat(100);
 /// let compressed = zrip::compress(&data, 1).unwrap();
 ///

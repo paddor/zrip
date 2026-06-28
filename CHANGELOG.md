@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+## [0.8.0]
+
+### Added
+
+- Level -8 (zrip-only): same parameters as old L-7 but with
+  `force_raw_literals`, extending the level range from [-7, 4] to [-8, 4].
+  Old L-7 now gets Huffman-compressed literals while L-8 trades ratio for
+  maximum encode throughput.
+- 3-tier dictionary setup in `CompressContext` adapts hash table
+  initialization to input size: micro inputs use a linear-scan attached
+  match finder with raw literals, small inputs add Huffman from dict
+  tables, large inputs copy the full hash snapshot.
+- Decode-side dictionary FSE/Huffman caching: pre-promotes dict tables at
+  construction time so each frame clones promoted tables instead of
+  rebuilding from raw dictionary entries.
+### Changed
+
+- L2 `hash_log` raised from 16 (256 KB) to 17 (512 KB) for better ratio.
+- `huf_worth_trying` minimum gain threshold raised from n/256 (~0.4%) to
+  n/32 (~3%) to skip Huffman table builds on marginally compressible
+  blocks.
+- Per-level raw literals size ramp skips Huffman for tiny blocks.
+- Decode doctests changed to `no_run` so Miri does not attempt
+  `fearless_simd::dispatch!` AVX2 paths it cannot emulate.
+
 ## [0.7.3]
 
 ### Fixed
