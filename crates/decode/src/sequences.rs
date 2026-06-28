@@ -23,6 +23,7 @@ pub(crate) fn into_table(v: &[FseSeqDecodeEntry]) -> SeqTable {
     table
 }
 
+#[derive(Clone)]
 pub(crate) struct SequenceDecodeTables {
     pub(crate) ll_table: SeqTable,
     pub(crate) ll_accuracy: u8,

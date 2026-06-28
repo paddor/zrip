@@ -363,7 +363,7 @@ fn compress_level_zero_is_default() {
 #[test]
 fn compress_invalid_level() {
     assert!(zrip::compress(b"hello", 5).is_err());
-    assert!(zrip::compress(b"hello", -8).is_err());
+    assert!(zrip::compress(b"hello", -9).is_err());
     assert!(zrip::compress(b"hello", 100).is_err());
 }
 

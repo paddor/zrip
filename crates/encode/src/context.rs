@@ -20,10 +20,13 @@ use zrip_core::xxhash::xxh64;
 /// Built once from a [`Dictionary`] + [`LevelParams`]. Caches the pre-filled
 /// hash table(s) and a combined buffer with the dict prefix already loaded,
 /// plus encode-side entropy tables built from the dict's decode tables.
+const ATTACH_THRESHOLD: usize = 16384;
+
 pub(crate) struct PreparedDict {
     combined: Vec<u8>,
     hash_snapshot: Vec<u32>,
     hash_long_snapshot: Vec<u32>,
+    hash_log: u32,
     prefix_len: usize,
     rep_offsets: [u32; 3],
     dict_id: u32,
@@ -84,6 +87,7 @@ impl PreparedDict {
             combined,
             hash_snapshot,
             hash_long_snapshot,
+            hash_log: params.hash_log,
             prefix_len,
             rep_offsets: *dict.rep_offsets(),
             dict_id: dict.id(),
@@ -114,6 +118,7 @@ pub struct CompressContext {
     hash_table: Vec<u32>,
     hash_long: Vec<u32>,
     dict_hash: Vec<u32>,
+    small_hash: Vec<u32>,
     sequences: Vec<Sequence>,
     output: Vec<u8>,
     workspace: BlockEncodeWorkspace,
@@ -121,7 +126,7 @@ pub struct CompressContext {
 }
 
 impl CompressContext {
-    /// Creates a new context for the given compression level (-7..=4).
+    /// Creates a new context for the given compression level (-8..=4).
     pub fn new(level: i32) -> Result<Self, CompressError> {
         let params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
         let max_log = strategy::max_hash_log(level).expect("level validated above");
@@ -136,6 +141,7 @@ impl CompressContext {
             hash_table,
             hash_long,
             dict_hash: Vec::new(),
+            small_hash: Vec::new(),
             sequences: Vec::new(),
             output: Vec::new(),
             workspace: BlockEncodeWorkspace::new(),
@@ -179,6 +185,7 @@ impl CompressContext {
             hash_table,
             hash_long,
             dict_hash: Vec::new(),
+            small_hash: Vec::new(),
             sequences: Vec::new(),
             output: Vec::new(),
             workspace: BlockEncodeWorkspace::new(),
@@ -238,49 +245,112 @@ impl CompressContext {
     fn compress_with_prepared(&mut self, input: &[u8]) -> Result<Cow<'_, [u8]>, CompressError> {
         let prep = self.prepared.as_ref().unwrap();
         let total_window = prep.prefix_len + input.len();
-        let params = strategy::level_params_for_size(self.level, total_window)
+        let mut params = strategy::level_params_for_size(self.level, total_window)
             .expect("level validated at construction");
-        let snapshot_matches = match params.strategy {
-            Strategy::Fast => (1usize << params.hash_log) == prep.hash_snapshot.len(),
-            Strategy::DFast => {
-                (1usize << params.chain_log) == prep.hash_snapshot.len()
-                    && (1usize << params.hash_log) == prep.hash_long_snapshot.len()
-            }
-        };
+        strategy::apply_raw_literals_size_override(&mut params, input.len());
+
+        let use_attached = !input.is_empty()
+            && input.len() <= ATTACH_THRESHOLD
+            && params.strategy == Strategy::Fast;
+
         let dict_id = prep.dict_id;
         let prefix_len = prep.prefix_len;
+        let dict_hash_log = prep.hash_log;
 
-        if !snapshot_matches {
-            return self.compress_with_dict_fallback(input, dict_id, prefix_len);
+        if !use_attached {
+            let snapshot_matches = match params.strategy {
+                Strategy::Fast => (1usize << params.hash_log) == prep.hash_snapshot.len(),
+                Strategy::DFast => {
+                    (1usize << params.chain_log) == prep.hash_snapshot.len()
+                        && (1usize << params.hash_log) == prep.hash_long_snapshot.len()
+                }
+            };
+            if !snapshot_matches {
+                return self.compress_with_dict_fallback(input, dict_id, prefix_len);
+            }
         }
 
-        let prep = self.prepared.as_mut().unwrap();
-        self.hash_table.copy_from_slice(&prep.hash_snapshot);
-        if !prep.hash_long_snapshot.is_empty() {
-            self.hash_long.copy_from_slice(&prep.hash_long_snapshot);
+        {
+            let prep = self.prepared.as_mut().unwrap();
+            if !use_attached {
+                self.hash_table.copy_from_slice(&prep.hash_snapshot);
+                if !prep.hash_long_snapshot.is_empty() {
+                    self.hash_long.copy_from_slice(&prep.hash_long_snapshot);
+                }
+            }
+            prep.combined.truncate(prep.prefix_len);
+            prep.combined.extend_from_slice(input);
         }
 
-        prep.combined.truncate(prep.prefix_len);
-        prep.combined.extend_from_slice(input);
+        let prep = self.prepared.as_ref().unwrap();
 
-        if let Some(ref huf) = prep.huf_table {
+        if use_attached {
+            self.workspace.prev_huffman = if params.force_raw_literals {
+                None
+            } else {
+                prep.huf_table.clone()
+            };
+        } else if let Some(ref huf) = prep.huf_table {
             self.workspace.prev_huffman = Some(huf.clone());
         } else {
             self.workspace.prev_huffman = None;
         }
-
         self.workspace.prev_ll = prep.ll_table.clone();
         self.workspace.prev_of = prep.of_table.clone();
         self.workspace.prev_ml = prep.ml_table.clone();
 
         self.output.clear();
         self.output.reserve(input.len() + 32);
-        write_frame_header(&mut self.output, input.len(), Some(prep.dict_id));
+        write_frame_header(&mut self.output, input.len(), Some(dict_id));
 
         if input.is_empty() {
             block_encoder::encode_raw_block(&[], true, &mut self.output);
+        } else if use_attached {
+            let input_hash_log = if input.len() >= 2 {
+                let src_log = 32 - ((input.len() as u32) - 1).leading_zeros();
+                params.hash_log.min(src_log).max(strategy::HASH_LOG_MIN)
+            } else {
+                strategy::HASH_LOG_MIN
+            };
+            let input_hash_size = 1usize << input_hash_log;
+            self.small_hash.resize(input_hash_size, 0);
+            self.small_hash.fill(0);
+
+            let mut rep_offsets = prep.rep_offsets;
+
+            fast::compress_fast_attached(
+                &prep.combined,
+                prefix_len,
+                prefix_len + input.len(),
+                &params,
+                &prep.rep_offsets,
+                &prep.hash_snapshot,
+                dict_hash_log,
+                &mut self.small_hash,
+                input_hash_log,
+                &mut self.sequences,
+            );
+
+            if params.force_raw_literals {
+                block_encoder::encode_compressed_block_raw(
+                    input,
+                    &self.sequences,
+                    &mut rep_offsets,
+                    true,
+                    &mut self.output,
+                    &mut self.workspace,
+                );
+            } else {
+                block_encoder::encode_compressed_block(
+                    input,
+                    &self.sequences,
+                    &mut rep_offsets,
+                    true,
+                    &mut self.output,
+                    &mut self.workspace,
+                );
+            }
         } else {
-            let prefix_len = prep.prefix_len;
             let combined = &prep.combined;
             let mut rep_offsets = prep.rep_offsets;
 
@@ -443,6 +513,9 @@ fn compress_core(
     workspace: &mut BlockEncodeWorkspace,
     combined: &mut Vec<u8>,
 ) -> Result<(), CompressError> {
+    let mut params = params;
+    strategy::apply_raw_literals_size_override(&mut params, input.len());
+
     let hash_size = match params.strategy {
         Strategy::Fast => 1usize << params.hash_log,
         Strategy::DFast => 1usize << params.chain_log,

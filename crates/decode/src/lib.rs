@@ -42,6 +42,9 @@ pub(crate) struct BlockDecodeWorkspace {
     pub fse_dist: Vec<i16>,
     pub fse_symbol_next: Vec<u16>,
     pub fse_build_buf: Vec<zrip_core::fse::FseDecodeEntry>,
+    pub cached_dict_tables: Option<SequenceDecodeTables>,
+    pub cached_dict_rep: [u32; 3],
+    pub cached_dict_huf: Option<(Vec<HuffmanDecodeEntry>, u8)>,
 }
 
 impl BlockDecodeWorkspace {
@@ -57,6 +60,34 @@ impl BlockDecodeWorkspace {
             fse_dist: Vec::new(),
             fse_symbol_next: Vec::new(),
             fse_build_buf: Vec::new(),
+            cached_dict_tables: None,
+            cached_dict_rep: [1, 4, 8],
+            cached_dict_huf: None,
+        }
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn cache_dict(&mut self, dict: &zrip_core::dict::Dictionary) {
+        let mut st = SequenceDecodeTables::new_default();
+        if let Some((t, l)) = dict.of_table() {
+            st.of_table = crate::sequences::into_table(&zrip_core::fse::promote_of_table(t));
+            st.of_accuracy = l;
+            st.of_set = true;
+        }
+        if let Some((t, l)) = dict.ml_table() {
+            st.ml_table = crate::sequences::into_table(&zrip_core::fse::promote_ml_table(t));
+            st.ml_accuracy = l;
+            st.ml_set = true;
+        }
+        if let Some((t, l)) = dict.ll_table() {
+            st.ll_table = crate::sequences::into_table(&zrip_core::fse::promote_ll_table(t));
+            st.ll_accuracy = l;
+            st.ll_set = true;
+        }
+        self.cached_dict_tables = Some(st);
+        self.cached_dict_rep = *dict.rep_offsets();
+        if let Some((t, l)) = dict.huf_table() {
+            self.cached_dict_huf = Some((t.to_vec(), l));
         }
     }
 }
@@ -186,7 +217,9 @@ pub(crate) fn decompress_frame(
 
     let dict_history: &[u8] = if let Some(d) = dict { d.content() } else { &[] };
 
-    let mut seq_tables = if let Some(d) = dict {
+    let (mut seq_tables, mut rep_offsets) = if let Some(ref cached) = ws.cached_dict_tables {
+        (cached.clone(), ws.cached_dict_rep)
+    } else if let Some(d) = dict {
         let mut st = SequenceDecodeTables::new_default();
         if let Some((t, l)) = d.of_table() {
             st.of_table = crate::sequences::into_table(&zrip_core::fse::promote_of_table(t));
@@ -203,17 +236,17 @@ pub(crate) fn decompress_frame(
             st.ll_accuracy = l;
             st.ll_set = true;
         }
-        st
+        (st, *d.rep_offsets())
     } else {
-        SequenceDecodeTables::new_default()
-    };
-    let mut rep_offsets: [u32; 3] = if let Some(d) = dict {
-        *d.rep_offsets()
-    } else {
-        [1, 4, 8]
+        (SequenceDecodeTables::new_default(), [1u32, 4, 8])
     };
     ws.huf_valid = false;
-    if let Some(d) = dict
+    if let Some((ref t, l)) = ws.cached_dict_huf {
+        ws.huf_table.clear();
+        ws.huf_table.extend_from_slice(t);
+        ws.huf_table_log = l;
+        ws.huf_valid = true;
+    } else if let Some(d) = dict
         && let Some((t, l)) = d.huf_table()
     {
         ws.huf_table.clear();

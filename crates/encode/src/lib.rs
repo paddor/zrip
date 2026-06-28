@@ -138,8 +138,10 @@ pub fn compress_opts(
 
 #[allow(clippy::unnecessary_wraps)]
 fn compress_inner(input: &[u8], params: &strategy::LevelParams) -> Result<Vec<u8>, CompressError> {
+    let mut params = *params;
+    strategy::apply_raw_literals_size_override(&mut params, input.len());
     let mut output = Vec::with_capacity(input.len() + 32);
-    compress_frame(input, params, &mut output);
+    compress_frame(input, &params, &mut output);
     Ok(output)
 }
 
@@ -293,8 +295,9 @@ pub fn compress_with_dict(
     dict: &zrip_core::dict::Dictionary,
 ) -> Result<Vec<u8>, CompressError> {
     let total_window = dict.content().len() + input.len();
-    let params = strategy::level_params_for_size(level, total_window)
+    let mut params = strategy::level_params_for_size(level, total_window)
         .ok_or(CompressError::InvalidLevel(level))?;
+    strategy::apply_raw_literals_size_override(&mut params, input.len());
 
     let mut output = Vec::with_capacity(input.len() + 32);
     write_frame_header(&mut output, input.len(), Some(dict.id()));
@@ -445,8 +448,9 @@ pub fn compress_with_dict(
 }
 
 pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usize, CompressError> {
-    let params = strategy::level_params_for_size(level, input.len())
+    let mut params = strategy::level_params_for_size(level, input.len())
         .ok_or(CompressError::InvalidLevel(level))?;
+    strategy::apply_raw_literals_size_override(&mut params, input.len());
     let mut buf = Vec::with_capacity(output.len());
     compress_frame(input, &params, &mut buf);
     if buf.len() > output.len() {
