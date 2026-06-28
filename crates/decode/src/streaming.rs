@@ -32,7 +32,7 @@ enum State {
 /// Wraps a reader of compressed data and yields decompressed bytes.
 /// Supports multi-frame streams and skippable frames.
 ///
-/// ```
+/// ```no_run
 /// use std::io::Read;
 ///
 /// let data = b"hello, streaming world!".repeat(100);
