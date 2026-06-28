@@ -522,6 +522,68 @@ fn compute_frequencies(packed: &[PackedSeq]) -> ([u32; 36], [u32; 53], [u32; 32]
     (ll_freq, ml_freq, of_freq, total_extra_bits)
 }
 
+/// Approximate log2(x) in 8.8 fixed point (result = log2(x) * 256).
+fn log2_fp8(x: u32) -> u32 {
+    if x <= 1 {
+        return 0;
+    }
+    let msb = 31 - x.leading_zeros();
+    let shifted = if msb > 8 {
+        x >> (msb - 8)
+    } else {
+        x << (8 - msb)
+    };
+    msb * 256 + (shifted - 256)
+}
+
+/// Cheap entropy estimate: returns true if Huffman is likely to produce savings.
+/// Avoids the expensive build-table-encode-discard cycle for blocks where
+/// Huffman overhead exceeds the compression benefit.
+fn huf_worth_trying(data: &[u8]) -> bool {
+    if data.len() > 32768 {
+        return true;
+    }
+    if data.len() < 64 {
+        return false;
+    }
+
+    let n = data.len() as u32;
+    let mut freqs = [0u32; 256];
+    let mut max_sym = 0u8;
+    for &b in data {
+        freqs[b as usize] += 1;
+        if b > max_sym {
+            max_sym = b;
+        }
+    }
+
+    if max_sym > 128 {
+        return false;
+    }
+
+    let active = freqs[..=max_sym as usize]
+        .iter()
+        .filter(|&&f| f > 0)
+        .count();
+    if active < 2 {
+        return false;
+    }
+
+    let log2_n = log2_fp8(n);
+    let mut entropy_bits_fp8: u64 = 0;
+    for &f in &freqs[..=max_sym as usize] {
+        if f > 0 {
+            entropy_bits_fp8 += f as u64 * (log2_n - log2_fp8(f)) as u64;
+        }
+    }
+
+    let estimated_bytes = entropy_bits_fp8.div_ceil(2048);
+    let tree_overhead = 1 + (max_sym as u64).div_ceil(2);
+    let min_gain = n as u64 / 32;
+
+    estimated_bytes + tree_overhead + min_gain < n as u64
+}
+
 fn encode_literals_section(
     lits: &[u8],
     output: &mut Vec<u8>,
@@ -547,6 +609,12 @@ fn encode_literals_section(
             output.extend_from_slice(huf_concat);
             return;
         }
+    }
+
+    if !huf_worth_trying(lits) {
+        *prev_huffman = None;
+        encode_raw_literals_section(lits, output);
+        return;
     }
 
     if let Some(table) = HuffmanEncodeTable::from_data(lits) {

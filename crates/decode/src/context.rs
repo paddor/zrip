@@ -48,10 +48,12 @@ impl DecompressContext {
 
     /// Creates a new context with a pre-loaded dictionary.
     pub fn with_dict(dict: Dictionary) -> Self {
+        let mut ws = Box::new(BlockDecodeWorkspace::new());
+        ws.cache_dict(&dict);
         Self {
             dict: Some(dict),
             output: Vec::new(),
-            ws: Box::new(BlockDecodeWorkspace::new()),
+            ws,
         }
     }
 

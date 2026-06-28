@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 
-const ZRIP_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
+const ZRIP_LEVELS: &[i32] = &[-8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 const C_ZSTD_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 
 const SILESIA_DOWNLOADS: &[(&str, &str)] = &[
@@ -66,18 +66,42 @@ const ALL_FILES: &[&str] = &[
 ];
 
 const SMALL_FILES: &[&str] = &[
+    "corpus/small/dickens_512",
+    "corpus/small/dickens_1k",
     "corpus/small/dickens_2k",
+    "corpus/small/dickens_4k",
     "corpus/small/dickens_8k",
+    "corpus/small/dickens_16k",
     "corpus/small/dickens_32k",
+    "corpus/small/dickens_64k",
     "corpus/small/dickens_128k",
+    "corpus/small/hdfs_512",
+    "corpus/small/hdfs_1k",
     "corpus/small/hdfs_2k",
+    "corpus/small/hdfs_4k",
     "corpus/small/hdfs_8k",
+    "corpus/small/hdfs_16k",
     "corpus/small/hdfs_32k",
+    "corpus/small/hdfs_64k",
     "corpus/small/hdfs_128k",
+    "corpus/small/xml_collection_512",
+    "corpus/small/xml_collection_1k",
     "corpus/small/xml_collection_2k",
+    "corpus/small/xml_collection_4k",
     "corpus/small/xml_collection_8k",
+    "corpus/small/xml_collection_16k",
     "corpus/small/xml_collection_32k",
+    "corpus/small/xml_collection_64k",
     "corpus/small/xml_collection_128k",
+    "corpus/small/x-ray_512",
+    "corpus/small/x-ray_1k",
+    "corpus/small/x-ray_2k",
+    "corpus/small/x-ray_4k",
+    "corpus/small/x-ray_8k",
+    "corpus/small/x-ray_16k",
+    "corpus/small/x-ray_32k",
+    "corpus/small/x-ray_64k",
+    "corpus/small/x-ray_128k",
 ];
 
 fn cpu_nanos() -> u64 {
@@ -396,17 +420,21 @@ fn cache_dir() -> PathBuf {
     dir
 }
 
-fn level_cache_dir(level: i32) -> PathBuf {
-    let dir = cache_dir().join(format!("L{}", level));
+fn level_cache_dir(level: i32, small: bool) -> PathBuf {
+    let mut dir = cache_dir();
+    if small {
+        dir = dir.join("small");
+    }
+    dir = dir.join(format!("L{}", level));
     std::fs::create_dir_all(&dir).ok();
     dir
 }
 
-fn level_codec_cache_path(level: i32, codec: &str) -> PathBuf {
-    level_cache_dir(level).join(format!("{}.jsonl", codec.replace(' ', "_")))
+fn level_codec_cache_path(level: i32, codec: &str, small: bool) -> PathBuf {
+    level_cache_dir(level, small).join(format!("{}.jsonl", codec.replace(' ', "_")))
 }
 
-fn write_cache(results: &[BenchResult]) {
+fn write_cache(results: &[BenchResult], small: bool) {
     let mut keys: Vec<(i32, &str)> = results
         .iter()
         .map(|r| (r.level, r.codec.as_str()))
@@ -415,7 +443,7 @@ fn write_cache(results: &[BenchResult]) {
     keys.dedup();
 
     for (level, codec) in &keys {
-        let path = level_codec_cache_path(*level, codec);
+        let path = level_codec_cache_path(*level, codec, small);
         let entries: Vec<_> = results
             .iter()
             .filter(|r| r.level == *level && r.codec == *codec)
@@ -473,7 +501,7 @@ fn migrate_flat_cache() {
 
         let mut total = 0;
         for (level, lines) in &by_level {
-            let dest = level_codec_cache_path(*level, codec_name);
+            let dest = level_codec_cache_path(*level, codec_name, false);
             let mut f = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -558,6 +586,68 @@ fn print_live_line(file: &str, level: i32, results: &[&BenchResult]) {
     writeln!(err).unwrap();
 }
 
+fn load_cached_keys(small: bool) -> std::collections::HashSet<(String, i32, String)> {
+    let mut keys = std::collections::HashSet::new();
+    let base = if small {
+        cache_dir().join("small")
+    } else {
+        cache_dir()
+    };
+    if !base.is_dir() {
+        return keys;
+    }
+    for entry in std::fs::read_dir(&base).into_iter().flatten() {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let level_dir = entry.path();
+        if !level_dir.is_dir() {
+            continue;
+        }
+        let dir_name = entry.file_name().to_string_lossy().to_string();
+        if !dir_name.starts_with('L') {
+            continue;
+        }
+        for file in std::fs::read_dir(&level_dir).into_iter().flatten() {
+            let file = match file {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
+            let path = file.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            for line in content.lines() {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                if let (Some(codec), Some(level), Some(input)) = (
+                    parse_str_field(line, "codec"),
+                    parse_level_from_json(line),
+                    parse_str_field(line, "input"),
+                ) {
+                    keys.insert((codec, level, input));
+                }
+            }
+        }
+    }
+    keys
+}
+
+fn parse_str_field(line: &str, field: &str) -> Option<String> {
+    let needle = format!("\"{}\": \"", field);
+    let idx = line.find(&needle)?;
+    let rest = &line[idx + needle.len()..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut only: Vec<String> = Vec::new();
@@ -567,6 +657,7 @@ fn main() {
     let mut extra_files: Vec<String> = Vec::new();
     let mut small_only = false;
     let mut dict_mode = false;
+    let mut reuse_cached = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -601,6 +692,7 @@ fn main() {
             }
             "--small-only" => small_only = true,
             "--dict" => dict_mode = true,
+            "--reuse" => reuse_cached = true,
             _ => {}
         }
         i += 1;
@@ -608,6 +700,19 @@ fn main() {
 
     ensure_corpus();
     migrate_flat_cache();
+
+    let cached_keys = if reuse_cached {
+        let keys = load_cached_keys(small_only);
+        if !keys.is_empty() {
+            eprintln!(
+                "--reuse: {} cached results loaded, will skip those",
+                keys.len()
+            );
+        }
+        keys
+    } else {
+        std::collections::HashSet::new()
+    };
 
     if !impl_specified {
         only.push("zrip".into());
@@ -636,6 +741,7 @@ fn main() {
     let target_ns = 20_000_000u64;
 
     let mut results: Vec<BenchResult> = Vec::new();
+    let mut results_small: Vec<BenchResult> = Vec::new();
 
     let base_files: &[&str] = if small_only { SMALL_FILES } else { ALL_FILES };
     let all_paths: Vec<&str> = base_files
@@ -710,6 +816,10 @@ fn main() {
                     continue;
                 }
 
+                if cached_keys.contains(&(codec.to_string(), level, name.to_string())) {
+                    continue;
+                }
+
                 let r = match codec {
                     "C zstd" => bench_c_zstd(&data, name, level, target_ns),
                     "zrip" | "zrip paranoid" => bench_zrip(&data, name, level, target_ns),
@@ -738,19 +848,27 @@ fn main() {
             if !level_batch.is_empty() {
                 let refs: Vec<&BenchResult> = level_batch.iter().collect();
                 print_live_line(name, level, &refs);
-                results.extend(level_batch);
+                if rel.starts_with("corpus/small/") {
+                    results_small.extend(level_batch);
+                } else {
+                    results.extend(level_batch);
+                }
             }
         }
     }
 
-    write_cache(&results);
+    write_cache(&results, false);
+    write_cache(&results_small, true);
 }
 
 fn dict_source_name(file_name: &str) -> String {
     let base = file_name
         .trim_end_matches("_2k")
+        .trim_end_matches("_4k")
         .trim_end_matches("_8k")
+        .trim_end_matches("_16k")
         .trim_end_matches("_32k")
+        .trim_end_matches("_64k")
         .trim_end_matches("_128k");
     let base = base
         .trim_end_matches(".txt")

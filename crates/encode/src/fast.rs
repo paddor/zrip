@@ -413,6 +413,212 @@ pub(crate) fn compress_fast_with_prefix(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "std")]
+pub(crate) fn compress_fast_attached(
+    combined: &[u8],
+    prefix_len: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    dict_hash: &[u32],
+    dict_hash_log: u32,
+    hash_table: &mut [u32],
+    input_hash_log: u32,
+    sequences: &mut Vec<Sequence>,
+) {
+    sequences.clear();
+    let input_len = block_end - prefix_len;
+    if input_len < 8 {
+        return;
+    }
+
+    let mut anchor = prefix_len;
+    let mut ip = prefix_len;
+    let acceleration = params.target_length.max(1) as usize;
+    let step_size = acceleration + 1;
+    let search_strength = params.search_strength as usize;
+    let mut rep = *rep_offsets;
+    let window = 1usize << params.window_log;
+    let limit = block_end - 4;
+
+    while ip < limit {
+        let rep0 = rep[0] as usize;
+        if (rep0 > 0) & (ip >= rep0)
+            && primitives::rd32(combined, ip) == primitives::rd32(combined, ip - rep0)
+        {
+            let clen = combined.len();
+            let mut match_len = primitives::count_match(combined, ip + 4, ip - rep0 + 4, clen) + 4;
+            let mut back = 0usize;
+            while ip - back > anchor
+                && ip - back > rep0
+                && combined[ip - back - 1] == combined[ip - back - rep0 - 1]
+            {
+                back += 1;
+            }
+            ip -= back;
+            match_len += back;
+            let lit_len = (ip - anchor) as u32;
+            sequences.push(Sequence {
+                literal_length: lit_len,
+                offset: rep0 as u32,
+                match_length: match_len as u32,
+            });
+            ip += match_len;
+            anchor = ip;
+            insert_hash::<0>(combined, ip, input_hash_log, hash_table);
+            rep_match_loop_fast::<0>(
+                combined,
+                &mut ip,
+                &mut anchor,
+                &mut rep,
+                input_hash_log,
+                hash_table,
+                sequences,
+                limit,
+                clen,
+            );
+            continue;
+        }
+
+        let search_start = ip;
+
+        loop {
+            let val = primitives::rd32(combined, ip);
+
+            let h_input = hash4_const::<0>(val, input_hash_log);
+            let input_match = primitives::hash_load(hash_table, h_input) as usize;
+            primitives::hash_store(hash_table, h_input, ip as u32);
+
+            if input_match >= prefix_len
+                && input_match < ip
+                && ip - input_match <= window
+                && val == primitives::rd32(combined, input_match)
+            {
+                let clen = combined.len();
+                let mut match_len =
+                    primitives::count_match(combined, ip + 4, input_match + 4, clen) + 4;
+                let match_pos = input_match;
+                let mut back = 0usize;
+                while ip - back > anchor
+                    && match_pos > back
+                    && combined[ip - back - 1] == combined[match_pos - back - 1]
+                {
+                    back += 1;
+                }
+                let match_start = ip - back;
+                match_len += back;
+                let offset = (match_start - (match_pos - back)) as u32;
+                let lit_len = (match_start - anchor) as u32;
+
+                sequences.push(Sequence {
+                    literal_length: lit_len,
+                    offset,
+                    match_length: match_len as u32,
+                });
+
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = offset;
+
+                ip += match_len - back;
+                anchor = ip;
+
+                insert_complementary_fast::<0>(
+                    combined,
+                    match_start,
+                    ip,
+                    input_hash_log,
+                    hash_table,
+                );
+                insert_hash::<0>(combined, ip, input_hash_log, hash_table);
+                rep_match_loop_fast::<0>(
+                    combined,
+                    &mut ip,
+                    &mut anchor,
+                    &mut rep,
+                    input_hash_log,
+                    hash_table,
+                    sequences,
+                    limit,
+                    clen,
+                );
+
+                break;
+            }
+
+            let h_dict = hash4_const::<0>(val, dict_hash_log);
+            let dict_match = primitives::hash_load(dict_hash, h_dict) as usize;
+            if dict_match < prefix_len
+                && ip - dict_match <= window
+                && val == primitives::rd32(combined, dict_match)
+            {
+                let clen = combined.len();
+                let match_pos = dict_match;
+                let mut match_len =
+                    primitives::count_match(combined, ip + 4, match_pos + 4, clen) + 4;
+                let mut back = 0usize;
+                while ip - back > anchor
+                    && match_pos > back
+                    && combined[ip - back - 1] == combined[match_pos - back - 1]
+                {
+                    back += 1;
+                }
+                let match_start = ip - back;
+                match_len += back;
+                let offset = (match_start - (match_pos - back)) as u32;
+                let lit_len = (match_start - anchor) as u32;
+
+                sequences.push(Sequence {
+                    literal_length: lit_len,
+                    offset,
+                    match_length: match_len as u32,
+                });
+
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = offset;
+
+                ip += match_len - back;
+                anchor = ip;
+
+                insert_complementary_fast::<0>(
+                    combined,
+                    match_start,
+                    ip,
+                    input_hash_log,
+                    hash_table,
+                );
+                insert_hash::<0>(combined, ip, input_hash_log, hash_table);
+                rep_match_loop_fast::<0>(
+                    combined,
+                    &mut ip,
+                    &mut anchor,
+                    &mut rep,
+                    input_hash_log,
+                    hash_table,
+                    sequences,
+                    limit,
+                    clen,
+                );
+
+                break;
+            }
+
+            let step = step_size + ((ip - search_start) >> search_strength);
+            ip += step;
+
+            if ip >= limit {
+                break;
+            }
+        }
+
+        if ip >= limit {
+            break;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compress_fast_with_prefix_reuse(
     src: &[u8],
     params: &LevelParams,

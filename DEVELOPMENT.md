@@ -134,6 +134,7 @@ Plotting scripts in `scripts/`, all reading from `~/.cache/zrip/*.jsonl`:
 | `plot_summary.py` | `summary.svg` | Summary comparison table |
 | `plot_matrix.py` | `matrix.svg` | Per-file/level heatmap matrix |
 | `plot_pipeline.py` | `pipeline.svg` | Encode+decode pipeline throughput |
+| `plot_small.py` | `small.svg` | Encode speed vs input size (2K-128K) |
 
 ### Regenerating all charts
 
@@ -145,12 +146,27 @@ python3 scripts/plot_scatter.py doc/charts/x86_64/
 python3 scripts/plot_summary.py doc/charts/x86_64/
 python3 scripts/plot_matrix.py doc/charts/x86_64/
 python3 scripts/plot_pipeline.py doc/charts/x86_64/
+python3 scripts/plot_small.py doc/charts/x86_64/
 ```
 
 The `ZRIP_HW_EXTRAS` env var is required when the CPU governor and turbo state
 cannot be auto-detected (e.g. in a VM or container). It appends the given
 labels to the hardware subtitle in the chart. On bare metal with sysfs access,
 the script detects these automatically.
+
+### Small-input benchmark + chart workflow
+
+`small.svg` only includes zrip, C zstd, and structured-zstd (no paranoid).
+Use `--reuse` to keep cached results from other codecs and only re-bench zrip:
+
+```bash
+rm ~/.cache/zrip/x86_64/small/*/zrip.jsonl
+cd bench
+cargo run --example zrip_bench --release -- --small-only --reuse
+cd ..
+export ZRIP_HW_EXTRAS="performance governor,turbo off"
+python3 scripts/plot_small.py doc/charts/x86_64/
+```
 
 ### Full benchmark + chart workflow
 
@@ -165,4 +181,5 @@ python3 scripts/plot_scatter.py doc/charts/x86_64/
 python3 scripts/plot_summary.py doc/charts/x86_64/
 python3 scripts/plot_matrix.py doc/charts/x86_64/
 python3 scripts/plot_pipeline.py doc/charts/x86_64/
+python3 scripts/plot_small.py doc/charts/x86_64/
 ```
