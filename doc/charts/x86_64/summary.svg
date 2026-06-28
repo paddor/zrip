@@ -5,30 +5,30 @@
   <text x="22" y="180.0" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600" transform="rotate(-90,22,180.0)">seconds / GB</text>
   <line x1="70" y1="223.1" x2="680" y2="223.1" stroke="#21262d" stroke-width="1"/>
   <text x="62" y="223.1" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">10.0</text>
-  <line x1="70" y1="141.2" x2="680" y2="141.2" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="141.2" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">20.0</text>
-  <line x1="70" y1="59.3" x2="680" y2="59.3" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="59.3" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">30.0</text>
+  <line x1="70" y1="141.3" x2="680" y2="141.3" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="141.3" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">20.0</text>
+  <line x1="70" y1="59.4" x2="680" y2="59.4" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="59.4" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">30.0</text>
   <line x1="70" y1="305" x2="680" y2="305" stroke="#30363d" stroke-width="1.5"/>
-  <rect x="111.0" y="281.1" width="80.0" height="23.9" fill="#60a5fa" rx="1"/>
-  <rect x="111.0" y="257.9" width="80.0" height="23.2" fill="#4680c4" rx="1"/>
-  <rect x="111.0" y="250.7" width="80.0" height="7.2" fill="#60a5fa" rx="1"/>
+  <rect x="111.0" y="281.2" width="80.0" height="23.8" fill="#60a5fa" rx="1"/>
+  <rect x="111.0" y="258.0" width="80.0" height="23.2" fill="#4680c4" rx="1"/>
+  <rect x="111.0" y="250.9" width="80.0" height="7.1" fill="#60a5fa" rx="1"/>
   <text x="151.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">C zstd</text>
-  <rect x="223.0" y="270.5" width="80.0" height="34.5" fill="#f87171" rx="1"/>
-  <rect x="223.0" y="244.9" width="80.0" height="25.6" fill="#c45050" rx="1"/>
-  <rect x="223.0" y="229.4" width="80.0" height="15.5" fill="#f87171" rx="1"/>
+  <rect x="223.0" y="270.3" width="80.0" height="34.7" fill="#f87171" rx="1"/>
+  <rect x="223.0" y="244.7" width="80.0" height="25.6" fill="#c45050" rx="1"/>
+  <rect x="223.0" y="228.8" width="80.0" height="15.9" fill="#f87171" rx="1"/>
   <text x="263.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip</text>
   <rect x="335.0" y="261.5" width="80.0" height="43.5" fill="#f59e0b" rx="1"/>
   <rect x="335.0" y="238.3" width="80.0" height="23.2" fill="#c47d08" rx="1"/>
-  <rect x="335.0" y="226.4" width="80.0" height="11.9" fill="#f59e0b" rx="1"/>
+  <rect x="335.0" y="226.5" width="80.0" height="11.8" fill="#f59e0b" rx="1"/>
   <text x="375.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">structured-zstd</text>
-  <rect x="447.0" y="246.2" width="80.0" height="58.8" fill="#f472b6" rx="1"/>
-  <rect x="447.0" y="220.6" width="80.0" height="25.6" fill="#c05a92" rx="1"/>
-  <rect x="447.0" y="201.9" width="80.0" height="18.7" fill="#f472b6" rx="1"/>
+  <rect x="447.0" y="247.0" width="80.0" height="58.0" fill="#f472b6" rx="1"/>
+  <rect x="447.0" y="221.4" width="80.0" height="25.6" fill="#c05a92" rx="1"/>
+  <rect x="447.0" y="203.8" width="80.0" height="17.6" fill="#f472b6" rx="1"/>
   <text x="487.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip paranoid</text>
-  <rect x="559.0" y="153.7" width="80.0" height="151.3" fill="#4ade80" rx="1"/>
-  <rect x="559.0" y="123.2" width="80.0" height="30.4" fill="#3aaf60" rx="1"/>
-  <rect x="559.0" y="87.6" width="80.0" height="35.6" fill="#4ade80" rx="1"/>
+  <rect x="559.0" y="153.5" width="80.0" height="151.5" fill="#4ade80" rx="1"/>
+  <rect x="559.0" y="123.1" width="80.0" height="30.4" fill="#3aaf60" rx="1"/>
+  <rect x="559.0" y="87.6" width="80.0" height="35.5" fill="#4ade80" rx="1"/>
   <text x="599.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">ruzstd</text>
   <rect x="130" y="335" width="12" height="12" fill="#60a5fa" rx="2"/>
   <text x="148" y="345" fill="#e6edf3" font-size="10" font-weight="500">libzstd v1.5.7 (C)</text>
