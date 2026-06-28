@@ -5,7 +5,7 @@ Reads ~/.cache/zrip/L*/{codec}.jsonl, filters to small corpus files,
 writes small.svg. One panel per source (dickens, hdfs, xml_collection),
 X-axis: input size (log), Y-axis: encode MB/s.
 
-Two shaded bands per codec: Fast (L-7..L2) and DFast (L3..L4).
+Two shaded bands per codec: Fast (L-8..L2) and DFast (L3..L4).
 Boundary lines labeled at the right edge.
 
 Usage:
@@ -32,13 +32,13 @@ LABELS = {
     "structured-zstd": "structured-zstd 0.0.45 (Rust)",
 }
 
-SMALL_PREFIXES = ["dickens", "hdfs", "xml_collection"]
-SMALL_SUFFIXES = ["_2k", "_8k", "_32k", "_128k"]
-SMALL_SIZES = [2048, 8192, 32768, 131072]
-SIZE_LABELS = ["2K", "8K", "32K", "128K"]
+SMALL_PREFIXES = ["dickens", "hdfs", "xml_collection", "x-ray"]
+SMALL_SUFFIXES = ["_512", "_1k", "_2k", "_4k", "_8k", "_16k", "_32k", "_64k", "_128k"]
+SMALL_SIZES = [512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072]
+SIZE_LABELS = ["512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K"]
 
-BAND_LEVELS = list(range(-7, 5))    # -7..4
-INTERIOR_LEVELS = list(range(-6, 4))  # -6..3 (faint lines inside band)
+BAND_LEVELS = list(range(-8, 5))    # -8..4
+INTERIOR_LEVELS = list(range(-7, 4))  # -7..3 (faint lines inside band)
 LABEL_LEVEL = -1
 
 
@@ -83,35 +83,38 @@ def detect_hardware():
 
 def load_small_data():
     from profiles import cache_target
-    cache_dir = os.path.join(
+    base_dir = os.path.join(
         os.environ.get("HOME", "."), ".cache", "zrip", cache_target())
-    data = {}
-    if not os.path.isdir(cache_dir):
-        return data
+    small_dir = os.path.join(base_dir, "small")
     small_names = set()
     for prefix in SMALL_PREFIXES:
         for suffix in SMALL_SUFFIXES:
             small_names.add(prefix + suffix)
-    for entry in os.listdir(cache_dir):
-        level_dir = os.path.join(cache_dir, entry)
-        if not os.path.isdir(level_dir) or not entry.startswith("L"):
+    data = {}
+    # Try dedicated small/ subdir first, fall back to top-level for old caches
+    for cache_dir in [small_dir, base_dir]:
+        if not os.path.isdir(cache_dir):
             continue
-        for codec in CODEC_ORDER:
-            fname = codec.replace(" ", "_") + ".jsonl"
-            path = os.path.join(level_dir, fname)
-            if not os.path.exists(path):
+        for entry in os.listdir(cache_dir):
+            level_dir = os.path.join(cache_dir, entry)
+            if not os.path.isdir(level_dir) or not entry.startswith("L"):
                 continue
-            if codec not in data:
-                data[codec] = {}
-            with open(path) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    r = json.loads(line)
-                    if r["input"] not in small_names:
-                        continue
-                    data[codec][(r["input"], r["level"])] = r
+            for codec in CODEC_ORDER:
+                fname = codec.replace(" ", "_") + ".jsonl"
+                path = os.path.join(level_dir, fname)
+                if not os.path.exists(path):
+                    continue
+                if codec not in data:
+                    data[codec] = {}
+                with open(path) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        r = json.loads(line)
+                        if r["input"] not in small_names:
+                            continue
+                        data[codec][(r["input"], r["level"])] = r
     return {codec: list(seen.values()) for codec, seen in data.items()}
 
 
@@ -143,15 +146,15 @@ def band_envelope(rows, prefix, levels):
 def generate_svg(data):
     hw_label = detect_hardware()
 
-    svg_w = 950
     n_panels = len(SMALL_PREFIXES)
-    panel_w = 230
-    panel_h = 400
+    panel_w = 700
+    panel_h = 220
     top_margin = 55 if hw_label else 45
     left_margin = 90
-    panel_gap = 70
+    row_gap = 50
     bottom_margin = 70
-    svg_h = top_margin + panel_h + bottom_margin
+    svg_w = left_margin + panel_w + 40
+    svg_h = top_margin + n_panels * panel_h + (n_panels - 1) * row_gap + bottom_margin
 
     mid_x = svg_w / 2
 
@@ -173,15 +176,13 @@ def generate_svg(data):
             f' font-size="10">{hw_label}</text>'
         )
 
-    x_start = left_margin
-
-    log_min = math.log10(1500)
+    log_min = math.log10(400)
     log_max = math.log10(200000)
 
     for pi, prefix in enumerate(SMALL_PREFIXES):
-        xl = x_start + pi * (panel_w + panel_gap)
+        xl = left_margin
         xr = xl + panel_w
-        p_top = top_margin
+        p_top = top_margin + pi * (panel_h + row_gap)
         p_bot = p_top + panel_h
         pw = xr - xl
         pcx = (xl + xr) / 2
@@ -250,20 +251,22 @@ def generate_svg(data):
                 continue
             color = COLORS[codec]
 
-            lo_pts, hi_pts = band_envelope(rows, prefix, BAND_LEVELS)
+            codec_levels = [lv for lv in BAND_LEVELS
+                            if any(get_mbs(rows, prefix + s, lv) is not None
+                                   for s in SMALL_SUFFIXES)]
+            if not codec_levels:
+                continue
+            lo_pts, hi_pts = band_envelope(rows, prefix, codec_levels)
             if not lo_pts:
                 continue
 
-            # Shaded fill between lo and hi
-            fwd = [f"{map_x(sz):.1f},{map_y(mbs):.1f}" for sz, mbs in hi_pts]
-            rev = [f"{map_x(sz):.1f},{map_y(mbs):.1f}" for sz, mbs in reversed(lo_pts)]
-            poly = "M" + "L".join(fwd) + "L" + "L".join(rev) + "Z"
-            L.append(
-                f'  <path d="{poly}" fill="{color}" fill-opacity="0.15"/>'
-            )
+            top_lv = codec_levels[0]
+            bot_lv = codec_levels[-1]
+            top_label = f"L{top_lv}" if top_lv >= 0 else f"L−{abs(top_lv)}"
+            bot_label = f"L{bot_lv}" if bot_lv >= 0 else f"L−{abs(bot_lv)}"
 
-            # Faint interior lines (L-6..L1), label L-1
-            for level in INTERIOR_LEVELS:
+            # Interior lines, label L-1
+            for level in [lv for lv in INTERIOR_LEVELS if lv in codec_levels]:
                 pts = []
                 for si, suffix in enumerate(SMALL_SUFFIXES):
                     name = prefix + suffix
@@ -290,10 +293,10 @@ def generate_svg(data):
                         f' fill-opacity="0.5">{lbl}</text>'
                     )
 
-            # Boundary lines: L-7 (solid, top) and L4 (dashed, bottom)
+            # Boundary lines: top (solid) and bottom (dashed)
             for pts, dash, label in [
-                (hi_pts, "", "L−7"),
-                (lo_pts, ' stroke-dasharray="4,3"', "L4"),
+                (hi_pts, "", top_label),
+                (lo_pts, ' stroke-dasharray="4,3"', bot_label),
             ]:
                 if len(pts) > 1:
                     parts = []
@@ -319,25 +322,29 @@ def generate_svg(data):
                     f' fill="{color}" font-size="7" font-weight="600">{label}</text>'
                 )
 
-    # Shared Y-axis label
-    y_mid = top_margin + panel_h / 2
+    # Shared Y-axis label (centered vertically across all panels)
+    total_h = n_panels * panel_h + (n_panels - 1) * row_gap
+    y_mid = top_margin + total_h / 2
     L.append(
         f'  <text x="20" y="{y_mid}" text-anchor="middle" fill="#e6edf3"'
         f' font-size="11" font-weight="600"'
         f' transform="rotate(-90,20,{y_mid})">encode MB/s</text>'
     )
 
-    # Legend
-    leg_y = top_margin + panel_h + 40
+    # Legend: single row — codecs then meta items
+    leg_y = top_margin + total_h + 40
+
     legend_items = []
     for codec in CODEC_ORDER:
         if codec in data:
             legend_items.append(("codec", codec, LABELS[codec]))
-    legend_items.append(("band", "fast", "L−7..L4 range"))
-    legend_items.append(("line", "solid", "solid = L−7"))
-    legend_items.append(("line", "dash", "dashed = L4"))
+    legend_items += [
+        ("line", "solid", "solid = fastest"),
+        ("line", "dash", "dashed = slowest"),
+    ]
 
-    rw = sum(len(lb) * 6.2 + 24 for _, _, lb in legend_items) + 12 * (len(legend_items) - 1)
+    rw = sum(len(lb) * 6.2 + 24 for _, _, lb in legend_items)
+    rw += 12 * (len(legend_items) - 1)
     lx = mid_x - rw / 2
     for kind, key, label in legend_items:
         if kind == "codec":
@@ -348,15 +355,6 @@ def generate_svg(data):
             L.append(
                 f'  <text x="{lx + 13:.0f}" y="{leg_y + 3.5}" fill="#e6edf3"'
                 f' font-size="10" font-weight="500">{label}</text>'
-            )
-        elif kind == "band":
-            L.append(
-                f'  <rect x="{lx:.0f}" y="{leg_y - 5}" width="14" height="10"'
-                f' fill="#7d8590" fill-opacity="0.25" rx="2"/>'
-            )
-            L.append(
-                f'  <text x="{lx + 18:.0f}" y="{leg_y + 3.5}" fill="#7d8590"'
-                f' font-size="10">{label}</text>'
             )
         elif kind == "line":
             dash = "" if key == "solid" else " stroke-dasharray='4,3'"
