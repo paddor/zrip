@@ -41,6 +41,8 @@ pub(crate) struct BlockDecodeWorkspace {
     pub huf_rank_count: Vec<u32>,
     pub huf_rank_start: Vec<u32>,
     pub huf_weights: Vec<u8>,
+    pub huf_last_weights: Vec<u8>,
+    pub huf_last_weights_valid: bool,
     pub fse_dist: Vec<i16>,
     pub fse_symbol_next: Vec<u16>,
     pub fse_build_buf: Vec<zrip_core::fse::FseDecodeEntry>,
@@ -60,6 +62,8 @@ impl BlockDecodeWorkspace {
             huf_rank_count: Vec::new(),
             huf_rank_start: Vec::new(),
             huf_weights: Vec::new(),
+            huf_last_weights: Vec::new(),
+            huf_last_weights_valid: false,
             fse_dist: Vec::new(),
             fse_symbol_next: Vec::new(),
             fse_build_buf: Vec::new(),
@@ -67,6 +71,11 @@ impl BlockDecodeWorkspace {
             cached_dict_rep: [1, 4, 8],
             cached_dict_huf: None,
         }
+    }
+
+    pub(crate) fn reset_huffman_state(&mut self) {
+        self.huf_valid = false;
+        self.huf_last_weights_valid = false;
     }
 
     #[cfg(feature = "std")]
@@ -243,7 +252,7 @@ pub(crate) fn decompress_frame(
     } else {
         (SequenceDecodeTables::new_default(), [1u32, 4, 8])
     };
-    ws.huf_valid = false;
+    ws.reset_huffman_state();
     if let Some((ref t, l)) = ws.cached_dict_huf {
         ws.huf_table.clear();
         ws.huf_table.extend_from_slice(t);
