@@ -376,6 +376,62 @@ fn bench_c_zstd_dict(
     }
 }
 
+fn bench_decode_only(
+    codec: &str,
+    compressed: &[u8],
+    original_size: usize,
+    compressed_size: usize,
+    name: &str,
+    level: i32,
+    target_ns: u64,
+) -> BenchResult {
+    let decompress_ns = match codec {
+        "C zstd" => {
+            let mut decompressor = zstd::bulk::Decompressor::new().unwrap();
+            let mut buf = Vec::with_capacity(original_size + 1024);
+            bench_loop(3, target_ns, 7, || {
+                buf.clear();
+                let _ = std::hint::black_box(
+                    decompressor
+                        .decompress_to_buffer(std::hint::black_box(compressed), &mut buf)
+                        .unwrap(),
+                );
+            })
+        }
+        "zrip" | "zrip paranoid" => {
+            let mut ctx = zrip::DecompressContext::new();
+            bench_loop(3, target_ns, 7, || {
+                let _ =
+                    std::hint::black_box(ctx.decompress(std::hint::black_box(compressed)).unwrap());
+            })
+        }
+        "ruzstd" => bench_loop(3, target_ns, 7, || {
+            let mut dec = ruzstd::decoding::FrameDecoder::new();
+            let mut out = Vec::with_capacity(original_size + 1024);
+            dec.decode_all_to_vec(std::hint::black_box(compressed), &mut out)
+                .unwrap();
+            std::hint::black_box(&out);
+        }),
+        "structured-zstd" => bench_loop(3, target_ns, 7, || {
+            let mut dec = structured_zstd::decoding::FrameDecoder::new();
+            let mut out = vec![0u8; original_size + 1024];
+            dec.decode_all(std::hint::black_box(compressed), &mut out)
+                .unwrap();
+            std::hint::black_box(&out);
+        }),
+        _ => unreachable!("unsupported codec for decode-only: {}", codec),
+    };
+    BenchResult {
+        codec: codec.to_string(),
+        input_name: name.into(),
+        level,
+        input_size: original_size,
+        compressed_size,
+        compress_ns: 0.0,
+        decompress_ns,
+    }
+}
+
 fn bench_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -420,10 +476,13 @@ fn cache_dir() -> PathBuf {
     dir
 }
 
-fn level_cache_dir(level: i32, small: bool) -> PathBuf {
+fn level_cache_dir_inner(level: i32, small: bool, decode_only: bool) -> PathBuf {
     let mut dir = cache_dir();
     if small {
         dir = dir.join("small");
+    }
+    if decode_only {
+        dir = dir.join("decode_cmp");
     }
     dir = dir.join(format!("L{}", level));
     std::fs::create_dir_all(&dir).ok();
@@ -431,10 +490,22 @@ fn level_cache_dir(level: i32, small: bool) -> PathBuf {
 }
 
 fn level_codec_cache_path(level: i32, codec: &str, small: bool) -> PathBuf {
-    level_cache_dir(level, small).join(format!("{}.jsonl", codec.replace(' ', "_")))
+    level_cache_dir_inner(level, small, false).join(format!("{}.jsonl", codec.replace(' ', "_")))
+}
+
+fn level_codec_cache_path_decode(level: i32, codec: &str, small: bool) -> PathBuf {
+    level_cache_dir_inner(level, small, true).join(format!("{}.jsonl", codec.replace(' ', "_")))
 }
 
 fn write_cache(results: &[BenchResult], small: bool) {
+    write_cache_inner(results, small, false);
+}
+
+fn write_cache_decode(results: &[BenchResult], small: bool) {
+    write_cache_inner(results, small, true);
+}
+
+fn write_cache_inner(results: &[BenchResult], small: bool, decode_only: bool) {
     let mut keys: Vec<(i32, &str)> = results
         .iter()
         .map(|r| (r.level, r.codec.as_str()))
@@ -443,7 +514,11 @@ fn write_cache(results: &[BenchResult], small: bool) {
     keys.dedup();
 
     for (level, codec) in &keys {
-        let path = level_codec_cache_path(*level, codec, small);
+        let path = if decode_only {
+            level_codec_cache_path_decode(*level, codec, small)
+        } else {
+            level_codec_cache_path(*level, codec, small)
+        };
         let entries: Vec<_> = results
             .iter()
             .filter(|r| r.level == *level && r.codec == *codec)
@@ -530,6 +605,7 @@ const ZRIP_CODEC: &str = "zrip paranoid";
 const ZRIP_CODEC: &str = "zrip";
 
 const CODECS: &[&str] = &["C zstd", ZRIP_CODEC, "ruzstd", "structured-zstd", "lz4rip"];
+const DECODE_CODECS: &[&str] = &["C zstd", ZRIP_CODEC, "ruzstd", "structured-zstd"];
 const DICT_CODECS: &[&str] = &["C zstd+dict", "zrip+dict"];
 
 fn levels_for_codec<'a>(codec: &str, level_filter: &'a [i32]) -> &'a [i32] {
@@ -657,6 +733,7 @@ fn main() {
     let mut extra_files: Vec<String> = Vec::new();
     let mut small_only = false;
     let mut dict_mode = false;
+    let mut decode_only = false;
     let mut reuse_cached = false;
     let mut i = 1;
     while i < args.len() {
@@ -692,6 +769,7 @@ fn main() {
             }
             "--small-only" => small_only = true,
             "--dict" => dict_mode = true,
+            "--decode-only" => decode_only = true,
             "--reuse" => reuse_cached = true,
             _ => {}
         }
@@ -714,13 +792,25 @@ fn main() {
         std::collections::HashSet::new()
     };
 
-    if !impl_specified {
+    if decode_only {
+        if !impl_specified {
+            only.clear();
+        } else if only.iter().any(|o| o == "all") {
+            only.clear();
+        }
+    } else if !impl_specified {
         only.push("zrip".into());
     } else if only.iter().any(|o| o == "all") {
         only.clear();
     }
 
-    let base_codecs: &[&str] = if dict_mode { DICT_CODECS } else { CODECS };
+    let base_codecs: &[&str] = if decode_only {
+        DECODE_CODECS
+    } else if dict_mode {
+        DICT_CODECS
+    } else {
+        CODECS
+    };
 
     let active_codecs: Vec<&str> = base_codecs
         .iter()
@@ -728,7 +818,17 @@ fn main() {
         .filter(|c| only.is_empty() || only.iter().any(|o| c.contains(o.as_str())))
         .collect();
 
-    let all_levels: Vec<i32> = {
+    let all_levels: Vec<i32> = if decode_only {
+        let lvls = if level_filter.is_empty() {
+            ZRIP_LEVELS
+        } else {
+            &level_filter
+        };
+        let mut v = lvls.to_vec();
+        v.sort();
+        v.dedup();
+        v
+    } else {
         let mut lvls: Vec<i32> = active_codecs
             .iter()
             .flat_map(|c| levels_for_codec(c, &level_filter).iter().copied())
@@ -810,39 +910,56 @@ fn main() {
         for &level in &all_levels {
             let mut level_batch: Vec<BenchResult> = Vec::new();
 
-            for &codec in &active_codecs {
-                let codec_levels = levels_for_codec(codec, &level_filter);
-                if !codec_levels.contains(&level) {
-                    continue;
+            if decode_only {
+                let mut compressor = zstd::bulk::Compressor::new(level).unwrap();
+                let compressed = compressor.compress(&data).unwrap();
+                for &codec in &active_codecs {
+                    let r = bench_decode_only(
+                        codec,
+                        &compressed,
+                        data.len(),
+                        compressed.len(),
+                        name,
+                        level,
+                        target_ns,
+                    );
+                    level_batch.push(r);
                 }
+            } else {
+                for &codec in &active_codecs {
+                    let codec_levels = levels_for_codec(codec, &level_filter);
+                    if !codec_levels.contains(&level) {
+                        continue;
+                    }
 
-                if cached_keys.contains(&(codec.to_string(), level, name.to_string())) {
-                    continue;
+                    if cached_keys.contains(&(codec.to_string(), level, name.to_string())) {
+                        continue;
+                    }
+
+                    let r = match codec {
+                        "C zstd" => bench_c_zstd(&data, name, level, target_ns),
+                        "zrip" | "zrip paranoid" => bench_zrip(&data, name, level, target_ns),
+                        "ruzstd" => bench_ruzstd(&data, name, level, target_ns),
+                        "structured-zstd" => bench_structured_zstd(&data, name, level, target_ns),
+                        "lz4rip" => bench_lz4rip(&data, name, level, target_ns),
+                        "zrip+dict" => {
+                            if let Some(db) = dict_bytes {
+                                bench_zrip_dict(&data, name, level, target_ns, db)
+                            } else {
+                                continue;
+                            }
+                        }
+                        "C zstd+dict" => {
+                            if let Some(db) = dict_bytes {
+                                bench_c_zstd_dict(&data, name, level, target_ns, db)
+                            } else {
+                                continue;
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+                    level_batch.push(r);
                 }
-
-                let r = match codec {
-                    "C zstd" => bench_c_zstd(&data, name, level, target_ns),
-                    "zrip" | "zrip paranoid" => bench_zrip(&data, name, level, target_ns),
-                    "ruzstd" => bench_ruzstd(&data, name, level, target_ns),
-                    "structured-zstd" => bench_structured_zstd(&data, name, level, target_ns),
-                    "lz4rip" => bench_lz4rip(&data, name, level, target_ns),
-                    "zrip+dict" => {
-                        if let Some(db) = dict_bytes {
-                            bench_zrip_dict(&data, name, level, target_ns, db)
-                        } else {
-                            continue;
-                        }
-                    }
-                    "C zstd+dict" => {
-                        if let Some(db) = dict_bytes {
-                            bench_c_zstd_dict(&data, name, level, target_ns, db)
-                        } else {
-                            continue;
-                        }
-                    }
-                    _ => unreachable!(),
-                };
-                level_batch.push(r);
             }
 
             if !level_batch.is_empty() {
@@ -857,8 +974,13 @@ fn main() {
         }
     }
 
-    write_cache(&results, false);
-    write_cache(&results_small, true);
+    if decode_only {
+        write_cache_decode(&results, false);
+        write_cache_decode(&results_small, true);
+    } else {
+        write_cache(&results, false);
+        write_cache(&results_small, true);
+    }
 }
 
 fn dict_source_name(file_name: &str) -> String {
