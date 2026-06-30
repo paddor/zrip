@@ -40,7 +40,7 @@ PROFILES = {
         "LABELS": {
             "C zstd":          "C zstd 1.5.7 (libzstd wasm)",
             "zrip":            "zrip (SIMD128)",
-            "structured-zstd": "structured-zstd 0.0.45",
+            "structured-zstd": "structured-zstd 0.0.48",
             "zrip paranoid":   "zrip paranoid (safe Rust, no unsafe)",
         },
         "LEVEL_FILTER": {},

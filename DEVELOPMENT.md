@@ -134,7 +134,7 @@ Plotting scripts in `scripts/`, all reading from `~/.cache/zrip/*.jsonl`:
 | `plot_summary.py` | `summary.svg` | Summary comparison table |
 | `plot_matrix.py` | `matrix.svg` | Per-file/level heatmap matrix |
 | `plot_pipeline.py` | `pipeline.svg` | Encode+decode pipeline throughput |
-| `plot_small.py` | `small.svg` | Encode speed vs input size (2K-128K) |
+| `plot_small.py` | `small_encode.svg` | Encode speed vs input size (2K-128K) |
 
 ### Regenerating all charts
 
@@ -156,7 +156,7 @@ the script detects these automatically.
 
 ### Small-input benchmark + chart workflow
 
-`small.svg` only includes zrip, C zstd, and structured-zstd (no paranoid).
+`small_encode.svg` only includes zrip, C zstd, and structured-zstd (no paranoid).
 Use `--reuse` to keep cached results from other codecs and only re-bench zrip:
 
 ```bash
