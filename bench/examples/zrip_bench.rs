@@ -662,13 +662,19 @@ fn print_live_line(file: &str, level: i32, results: &[&BenchResult]) {
     writeln!(err).unwrap();
 }
 
-fn load_cached_keys(small: bool) -> std::collections::HashSet<(String, i32, String)> {
+fn load_cached_keys(
+    small: bool,
+    decode_only: bool,
+) -> std::collections::HashSet<(String, i32, String)> {
     let mut keys = std::collections::HashSet::new();
-    let base = if small {
+    let mut base = if small {
         cache_dir().join("small")
     } else {
         cache_dir()
     };
+    if decode_only {
+        base = base.join("decode_cmp");
+    }
     if !base.is_dir() {
         return keys;
     }
@@ -780,7 +786,7 @@ fn main() {
     migrate_flat_cache();
 
     let cached_keys = if reuse_cached {
-        let keys = load_cached_keys(small_only);
+        let keys = load_cached_keys(small_only, decode_only);
         if !keys.is_empty() {
             eprintln!(
                 "--reuse: {} cached results loaded, will skip those",
@@ -914,6 +920,10 @@ fn main() {
                 let mut compressor = zstd::bulk::Compressor::new(level).unwrap();
                 let compressed = compressor.compress(&data).unwrap();
                 for &codec in &active_codecs {
+                    if cached_keys.contains(&(codec.to_string(), level, name.to_string())) {
+                        continue;
+                    }
+
                     let r = bench_decode_only(
                         codec,
                         &compressed,
