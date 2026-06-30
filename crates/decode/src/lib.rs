@@ -12,6 +12,7 @@ pub(crate) mod exec;
 pub(crate) mod fast_vec;
 pub(crate) mod literals;
 pub(crate) mod ring_buffer;
+pub(crate) mod seq_table;
 pub(crate) mod sequences;
 #[cfg(feature = "std")]
 pub mod streaming;
@@ -39,6 +40,7 @@ pub(crate) struct BlockDecodeWorkspace {
     pub huf_all_weights: Vec<u8>,
     pub huf_rank_count: Vec<u32>,
     pub huf_rank_start: Vec<u32>,
+    pub huf_weights: Vec<u8>,
     pub fse_dist: Vec<i16>,
     pub fse_symbol_next: Vec<u16>,
     pub fse_build_buf: Vec<zrip_core::fse::FseDecodeEntry>,
@@ -57,6 +59,7 @@ impl BlockDecodeWorkspace {
             huf_all_weights: Vec::new(),
             huf_rank_count: Vec::new(),
             huf_rank_start: Vec::new(),
+            huf_weights: Vec::new(),
             fse_dist: Vec::new(),
             fse_symbol_next: Vec::new(),
             fse_build_buf: Vec::new(),
@@ -70,17 +73,17 @@ impl BlockDecodeWorkspace {
     pub(crate) fn cache_dict(&mut self, dict: &zrip_core::dict::Dictionary) {
         let mut st = SequenceDecodeTables::new_default();
         if let Some((t, l)) = dict.of_table() {
-            st.of_table = crate::sequences::into_table(&zrip_core::fse::promote_of_table(t));
+            st.of_table = crate::seq_table::SeqTable::promote_of(t);
             st.of_accuracy = l;
             st.of_set = true;
         }
         if let Some((t, l)) = dict.ml_table() {
-            st.ml_table = crate::sequences::into_table(&zrip_core::fse::promote_ml_table(t));
+            st.ml_table = crate::seq_table::SeqTable::promote_ml(t);
             st.ml_accuracy = l;
             st.ml_set = true;
         }
         if let Some((t, l)) = dict.ll_table() {
-            st.ll_table = crate::sequences::into_table(&zrip_core::fse::promote_ll_table(t));
+            st.ll_table = crate::seq_table::SeqTable::promote_ll(t);
             st.ll_accuracy = l;
             st.ll_set = true;
         }
@@ -222,17 +225,17 @@ pub(crate) fn decompress_frame(
     } else if let Some(d) = dict {
         let mut st = SequenceDecodeTables::new_default();
         if let Some((t, l)) = d.of_table() {
-            st.of_table = crate::sequences::into_table(&zrip_core::fse::promote_of_table(t));
+            st.of_table = crate::seq_table::SeqTable::promote_of(t);
             st.of_accuracy = l;
             st.of_set = true;
         }
         if let Some((t, l)) = d.ml_table() {
-            st.ml_table = crate::sequences::into_table(&zrip_core::fse::promote_ml_table(t));
+            st.ml_table = crate::seq_table::SeqTable::promote_ml(t);
             st.ml_accuracy = l;
             st.ml_set = true;
         }
         if let Some((t, l)) = d.ll_table() {
-            st.ll_table = crate::sequences::into_table(&zrip_core::fse::promote_ll_table(t));
+            st.ll_table = crate::seq_table::SeqTable::promote_ll(t);
             st.ll_accuracy = l;
             st.ll_set = true;
         }

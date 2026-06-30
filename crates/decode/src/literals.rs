@@ -3,7 +3,7 @@
 use crate::BlockDecodeWorkspace;
 use zrip_core::error::DecompressError;
 use zrip_core::huffman::decode::{decode_4_streams_into, decode_single_stream_vec};
-use zrip_core::huffman::weights::{build_huffman_decode_table_into, parse_huffman_weights};
+use zrip_core::huffman::weights::{build_huffman_decode_table_into, parse_huffman_weights_into};
 
 #[derive(Debug, Clone, Copy)]
 pub enum LiteralsBlockType {
@@ -149,9 +149,15 @@ pub(crate) fn decode_literals_ws(
                 }
                 0
             } else {
-                let (weights, consumed) = parse_huffman_weights(stream_data)?;
+                let consumed = parse_huffman_weights_into(
+                    stream_data,
+                    &mut ws.huf_weights,
+                    &mut ws.fse_build_buf,
+                    &mut ws.fse_symbol_next,
+                    &mut ws.fse_dist,
+                )?;
                 ws.huf_table_log = build_huffman_decode_table_into(
-                    &weights,
+                    &ws.huf_weights,
                     &mut ws.huf_table,
                     &mut ws.huf_all_weights,
                     &mut ws.huf_rank_count,
