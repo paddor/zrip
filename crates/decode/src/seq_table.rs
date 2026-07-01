@@ -49,8 +49,8 @@ impl SeqTable {
 
     #[cfg(feature = "paranoid")]
     #[inline(always)]
-    pub(crate) fn get(&self, idx: usize) -> FseSeqDecodeEntry {
-        self.data[idx]
+    pub(crate) fn get_ref(&self, idx: usize) -> &FseSeqDecodeEntry {
+        &self.data[idx]
     }
 
     #[cfg(not(feature = "paranoid"))]

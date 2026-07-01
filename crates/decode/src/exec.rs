@@ -42,6 +42,19 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     let output_start = op;
     let op_limit = output_start + zrip_core::frame::MAX_BLOCK_SIZE;
     let mut lit_off: usize = 0;
+    macro_rules! table_entry {
+        ($table:expr, $state:expr) => {{
+            let idx = ($state & FSE_SEQ_TABLE_MASK) as usize;
+            #[cfg(feature = "paranoid")]
+            {
+                $table.get_ref(idx)
+            }
+            #[cfg(not(feature = "paranoid"))]
+            {
+                $table.get(idx)
+            }
+        }};
+    }
     macro_rules! execute_seq {
         ($literal_length:expr, $match_length:expr, $offset:expr) => {{
             let ll = $literal_length as usize;
@@ -83,15 +96,9 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
 
     macro_rules! decode_and_execute_update {
         ($rev_reader:expr, $offsets:expr) => {{
-            let of_e = tables
-                .of_table
-                .get((of_state & FSE_SEQ_TABLE_MASK) as usize);
-            let ml_e = tables
-                .ml_table
-                .get((ml_state & FSE_SEQ_TABLE_MASK) as usize);
-            let ll_e = tables
-                .ll_table
-                .get((ll_state & FSE_SEQ_TABLE_MASK) as usize);
+            let of_e = table_entry!(tables.of_table, of_state);
+            let ml_e = table_entry!(tables.ml_table, ml_state);
+            let ll_e = table_entry!(tables.ll_table, ll_state);
 
             let of_extra = $rev_reader.read_bits_branchless(of_e.extra_bits);
             let offset_value = of_e.baseline_value + of_extra;
@@ -132,15 +139,9 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     }
     while seq_idx < last_seq {
         rev_reader.refill();
-        let of_e = tables
-            .of_table
-            .get((of_state & FSE_SEQ_TABLE_MASK) as usize);
-        let ml_e = tables
-            .ml_table
-            .get((ml_state & FSE_SEQ_TABLE_MASK) as usize);
-        let ll_e = tables
-            .ll_table
-            .get((ll_state & FSE_SEQ_TABLE_MASK) as usize);
+        let of_e = table_entry!(tables.of_table, of_state);
+        let ml_e = table_entry!(tables.ml_table, ml_state);
+        let ll_e = table_entry!(tables.ll_table, ll_state);
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
@@ -162,15 +163,9 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     // Last sequence: no FSE state update
     {
         rev_reader.refill();
-        let of_e = tables
-            .of_table
-            .get((of_state & FSE_SEQ_TABLE_MASK) as usize);
-        let ml_e = tables
-            .ml_table
-            .get((ml_state & FSE_SEQ_TABLE_MASK) as usize);
-        let ll_e = tables
-            .ll_table
-            .get((ll_state & FSE_SEQ_TABLE_MASK) as usize);
+        let of_e = table_entry!(tables.of_table, of_state);
+        let ml_e = table_entry!(tables.ml_table, ml_state);
+        let ll_e = table_entry!(tables.ll_table, ll_state);
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
