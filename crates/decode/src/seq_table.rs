@@ -39,6 +39,21 @@ impl SeqTable {
     }
 
     #[cfg(not(feature = "paranoid"))]
+    #[inline(always)]
+    pub(crate) fn get(&self, idx: usize) -> FseSeqDecodeEntry {
+        debug_assert!(idx < FSE_SEQ_TABLE_CAPACITY);
+        // SAFETY: The FSE state machine bounds idx to [0, 1 << accuracy_log).
+        // All entries in that range are initialized by promote_* or set.
+        unsafe { self.data[idx].assume_init() }
+    }
+
+    #[cfg(feature = "paranoid")]
+    #[inline(always)]
+    pub(crate) fn get_ref(&self, idx: usize) -> &FseSeqDecodeEntry {
+        &self.data[idx]
+    }
+
+    #[cfg(not(feature = "paranoid"))]
     pub(crate) fn promote_ll(fse: &[FseDecodeEntry]) -> Self {
         debug_assert!(fse.len() <= FSE_SEQ_TABLE_CAPACITY);
         let mut table = Self {

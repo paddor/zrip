@@ -42,24 +42,88 @@ pub(crate) fn compress_fast_block(
 ) {
     sequences.clear();
     let mls = params.min_match as usize;
-    macro_rules! dispatch {
-        ($hl:expr, $mls:expr) => {
-            compress_fast_block_impl::<$hl, $mls>(
-                src,
-                block_start,
-                block_end,
-                params,
-                rep_offsets,
-                hash_table,
-                sequences,
-            )
-        };
+    match (mls, params.hash_log) {
+        (4, 14) => compress_fast_block_h14_mls4(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
+        (7.., _) => compress_fast_block_mls7(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
+        (5..7, _) => compress_fast_block_impl::<0, 5>(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
+        _ => compress_fast_block_impl::<0, 4>(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
     }
-    match mls {
-        7.. => dispatch!(0, 7),
-        5..7 => dispatch!(0, 5),
-        _ => dispatch!(0, 4),
-    }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_fast_block_h14_mls4(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_fast_block_impl::<14, 4>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_fast_block_mls7(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_fast_block_impl::<0, 7>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    );
 }
 
 /// C zstd-style 4-cursor match finder (port of ZSTD_compressBlock_fast_noDict_generic).

@@ -56,6 +56,10 @@ name = "profile_decode"
 required-features = ["std"]
 
 [[example]]
+name = "profile_decode_corpus"
+required-features = ["std"]
+
+[[example]]
 name = "profile_encode"
 required-features = ["std"]
 

@@ -44,24 +44,52 @@ pub(crate) fn compress_dfast_block(
     hash_long: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    macro_rules! dispatch {
-        ($hl:expr, $sl:expr, $mls:expr) => {
-            compress_dfast_block_impl::<$hl, $sl, $mls>(
-                src,
-                block_start,
-                block_end,
-                params,
-                rep_offsets,
-                hash_short,
-                hash_long,
-                sequences,
-            )
-        };
-    }
     match params.min_match {
-        ..=4 => dispatch!(0, 0, 4),
-        _ => dispatch!(0, 0, 5),
+        ..=4 => compress_dfast_block_impl::<0, 0, 4>(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_short,
+            hash_long,
+            sequences,
+        ),
+        _ => compress_dfast_block_mls5(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_short,
+            hash_long,
+            sequences,
+        ),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_dfast_block_mls5(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_short: &mut [u32],
+    hash_long: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_dfast_block_impl::<0, 0, 5>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_short,
+        hash_long,
+        sequences,
+    );
 }
 
 /// 4-cursor DFast match finder with prefetch pipeline.
