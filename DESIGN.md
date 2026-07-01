@@ -25,9 +25,9 @@ Const-generic dispatch on minimum match length via
 
 | MLS | Hash function | Used at levels |
 |-----|---------------|----------------|
-| 4   | `hash4` (PRIME32_1) | 1 |
+| 4   | `hash4` (PRIME32_1) | 1..2 |
 | 5   | `hash5` (PRIME64_1) | -6..-1 |
-| 7   | `hash7` (custom PRIME7) | -7 |
+| 7   | `hash7` (custom PRIME7) | -8..-7 |
 
 Hash table prefetch on x86_64 (`_mm_prefetch`) and aarch64 (inline asm
 `prfm pldl1keep`) hides memory latency in the match-finding loop.
@@ -104,10 +104,13 @@ exceeds savings:
 
 Per-block decisions:
 
-**Literals**: Level -7 always emits raw literal blocks (skips Huffman tree
-construction entirely). All other levels try Huffman-compressed literals with
-treeless reuse across blocks via `prev_huffman`. For literal blocks >= 1024
-bytes, encodes into 4 independent streams to enable decoder-side parallelism.
+**Literals**: Level -8 always emits raw literal blocks (skips Huffman tree
+construction entirely). Other Fast levels may also force raw literals for
+small inputs through the per-level raw-literal size ramp in
+`strategy.rs:apply_raw_literals_size_override`. All other blocks try
+Huffman-compressed literals with treeless reuse across blocks via
+`prev_huffman`. For literal blocks >= 1024 bytes, encodes into 4 independent
+streams to enable decoder-side parallelism.
 
 **3-way FSE table mode selection.** Compares predefined, custom
 (data-derived), and repeat (carry-over from previous block or dict) FSE
@@ -301,9 +304,14 @@ Enable via `Options::ldm(true)` (requires the `ldm` feature, on by default).
 ### Sequence execution (`crates/decode/src/exec.rs`)
 
 `#![forbid(unsafe_code)]`. A single safe Rust implementation handles all
-platforms. FSE decode tables are fixed-size `[FseSeqDecodeEntry; 512]` arrays
-indexed with `state & 511`, which LLVM proves is always in bounds (emits
-`andl $511` with no bounds check).
+platforms. `SeqTable` stores fixed-size 512-entry FSE sequence tables indexed
+with `state & 511`. In default builds the backing storage is
+`[MaybeUninit<FseSeqDecodeEntry>; 512]`, so table promotion initializes only
+the states that the FSE accuracy log can reach. The hot loop copies each
+`FseSeqDecodeEntry` out of the table, letting LLVM keep fields in registers.
+Under `paranoid`, `SeqTable` uses fully initialized
+`[FseSeqDecodeEntry; 512]` storage and the hot loop borrows entries by
+reference to avoid copying initialized padding-heavy structs.
 
 2-sequence unrolled decode loop: decodes 2 sequences per iteration while the
 bit buffer has >= 16 bytes remaining. Cuts loop overhead in half.
@@ -321,12 +329,12 @@ enabling the compiler to generate BMI2 bit extraction instructions (`shlx`,
 
 ### FSE tables
 
-**Fixed-size tables with mask** (`crates/core/src/fse/mod.rs`).
-`[FseSeqDecodeEntry; 512]` arrays with `& FSE_SEQ_TABLE_MASK` instead of
-variable-size Vec with bounds checks. Eliminates heap allocation per block
-and enables bitwise masking instead of modular arithmetic.
+**Fixed-size tables with mask** (`crates/decode/src/seq_table.rs`).
+`SeqTable` uses 512-entry storage with `& FSE_SEQ_TABLE_MASK` instead of
+variable-size `Vec` indexing. This removes per-block sequence table
+allocation and uses bitwise masking instead of modular arithmetic.
 
-**Promoted FSE tables** (`fse/mod.rs:promote_ll_table` etc.).
+**Promoted FSE tables** (`seq_table.rs:SeqTable::promote_ll` etc.).
 `FseSeqDecodeEntry` pre-computes `extra_bits` and `baseline_value` from the
 LL/ML/OF code tables. Decode reads one struct instead of doing a separate
 baseline/bits table lookup per symbol.
@@ -335,7 +343,7 @@ baseline/bits table lookup per symbol.
 decode tables into workspace buffers instead of returning new Vecs.
 
 **Predefined table caching** (`sequences.rs`). `LazyLock` for LL/ML/OF
-predefined tables. Built once, array-copied per use.
+predefined tables in `std` builds. Built once, then `SeqTable`-cloned per use.
 
 
 ### Bitstream (`crates/core/src/bitstream/reader_reverse.rs`)
@@ -404,9 +412,9 @@ Two dispatch mechanisms coexist:
 **Decoder:** `fearless_simd::dispatch!` with a cached `OnceLock<Level>`. The
 macro compiles `decode_execute_sequences` with platform-specific target features
 (AVX2+BMI2 on x86_64, NEON on aarch64, SIMD128 on wasm32) and selects the best
-version at runtime. Zero `unsafe` in user code. Works under `paranoid` since
-`fearless_simd` requires no unsafe. Without `std` or `simd`, the scalar path
-runs directly.
+version at runtime when the `simd` feature is enabled. Zero `unsafe` in user
+code. Works under `paranoid` since `fearless_simd` requires no unsafe. Without
+`std` or `simd`, the scalar path runs directly.
 
 **Huffman BMI2:** `crates/core/src/simd/mod.rs` defines a `CpuTier` enum
 (`Bmi2`/`Avx2` on x86_64). Runtime detection cached in `OnceLock<CpuTier>`.
