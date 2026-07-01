@@ -56,8 +56,15 @@ pub(crate) fn fast_extend_from_slice(vec: &mut Vec<u8>, src: &[u8]) {
             (dst as *mut u32).write_unaligned(a);
             let b = (sp.add(len - 4) as *const u32).read_unaligned();
             (dst.add(len - 4) as *mut u32).write_unaligned(b);
+        } else if len == 3 {
+            let a = (sp as *const u16).read_unaligned();
+            (dst as *mut u16).write_unaligned(a);
+            *dst.add(2) = *sp.add(2);
+        } else if len == 2 {
+            let a = (sp as *const u16).read_unaligned();
+            (dst as *mut u16).write_unaligned(a);
         } else {
-            core::ptr::copy_nonoverlapping(sp, dst, len);
+            *dst = *sp;
         }
         vec.set_len(vec.len() + len);
     }

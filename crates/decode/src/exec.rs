@@ -12,7 +12,7 @@ use zrip_core::hint::{likely, unlikely};
 
 #[allow(unused_assignments)]
 #[inline(always)]
-pub(crate) fn decode_execute_sequences(
+pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     data: &[u8],
     num_sequences: u32,
     tables: &SequenceDecodeTables,
@@ -62,13 +62,20 @@ pub(crate) fn decode_execute_sequences(
                 return Err(DecompressError::InvalidOffset);
             }
             let out_pos = op;
-            if unlikely(off > out_pos + history.len()) {
-                return Err(DecompressError::InvalidOffset);
-            }
-            if likely(off <= out_pos) {
-                wild_copy_match(output, off, ml);
+            if HAS_HISTORY {
+                if unlikely(off > out_pos + history.len()) {
+                    return Err(DecompressError::InvalidOffset);
+                }
+                if likely(off <= out_pos) {
+                    wild_copy_match(output, off, ml);
+                } else {
+                    copy_match_from_history(output, history, off, out_pos, ml);
+                }
             } else {
-                copy_match_from_history(output, history, off, out_pos, ml);
+                if unlikely(off > out_pos) {
+                    return Err(DecompressError::InvalidOffset);
+                }
+                wild_copy_match(output, off, ml);
             }
             op += ml;
         }};

@@ -443,28 +443,52 @@ pub(crate) fn decode_sequences_dispatch(
         static LEVEL: OnceLock<fearless_simd::Level> = OnceLock::new();
         let level = *LEVEL.get_or_init(fearless_simd::Level::new);
         return fearless_simd::dispatch!(level, _simd => {
-            decode_execute_sequences(
-                seq_data,
-                num_sequences,
-                seq_tables,
-                rep_offsets,
-                literals,
-                output,
-                history,
-            )
+            if history.is_empty() {
+                decode_execute_sequences::<false>(
+                    seq_data,
+                    num_sequences,
+                    seq_tables,
+                    rep_offsets,
+                    literals,
+                    output,
+                    history,
+                )
+            } else {
+                decode_execute_sequences::<true>(
+                    seq_data,
+                    num_sequences,
+                    seq_tables,
+                    rep_offsets,
+                    literals,
+                    output,
+                    history,
+                )
+            }
         });
     }
 
     #[allow(unreachable_code)]
-    decode_execute_sequences(
-        seq_data,
-        num_sequences,
-        seq_tables,
-        rep_offsets,
-        literals,
-        output,
-        history,
-    )
+    if history.is_empty() {
+        decode_execute_sequences::<false>(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            literals,
+            output,
+            history,
+        )
+    } else {
+        decode_execute_sequences::<true>(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            literals,
+            output,
+            history,
+        )
+    }
 }
 
 #[cfg(all(test, miri, not(feature = "paranoid")))]
