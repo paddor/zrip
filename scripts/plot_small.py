@@ -2,7 +2,7 @@
 """Generate encode speed vs compression ratio chart for small inputs (<256 KB).
 
 Reads ~/.cache/zrip/L*/{codec}.jsonl, filters to small corpus files,
-writes small.svg. One panel per source (dickens, hdfs, xml_collection),
+writes small_encode.svg. One panel per source (dickens, hdfs, xml_collection),
 X-axis: input size (log), Y-axis: encode MB/s.
 
 Two shaded bands per codec: Fast (L-8..L2) and DFast (L3..L4).
@@ -29,7 +29,7 @@ COLORS = {
 LABELS = {
     "C zstd":          "C zstd (libzstd)",
     "zrip":            "zrip (Rust)",
-    "structured-zstd": "structured-zstd 0.0.45 (Rust)",
+    "structured-zstd": "structured-zstd 0.0.48 (Rust)",
 }
 
 SMALL_PREFIXES = ["dickens", "hdfs", "xml_collection", "x-ray"]
@@ -393,7 +393,7 @@ def main():
     arch = platform.machine() or "x86_64"
     output_dir = sys.argv[1] if len(sys.argv) > 1 else f"doc/charts/{arch}"
     os.makedirs(output_dir, exist_ok=True)
-    path = os.path.join(output_dir, "small.svg")
+    path = os.path.join(output_dir, "small_encode.svg")
     with open(path, "w") as f:
         f.write(svg)
     print(f"wrote {path}")

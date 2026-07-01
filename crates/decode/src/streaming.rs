@@ -12,7 +12,6 @@ use zrip_core::dict::Dictionary;
 use zrip_core::error::DecompressError;
 use zrip_core::frame::header::parse_frame_header;
 use zrip_core::frame::{MAX_BLOCK_SIZE, MAX_WINDOW_SIZE};
-use zrip_core::fse::{promote_ll_table, promote_ml_table, promote_of_table};
 use zrip_core::xxhash::Xxh64State;
 
 enum State {
@@ -134,7 +133,7 @@ impl<R: Read> FrameDecoder<R> {
         self.output_pos = 0;
         self.rep_offsets = [1, 4, 8];
         self.seq_tables = SequenceDecodeTables::new_default();
-        self.ws.huf_valid = false;
+        self.ws.reset_huffman_state();
         self.hasher = None;
         self.content_checksum = false;
         self.bytes_output = 0;
@@ -286,22 +285,22 @@ impl<R: Read> FrameDecoder<R> {
             self.decode_history.extend_from_slice(d.content());
             let mut st = SequenceDecodeTables::new_default();
             if let Some((t, l)) = d.of_table() {
-                st.of_table = crate::sequences::into_table(&promote_of_table(t));
+                st.of_table = crate::seq_table::SeqTable::promote_of(t);
                 st.of_accuracy = l;
                 st.of_set = true;
             }
             if let Some((t, l)) = d.ml_table() {
-                st.ml_table = crate::sequences::into_table(&promote_ml_table(t));
+                st.ml_table = crate::seq_table::SeqTable::promote_ml(t);
                 st.ml_accuracy = l;
                 st.ml_set = true;
             }
             if let Some((t, l)) = d.ll_table() {
-                st.ll_table = crate::sequences::into_table(&promote_ll_table(t));
+                st.ll_table = crate::seq_table::SeqTable::promote_ll(t);
                 st.ll_accuracy = l;
                 st.ll_set = true;
             }
             self.seq_tables = st;
-            self.ws.huf_valid = false;
+            self.ws.reset_huffman_state();
             if let Some((t, l)) = d.huf_table() {
                 self.ws.huf_table.clear();
                 self.ws.huf_table.extend_from_slice(t);
@@ -311,7 +310,7 @@ impl<R: Read> FrameDecoder<R> {
         } else {
             self.rep_offsets = [1, 4, 8];
             self.seq_tables = SequenceDecodeTables::new_default();
-            self.ws.huf_valid = false;
+            self.ws.reset_huffman_state();
         }
 
         self.state = State::BlockHeader;

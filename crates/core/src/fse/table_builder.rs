@@ -218,22 +218,25 @@ pub fn build_decode_table_into(
     symbol_next: &mut Vec<u16>,
 ) -> Result<(), DecompressError> {
     let table_size = 1usize << accuracy_log;
-    table.clear();
-    table.resize(
-        table_size,
-        FseDecodeEntry {
-            base_line: 0,
-            num_bits: 0,
-            symbol: 0,
-        },
-    );
+    if table.len() != table_size {
+        table.clear();
+        table.resize(
+            table_size,
+            FseDecodeEntry {
+                base_line: 0,
+                num_bits: 0,
+                symbol: 0,
+            },
+        );
+    }
 
     let step = (table_size >> 1) + (table_size >> 3) + 3;
     let mask = table_size - 1;
 
     let mut high_threshold = table_size - 1;
-    symbol_next.clear();
     symbol_next.resize(distribution.len(), 0);
+    symbol_next.truncate(distribution.len());
+    symbol_next.fill(0);
 
     for (s, &prob) in distribution.iter().enumerate() {
         if prob == -1 {
@@ -249,15 +252,40 @@ pub fn build_decode_table_into(
     }
 
     let mut position = 0;
-    for (s, &prob) in distribution.iter().enumerate() {
-        if prob <= 0 {
-            continue;
-        }
-        for _ in 0..prob {
-            table[position].symbol = s as u8;
-            position = (position + step) & mask;
-            while position > high_threshold {
+    if high_threshold == table_size - 1 {
+        for (s, &prob) in distribution.iter().enumerate() {
+            if prob <= 0 {
+                continue;
+            }
+            let sym = s as u8;
+            let mut remaining = prob as usize;
+            while remaining >= 4 {
+                table[position].symbol = sym;
                 position = (position + step) & mask;
+                table[position].symbol = sym;
+                position = (position + step) & mask;
+                table[position].symbol = sym;
+                position = (position + step) & mask;
+                table[position].symbol = sym;
+                position = (position + step) & mask;
+                remaining -= 4;
+            }
+            for _ in 0..remaining {
+                table[position].symbol = sym;
+                position = (position + step) & mask;
+            }
+        }
+    } else {
+        for (s, &prob) in distribution.iter().enumerate() {
+            if prob <= 0 {
+                continue;
+            }
+            for _ in 0..prob {
+                table[position].symbol = s as u8;
+                position = (position + step) & mask;
+                while position > high_threshold {
+                    position = (position + step) & mask;
+                }
             }
         }
     }

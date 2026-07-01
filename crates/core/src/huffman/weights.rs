@@ -25,6 +25,27 @@ pub fn parse_huffman_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompress
     }
 }
 
+#[cfg(feature = "alloc")]
+pub fn parse_huffman_weights_into(
+    data: &[u8],
+    weights: &mut Vec<u8>,
+    fse_table: &mut Vec<crate::fse::FseDecodeEntry>,
+    fse_symbol_next: &mut Vec<u16>,
+    fse_dist: &mut Vec<i16>,
+) -> Result<usize, DecompressError> {
+    if data.is_empty() {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
+
+    let header_byte = data[0];
+
+    if header_byte >= 128 {
+        parse_direct_weights_into(data, weights)
+    } else {
+        parse_fse_compressed_weights_into(data, weights, fse_table, fse_symbol_next, fse_dist)
+    }
+}
+
 fn parse_direct_weights(data: &[u8]) -> Result<(Vec<u8>, usize), DecompressError> {
     let num_symbols = (data[0] as usize) - 127;
     let num_bytes = num_symbols.div_ceil(2);
@@ -45,6 +66,29 @@ fn parse_direct_weights(data: &[u8]) -> Result<(Vec<u8>, usize), DecompressError
     }
 
     Ok((weights, 1 + num_bytes))
+}
+
+#[cfg(feature = "alloc")]
+fn parse_direct_weights_into(data: &[u8], weights: &mut Vec<u8>) -> Result<usize, DecompressError> {
+    let num_symbols = (data[0] as usize) - 127;
+    let num_bytes = num_symbols.div_ceil(2);
+
+    if data.len() < 1 + num_bytes {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
+
+    weights.clear();
+    for i in 0..num_symbols {
+        let byte_idx = 1 + i / 2;
+        let weight = if i % 2 == 0 {
+            data[byte_idx] >> 4
+        } else {
+            data[byte_idx] & 0x0F
+        };
+        weights.push(weight);
+    }
+
+    Ok(1 + num_bytes)
 }
 
 fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), DecompressError> {
@@ -109,6 +153,78 @@ fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompr
     }
 
     Ok((weights, 1 + compressed_size))
+}
+
+#[cfg(feature = "alloc")]
+fn parse_fse_compressed_weights_into(
+    data: &[u8],
+    weights: &mut Vec<u8>,
+    fse_table: &mut Vec<crate::fse::FseDecodeEntry>,
+    fse_symbol_next: &mut Vec<u16>,
+    fse_dist: &mut Vec<i16>,
+) -> Result<usize, DecompressError> {
+    use crate::fse::table_builder::{build_decode_table_into, parse_fse_table_description_into};
+
+    let compressed_size = data[0] as usize;
+    if compressed_size == 0 || data.len() < 1 + compressed_size {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
+
+    let compressed = &data[1..=compressed_size];
+
+    let mut bit_reader = BitReader::new(compressed);
+    let accuracy_log = parse_fse_table_description_into(&mut bit_reader, 12, fse_dist)?;
+    if accuracy_log > 6 {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
+
+    build_decode_table_into(fse_dist, accuracy_log, fse_table, fse_symbol_next)
+        .map_err(|_| DecompressError::BadHuffmanWeights)?;
+
+    let table_desc_bytes = bit_reader.bytes_consumed();
+    let fse_stream = &compressed[table_desc_bytes..];
+
+    if fse_stream.is_empty() {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
+
+    let mut rev_reader =
+        ReverseBitReader::new(fse_stream).map_err(|_| DecompressError::BadHuffmanWeights)?;
+
+    let mut state1 = FseState::new(fse_table, accuracy_log, &mut rev_reader)
+        .map_err(|_| DecompressError::BadHuffmanWeights)?;
+    let mut state2 = FseState::new(fse_table, accuracy_log, &mut rev_reader)
+        .map_err(|_| DecompressError::BadHuffmanWeights)?;
+
+    weights.clear();
+
+    loop {
+        weights.push(state1.symbol());
+        let nb1 = state1.num_bits();
+        if nb1 > 0 && rev_reader.bits_remaining() < nb1 as usize {
+            weights.push(state2.symbol());
+            break;
+        }
+        state1
+            .update_state(&mut rev_reader)
+            .map_err(|_| DecompressError::BadHuffmanWeights)?;
+
+        weights.push(state2.symbol());
+        let nb2 = state2.num_bits();
+        if nb2 > 0 && rev_reader.bits_remaining() < nb2 as usize {
+            weights.push(state1.symbol());
+            break;
+        }
+        state2
+            .update_state(&mut rev_reader)
+            .map_err(|_| DecompressError::BadHuffmanWeights)?;
+
+        if weights.len() > 255 {
+            return Err(DecompressError::BadHuffmanWeights);
+        }
+    }
+
+    Ok(1 + compressed_size)
 }
 
 #[cfg(feature = "alloc")]
@@ -181,12 +297,11 @@ pub fn build_huffman_decode_table(
         let entries = 1usize << (w - 1);
         let start = rank_start[w as usize] as usize;
         rank_start[w as usize] += entries as u32;
-        for j in 0..entries {
-            table[start + j] = HuffmanDecodeEntry {
-                symbol: symbol as u8,
-                num_bits,
-            };
-        }
+        let entry = HuffmanDecodeEntry {
+            symbol: symbol as u8,
+            num_bits,
+        };
+        table[start..start + entries].fill(entry);
     }
 
     Ok((table, table_log as u8))
@@ -239,21 +354,24 @@ pub fn build_huffman_decode_table_into(
     all_weights.push(last_weight);
 
     let table_size = 1usize << table_log;
-    table.clear();
-    table.resize(table_size, HuffmanDecodeEntry::default());
+    if table.len() != table_size {
+        table.clear();
+        table.resize(table_size, HuffmanDecodeEntry::default());
+    }
 
     let max_w = table_log as u8 + 1;
 
-    rank_count.clear();
     rank_count.resize(max_w as usize + 1, 0);
+    rank_count.truncate(max_w as usize + 1);
+    rank_count.fill(0);
     for &w in all_weights.iter() {
         if w > 0 && w <= max_w {
             rank_count[w as usize] += 1;
         }
     }
 
-    rank_start.clear();
     rank_start.resize(max_w as usize + 1, 0);
+    rank_start.truncate(max_w as usize + 1);
     {
         let mut cumul = 0u32;
         for w in 1..=max_w {
@@ -270,12 +388,11 @@ pub fn build_huffman_decode_table_into(
         let entries = 1usize << (w - 1);
         let start = rank_start[w as usize] as usize;
         rank_start[w as usize] += entries as u32;
-        for j in 0..entries {
-            table[start + j] = HuffmanDecodeEntry {
-                symbol: symbol as u8,
-                num_bits,
-            };
-        }
+        let entry = HuffmanDecodeEntry {
+            symbol: symbol as u8,
+            num_bits,
+        };
+        table[start..start + entries].fill(entry);
     }
 
     Ok(table_log as u8)

@@ -30,7 +30,7 @@ LABELS = {
     "C zstd":          "libzstd v1.5.7 (C)",
     "zrip":            "zrip (safe SIMD + encapsulated unsafe)",
     "zrip paranoid":   "zrip paranoid (safe SIMD, no unsafe)",
-    "structured-zstd": "structured-zstd v0.0.45 (unsafe)",
+    "structured-zstd": "structured-zstd v0.0.48 (unsafe)",
     "ruzstd":          "ruzstd v0.8.3 (safe)",
 }
 
