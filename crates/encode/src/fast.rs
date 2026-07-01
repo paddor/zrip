@@ -42,8 +42,8 @@ pub(crate) fn compress_fast_block(
 ) {
     sequences.clear();
     let mls = params.min_match as usize;
-    match mls {
-        7.. => compress_fast_block_mls7(
+    match (mls, params.hash_log) {
+        (4, 14) => compress_fast_block_h14_mls4(
             src,
             block_start,
             block_end,
@@ -52,7 +52,16 @@ pub(crate) fn compress_fast_block(
             hash_table,
             sequences,
         ),
-        5..7 => compress_fast_block_impl::<0, 5>(
+        (7.., _) => compress_fast_block_mls7(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
+        (5..7, _) => compress_fast_block_impl::<0, 5>(
             src,
             block_start,
             block_end,
@@ -71,6 +80,28 @@ pub(crate) fn compress_fast_block(
             sequences,
         ),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_fast_block_h14_mls4(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_fast_block_impl::<14, 4>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
