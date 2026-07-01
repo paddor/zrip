@@ -195,8 +195,8 @@ mod tests {
 
     #[test]
     fn wild_copy_match_all_offsets() {
-        for offset in 1..=16 {
-            for len in 1..=32 {
+        for offset in 1..=64 {
+            for len in 1..=128 {
                 let mut v = Vec::with_capacity(offset + len + 16);
                 let seed: Vec<u8> = (0..offset).map(|i| (i as u8).wrapping_mul(37)).collect();
                 v.extend_from_slice(&seed);

@@ -730,6 +730,24 @@ fn parse_str_field(line: &str, field: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
+fn print_help(program: &str) {
+    println!(
+        "\
+Usage: {program} [OPTIONS]
+
+Options:
+  --impl <name>       Codec filter: zrip, C zstd, all, etc. Default: zrip
+  --files <list>      Comma-separated corpus file basenames to run
+  --levels <list>     Comma-separated levels, e.g. -7,1,3
+  --extra <path>      Add an extra input file
+  --small-only        Run the small-file corpus
+  --dict              Run dictionary benchmarks
+  --decode-only       Run decode-only benchmark set
+  --reuse             Reuse cached results when available
+  -h, --help          Print this help"
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut only: Vec<String> = Vec::new();
@@ -744,39 +762,56 @@ fn main() {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "-h" | "--help" => {
+                print_help(&args[0]);
+                return;
+            }
             "--impl" => {
                 i += 1;
-                impl_specified = true;
-                if i < args.len() {
-                    only.push(args[i].clone());
+                if i >= args.len() {
+                    eprintln!("--impl requires a value");
+                    std::process::exit(2);
                 }
+                impl_specified = true;
+                only.push(args[i].clone());
             }
             "--files" => {
                 i += 1;
-                if i < args.len() {
-                    file_filter.extend(args[i].split(',').map(|s| s.to_string()));
+                if i >= args.len() {
+                    eprintln!("--files requires a value");
+                    std::process::exit(2);
                 }
+                file_filter.extend(args[i].split(',').map(|s| s.to_string()));
             }
             "--levels" => {
                 i += 1;
-                if i < args.len() {
-                    level_filter.extend(
-                        args[i]
-                            .split(',')
-                            .filter_map(|s| s.trim().parse::<i32>().ok()),
-                    );
+                if i >= args.len() {
+                    eprintln!("--levels requires a value");
+                    std::process::exit(2);
                 }
+                level_filter.extend(
+                    args[i]
+                        .split(',')
+                        .filter_map(|s| s.trim().parse::<i32>().ok()),
+                );
             }
             "--extra" => {
                 i += 1;
-                if i < args.len() {
-                    extra_files.push(args[i].clone());
+                if i >= args.len() {
+                    eprintln!("--extra requires a value");
+                    std::process::exit(2);
                 }
+                extra_files.push(args[i].clone());
             }
             "--small-only" => small_only = true,
             "--dict" => dict_mode = true,
             "--decode-only" => decode_only = true,
             "--reuse" => reuse_cached = true,
+            flag if flag.starts_with('-') => {
+                eprintln!("unknown option: {flag}");
+                eprintln!("try --help");
+                std::process::exit(2);
+            }
             _ => {}
         }
         i += 1;
