@@ -83,9 +83,15 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
 
     macro_rules! decode_and_execute_update {
         ($rev_reader:expr, $offsets:expr) => {{
-            let of_e = tables.of_table[(of_state & FSE_SEQ_TABLE_MASK) as usize];
-            let ml_e = tables.ml_table[(ml_state & FSE_SEQ_TABLE_MASK) as usize];
-            let ll_e = tables.ll_table[(ll_state & FSE_SEQ_TABLE_MASK) as usize];
+            let of_e = tables
+                .of_table
+                .get((of_state & FSE_SEQ_TABLE_MASK) as usize);
+            let ml_e = tables
+                .ml_table
+                .get((ml_state & FSE_SEQ_TABLE_MASK) as usize);
+            let ll_e = tables
+                .ll_table
+                .get((ll_state & FSE_SEQ_TABLE_MASK) as usize);
 
             let of_extra = $rev_reader.read_bits_branchless(of_e.extra_bits);
             let offset_value = of_e.baseline_value + of_extra;
@@ -126,9 +132,15 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     }
     while seq_idx < last_seq {
         rev_reader.refill();
-        let of_e = tables.of_table[(of_state & FSE_SEQ_TABLE_MASK) as usize];
-        let ml_e = tables.ml_table[(ml_state & FSE_SEQ_TABLE_MASK) as usize];
-        let ll_e = tables.ll_table[(ll_state & FSE_SEQ_TABLE_MASK) as usize];
+        let of_e = tables
+            .of_table
+            .get((of_state & FSE_SEQ_TABLE_MASK) as usize);
+        let ml_e = tables
+            .ml_table
+            .get((ml_state & FSE_SEQ_TABLE_MASK) as usize);
+        let ll_e = tables
+            .ll_table
+            .get((ll_state & FSE_SEQ_TABLE_MASK) as usize);
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
@@ -150,9 +162,15 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     // Last sequence: no FSE state update
     {
         rev_reader.refill();
-        let of_e = tables.of_table[(of_state & FSE_SEQ_TABLE_MASK) as usize];
-        let ml_e = tables.ml_table[(ml_state & FSE_SEQ_TABLE_MASK) as usize];
-        let ll_e = tables.ll_table[(ll_state & FSE_SEQ_TABLE_MASK) as usize];
+        let of_e = tables
+            .of_table
+            .get((of_state & FSE_SEQ_TABLE_MASK) as usize);
+        let ml_e = tables
+            .ml_table
+            .get((ml_state & FSE_SEQ_TABLE_MASK) as usize);
+        let ll_e = tables
+            .ll_table
+            .get((ll_state & FSE_SEQ_TABLE_MASK) as usize);
 
         let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
         let offset_value = of_e.baseline_value + of_extra;
