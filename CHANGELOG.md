@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.8.1]
+
+### Changed
+
+- Reused Huffman decode tables and `MaybeUninit` FSE sequence table storage
+  to remove per-block decode allocations.
+- Specialized decoder no-history execution and sequence table reads to
+  reduce decode hot-loop work.
+- Specialized DFast MLS4, Fast L1 hash-log, and rare Fast MLS7 encode hot
+  paths.
+- Preserved copied `MaybeUninit` sequence entries for the default path while
+  borrowing sequence table entries in `paranoid` builds, recovering
+  `paranoid` decode throughput.
+- Refreshed x86_64 benchmark charts after rebenchmarking `zrip` and
+  `zrip paranoid` with performance governor and turbo off.
+- JSR package `@paddor/zrip` bumped to 0.5.1 for the current Rust codec.
+
 ## [0.8.0]
 
 ### Added
