@@ -291,6 +291,7 @@ pub(crate) fn decompress_frame(
             }
         }
 
+        let block_output_start = output.len();
         match block_header.block_type {
             BlockType::Raw => {
                 if offset + block_size > input.len() {
@@ -331,6 +332,9 @@ pub(crate) fn decompress_frame(
                 offset += block_size;
             }
         }
+        if let Some(ref mut hasher) = hasher {
+            hasher.update(&output[block_output_start..]);
+        }
 
         if block_header.last_block {
             break;
@@ -338,7 +342,6 @@ pub(crate) fn decompress_frame(
     }
 
     if let Some(ref mut hasher) = hasher {
-        hasher.update(&output[output_start..]);
         let hash = hasher.finish();
         let expected_checksum = (hash & 0xFFFF_FFFF) as u32;
 
