@@ -95,4 +95,77 @@ impl DecompressContext {
             Ok(Cow::Borrowed(&self.output))
         }
     }
+
+    /// Decompresses one zstd frame whose 4-byte magic number is stored out of band.
+    ///
+    /// OpenZL stores zstd payloads this way inside transform streams.
+    pub fn decompress_after_magic_with_limit(
+        &mut self,
+        input: &[u8],
+        max_output: usize,
+    ) -> Result<Cow<'_, [u8]>, DecompressError> {
+        self.output.clear();
+        super::decompress_frame_after_magic(
+            input,
+            &mut self.output,
+            max_output,
+            self.dict.as_ref(),
+            &mut self.ws,
+        )?;
+        if self.output.len() >= zrip_core::LARGE_OUTPUT_THRESHOLD {
+            Ok(Cow::Owned(core::mem::take(&mut self.output)))
+        } else {
+            Ok(Cow::Borrowed(&self.output))
+        }
+    }
+
+    /// Decompresses one zstd frame without its magic number into `output`.
+    ///
+    /// Appends to `output` and returns the number of bytes written.
+    pub fn decompress_after_magic_into(
+        &mut self,
+        input: &[u8],
+        output: &mut Vec<u8>,
+        max_output: usize,
+    ) -> Result<usize, DecompressError> {
+        let start = output.len();
+        super::decompress_frame_after_magic(
+            input,
+            output,
+            max_output,
+            self.dict.as_ref(),
+            &mut self.ws,
+        )?;
+        Ok(output.len() - start)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec::Vec;
+
+    fn push_block_header(out: &mut Vec<u8>, last: bool, block_type: u32, block_size: usize) {
+        let raw = ((block_size as u32) << 3) | (block_type << 1) | u32::from(last);
+        out.push(raw as u8);
+        out.push((raw >> 8) as u8);
+        out.push((raw >> 16) as u8);
+    }
+
+    #[test]
+    fn decompress_after_magic_into_appends_output() {
+        let mut frame = Vec::new();
+        frame.push(0x20);
+        frame.push(5);
+        push_block_header(&mut frame, true, 0, 5);
+        frame.extend_from_slice(b"hello");
+
+        let mut ctx = DecompressContext::new();
+        let mut output = b"prefix".to_vec();
+        let written = ctx
+            .decompress_after_magic_into(&frame, &mut output, usize::MAX)
+            .unwrap();
+        assert_eq!(written, 5);
+        assert_eq!(output, b"prefixhello");
+    }
 }
