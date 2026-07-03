@@ -28,7 +28,9 @@ use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequenc
 use zrip_core::block::{BlockType, parse_block_header};
 use zrip_core::error::DecompressError;
 use zrip_core::frame::MAX_WINDOW_SIZE;
-use zrip_core::frame::header::{FrameHeader, parse_frame_header, parse_frame_header_after_magic};
+#[cfg(feature = "std")]
+use zrip_core::frame::header::parse_frame_header_after_magic;
+use zrip_core::frame::header::{FrameHeader, parse_frame_header};
 use zrip_core::huffman::HuffmanDecodeEntry;
 use zrip_core::xxhash::Xxh64State;
 
@@ -198,6 +200,7 @@ pub(crate) fn decompress_frame(
     decompress_frame_with_header(input, output, max_output, dict, ws, header)
 }
 
+#[cfg(feature = "std")]
 pub(crate) fn decompress_frame_after_magic(
     input: &[u8],
     output: &mut Vec<u8>,
@@ -391,16 +394,19 @@ fn initial_sequence_state(
         if let Some((t, l)) = d.of_table() {
             st.of_table = crate::seq_table::SeqTable::promote_of(t);
             st.of_accuracy = l;
+            st.of_kind = crate::sequences::SequenceTableKind::Other;
             st.of_set = true;
         }
         if let Some((t, l)) = d.ml_table() {
             st.ml_table = crate::seq_table::SeqTable::promote_ml(t);
             st.ml_accuracy = l;
+            st.ml_kind = crate::sequences::SequenceTableKind::Other;
             st.ml_set = true;
         }
         if let Some((t, l)) = d.ll_table() {
             st.ll_table = crate::seq_table::SeqTable::promote_ll(t);
             st.ll_accuracy = l;
+            st.ll_kind = crate::sequences::SequenceTableKind::Other;
             st.ll_set = true;
         }
         (st, *d.rep_offsets())
