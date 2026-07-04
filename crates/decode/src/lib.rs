@@ -79,7 +79,6 @@ impl BlockDecodeWorkspace {
 
     pub(crate) fn reset_huffman_state(&mut self) {
         self.huf_valid = false;
-        self.huf_last_weights_valid = false;
     }
 
     #[cfg(feature = "std")]
@@ -263,6 +262,7 @@ fn decompress_frame_with_header(
         ws.huf_table.extend_from_slice(t);
         ws.huf_table_log = l;
         ws.huf_valid = true;
+        ws.huf_last_weights_valid = false;
     } else if let Some(d) = dict
         && let Some((t, l)) = d.huf_table()
     {
@@ -270,6 +270,7 @@ fn decompress_frame_with_header(
         ws.huf_table.extend_from_slice(t);
         ws.huf_table_log = l;
         ws.huf_valid = true;
+        ws.huf_last_weights_valid = false;
     }
 
     let mut hasher = if header.content_checksum {
@@ -596,6 +597,20 @@ mod tests {
             decompress_frame_after_magic(&frame, &mut output, usize::MAX, None, &mut ws).unwrap();
         assert_eq!(consumed, frame.len());
         assert_eq!(output, b"hello");
+    }
+
+    #[test]
+    fn frame_reset_keeps_explicit_huffman_cache() {
+        let mut ws = BlockDecodeWorkspace::new();
+        ws.huf_valid = true;
+        ws.huf_last_weights_valid = true;
+        ws.huf_last_weights.extend_from_slice(&[1, 2, 3]);
+
+        ws.reset_huffman_state();
+
+        assert!(!ws.huf_valid);
+        assert!(ws.huf_last_weights_valid);
+        assert_eq!(ws.huf_last_weights, [1, 2, 3]);
     }
 }
 
