@@ -156,9 +156,7 @@ pub(crate) fn decode_literals_ws(
                     &mut ws.fse_symbol_next,
                     &mut ws.fse_dist,
                 )?;
-                let can_reuse = ws.huf_valid
-                    && ws.huf_last_weights_valid
-                    && ws.huf_weights == ws.huf_last_weights;
+                let can_reuse = ws.huf_last_weights_valid && ws.huf_weights == ws.huf_last_weights;
                 if !can_reuse {
                     ws.huf_table_log = build_huffman_decode_table_into(
                         &ws.huf_weights,

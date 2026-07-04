@@ -25,6 +25,26 @@ fn copy_8(src: *const u8, dst: *mut u8) {
     }
 }
 
+#[cfg(not(feature = "paranoid"))]
+#[inline(always)]
+fn copy_32(src: *const u8, dst: *mut u8) {
+    unsafe {
+        copy_16(src, dst);
+        copy_16(src.add(16), dst.add(16));
+    }
+}
+
+#[cfg(not(feature = "paranoid"))]
+#[inline(always)]
+fn copy_64(src: *const u8, dst: *mut u8) {
+    unsafe {
+        copy_16(src, dst);
+        copy_16(src.add(16), dst.add(16));
+        copy_16(src.add(32), dst.add(32));
+        copy_16(src.add(48), dst.add(48));
+    }
+}
+
 /// Copy `src` into the end of `vec` using 16-byte chunk copies.
 ///
 /// All reads stay within `src` bounds (no wild over-read).
@@ -179,6 +199,51 @@ pub(crate) fn wild_copy_match(vec: &mut Vec<u8>, offset: usize, len: usize) {
     }
 }
 
+/// Variant for one-sequence tiny frames. The caller reserves 64 bytes of
+/// headroom, so non-overlapping copies can use wider chunks without changing
+/// the generic multi-sequence path.
+#[cfg(not(feature = "paranoid"))]
+#[inline(always)]
+pub(crate) fn wild_copy_match_single(vec: &mut Vec<u8>, offset: usize, len: usize) {
+    debug_assert!(offset > 0 && offset <= vec.len());
+    debug_assert!(vec.len() + len + 64 <= vec.capacity());
+    unsafe {
+        let ptr = vec.as_mut_ptr();
+        let op = ptr.add(vec.len());
+        let src = op.sub(offset);
+
+        if offset >= 64 {
+            let mut off = 0usize;
+            loop {
+                copy_64(src.add(off), op.add(off));
+                off += 64;
+                if off >= len {
+                    break;
+                }
+            }
+        } else if offset >= 32 {
+            let mut off = 0usize;
+            loop {
+                copy_32(src.add(off), op.add(off));
+                off += 32;
+                if off >= len {
+                    break;
+                }
+            }
+        } else {
+            wild_copy_match(vec, offset, len);
+            return;
+        }
+        vec.set_len(vec.len() + len);
+    }
+}
+
+#[cfg(feature = "paranoid")]
+#[inline(always)]
+pub(crate) fn wild_copy_match_single(vec: &mut Vec<u8>, offset: usize, len: usize) {
+    wild_copy_match(vec, offset, len);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,6 +271,28 @@ mod tests {
                     expected.push(expected[start + i % offset]);
                 }
                 wild_copy_match(&mut v, offset, len);
+                assert_eq!(
+                    &v[..offset + len],
+                    &expected[..offset + len],
+                    "offset={offset} len={len}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wild_copy_match_single_all_offsets() {
+        for offset in 1..=128 {
+            for len in 1..=256 {
+                let mut v = Vec::with_capacity(offset + len + 64);
+                let seed: Vec<u8> = (0..offset).map(|i| (i as u8).wrapping_mul(37)).collect();
+                v.extend_from_slice(&seed);
+                let mut expected = v.clone();
+                let start = expected.len() - offset;
+                for i in 0..len {
+                    expected.push(expected[start + i % offset]);
+                }
+                wild_copy_match_single(&mut v, offset, len);
                 assert_eq!(
                     &v[..offset + len],
                     &expected[..offset + len],

@@ -24,11 +24,18 @@ pub fn parse_frame_header(data: &[u8]) -> Result<FrameHeader, DecompressError> {
         return Err(DecompressError::BadMagic);
     }
 
-    if data.len() < 5 {
+    parse_frame_header_after_magic(&data[4..], 4)
+}
+
+pub fn parse_frame_header_after_magic(
+    data: &[u8],
+    magic_size: usize,
+) -> Result<FrameHeader, DecompressError> {
+    if data.is_empty() {
         return Err(DecompressError::BadFrameHeader);
     }
 
-    let descriptor = data[4];
+    let descriptor = data[0];
     let dict_id_flag = descriptor & 0x03;
     let content_checksum = (descriptor & 0x04) != 0;
     let single_segment = (descriptor & 0x20) != 0;
@@ -43,7 +50,7 @@ pub fn parse_frame_header(data: &[u8]) -> Result<FrameHeader, DecompressError> {
         return Err(DecompressError::BadFrameHeader);
     }
 
-    let mut offset = 5;
+    let mut offset = 1;
 
     let window_size = if single_segment {
         0
@@ -146,7 +153,7 @@ pub fn parse_frame_header(data: &[u8]) -> Result<FrameHeader, DecompressError> {
         dict_id,
         content_checksum,
         single_segment,
-        header_size: offset,
+        header_size: offset + magic_size,
     })
 }
 
@@ -171,5 +178,14 @@ mod tests {
             parse_frame_header(&data),
             Err(DecompressError::BadMagic)
         ));
+    }
+
+    #[test]
+    fn parse_header_after_magic() {
+        let data = [0x20, 0x00];
+        let hdr = parse_frame_header_after_magic(&data, 0).unwrap();
+        assert!(hdr.single_segment);
+        assert_eq!(hdr.frame_content_size, Some(0));
+        assert_eq!(hdr.header_size, 2);
     }
 }

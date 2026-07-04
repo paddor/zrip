@@ -3,7 +3,7 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use crate::fast_vec::{fast_extend_from_slice, wild_copy_match};
+use crate::fast_vec::{fast_extend_from_slice, wild_copy_match, wild_copy_match_single};
 use crate::sequences::{SequenceDecodeTables, compute_offset};
 use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
@@ -123,6 +123,21 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     let last_seq = num_sequences - 1;
     let mut seq_idx: u32 = 0;
     let fast_limit = rev_reader.limit_ptr + 16;
+    while seq_idx + 4 <= last_seq && rev_reader.ptr >= fast_limit {
+        rev_reader.refill_fast();
+        decode_and_execute_update!(rev_reader, offsets);
+
+        rev_reader.refill_fast();
+        decode_and_execute_update!(rev_reader, offsets);
+
+        rev_reader.refill_fast();
+        decode_and_execute_update!(rev_reader, offsets);
+
+        rev_reader.refill_fast();
+        decode_and_execute_update!(rev_reader, offsets);
+
+        seq_idx += 4;
+    }
     while seq_idx + 2 <= last_seq && rev_reader.ptr >= fast_limit {
         rev_reader.refill_fast();
         decode_and_execute_update!(rev_reader, offsets);
@@ -188,6 +203,104 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
             return Err(DecompressError::CorruptSequences);
         }
         fast_extend_from_slice(output, &literals[lit_off..]);
+    }
+
+    Ok(())
+}
+
+#[inline(always)]
+pub(crate) fn decode_execute_single_sequence<const HAS_HISTORY: bool>(
+    data: &[u8],
+    tables: &SequenceDecodeTables,
+    offsets: &mut [u32; 3],
+    literals: &[u8],
+    output: &mut Vec<u8>,
+    history: &[u8],
+) -> Result<(), DecompressError> {
+    if data.is_empty() {
+        return Err(DecompressError::CorruptSequences);
+    }
+
+    let mut rev_reader =
+        ReverseBitReader::new(data).map_err(|_| DecompressError::CorruptSequences)?;
+    let ll_state = rev_reader.read_bits(tables.ll_accuracy)?;
+    let of_state = rev_reader.read_bits(tables.of_accuracy)?;
+    let ml_state = rev_reader.read_bits(tables.ml_accuracy)?;
+
+    const WILDCOPY_OVERLENGTH: usize = 64;
+    output.reserve(zrip_core::frame::MAX_BLOCK_SIZE + WILDCOPY_OVERLENGTH);
+
+    macro_rules! table_entry {
+        ($table:expr, $state:expr) => {{
+            let idx = ($state & FSE_SEQ_TABLE_MASK) as usize;
+            #[cfg(feature = "paranoid")]
+            {
+                $table.get_ref(idx)
+            }
+            #[cfg(not(feature = "paranoid"))]
+            {
+                $table.get(idx)
+            }
+        }};
+    }
+
+    rev_reader.refill();
+    let of_e = table_entry!(tables.of_table, of_state);
+    let ml_e = table_entry!(tables.ml_table, ml_state);
+    let ll_e = table_entry!(tables.ll_table, ll_state);
+
+    let of_extra = rev_reader.read_bits_branchless(of_e.extra_bits);
+    let offset_value = of_e.baseline_value + of_extra;
+    let ml_extra = rev_reader.read_bits_branchless(ml_e.extra_bits);
+    let match_length = ml_e.baseline_value + ml_extra;
+    let ll_extra = rev_reader.read_bits_branchless(ll_e.extra_bits);
+    let literal_length = ll_e.baseline_value + ll_extra;
+    let offset = compute_offset(offset_value, literal_length, offsets);
+
+    let ll = literal_length as usize;
+    let ml = match_length as usize;
+    let output_start = output.len();
+    let op_limit = output_start + zrip_core::frame::MAX_BLOCK_SIZE;
+    if unlikely(output_start + ll + ml > op_limit) {
+        return Err(DecompressError::CorruptSequences);
+    }
+    if unlikely(ll > literals.len()) {
+        return Err(DecompressError::CorruptLiterals);
+    }
+
+    fast_extend_from_slice(output, &literals[..ll]);
+
+    let off = offset as usize;
+    if unlikely(off == 0) {
+        return Err(DecompressError::InvalidOffset);
+    }
+    let out_pos = output.len();
+    if HAS_HISTORY {
+        if unlikely(off > out_pos + history.len()) {
+            return Err(DecompressError::InvalidOffset);
+        }
+        if likely(off <= out_pos) {
+            wild_copy_match_single(output, off, ml);
+        } else {
+            copy_match_from_history(output, history, off, out_pos, ml);
+        }
+    } else {
+        if unlikely(off > out_pos) {
+            return Err(DecompressError::InvalidOffset);
+        }
+        wild_copy_match_single(output, off, ml);
+    }
+
+    if rev_reader.bits_remaining() != 0 {
+        return Err(DecompressError::CorruptSequences);
+    }
+
+    if ll < literals.len() {
+        let remaining = literals.len() - ll;
+        if output.len() + remaining > op_limit {
+            return Err(DecompressError::CorruptSequences);
+        }
+        fast_extend_from_slice(output, &literals[ll..]);
     }
 
     Ok(())

@@ -237,16 +237,17 @@ pub fn build_huffman_decode_table(
         return Err(DecompressError::BadHuffmanWeights);
     }
 
-    let max_weight = *weights.iter().max().unwrap();
-    if max_weight > MAX_BITS + 1 {
-        return Err(DecompressError::BadHuffmanWeights);
-    }
-
     let mut weight_sum: u32 = 0;
+    let mut max_weight = 0u8;
     for &w in weights.iter() {
+        max_weight = max_weight.max(w);
         if w > 0 {
             weight_sum += 1u32 << (w - 1);
         }
+    }
+
+    if max_weight > MAX_BITS + 1 {
+        return Err(DecompressError::BadHuffmanWeights);
     }
 
     if weight_sum == 0 {
@@ -321,16 +322,17 @@ pub fn build_huffman_decode_table_into(
         return Err(DecompressError::BadHuffmanWeights);
     }
 
-    let max_weight = *weights.iter().max().unwrap();
-    if max_weight > MAX_BITS + 1 {
-        return Err(DecompressError::BadHuffmanWeights);
-    }
-
     let mut weight_sum: u32 = 0;
+    let mut max_weight = 0u8;
     for &w in weights.iter() {
+        max_weight = max_weight.max(w);
         if w > 0 {
             weight_sum += 1u32 << (w - 1);
         }
+    }
+
+    if max_weight > MAX_BITS + 1 {
+        return Err(DecompressError::BadHuffmanWeights);
     }
 
     if weight_sum == 0 {
@@ -362,7 +364,6 @@ pub fn build_huffman_decode_table_into(
     let max_w = table_log as u8 + 1;
 
     rank_count.resize(max_w as usize + 1, 0);
-    rank_count.truncate(max_w as usize + 1);
     rank_count.fill(0);
     for &w in all_weights.iter() {
         if w > 0 && w <= max_w {
@@ -371,7 +372,6 @@ pub fn build_huffman_decode_table_into(
     }
 
     rank_start.resize(max_w as usize + 1, 0);
-    rank_start.truncate(max_w as usize + 1);
     {
         let mut cumul = 0u32;
         for w in 1..=max_w {

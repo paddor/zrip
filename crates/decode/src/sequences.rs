@@ -17,13 +17,22 @@ use zrip_core::fse::{
 pub(crate) struct SequenceDecodeTables {
     pub(crate) ll_table: SeqTable,
     pub(crate) ll_accuracy: u8,
+    pub(crate) ll_kind: SequenceTableKind,
     pub(crate) of_table: SeqTable,
     pub(crate) of_accuracy: u8,
+    pub(crate) of_kind: SequenceTableKind,
     pub(crate) ml_table: SeqTable,
     pub(crate) ml_accuracy: u8,
+    pub(crate) ml_kind: SequenceTableKind,
     pub(crate) ll_set: bool,
     pub(crate) of_set: bool,
     pub(crate) ml_set: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SequenceTableKind {
+    Predefined,
+    Other,
 }
 
 impl SequenceDecodeTables {
@@ -33,10 +42,13 @@ impl SequenceDecodeTables {
             Self {
                 ll_table: LL_PREDEFINED.clone(),
                 ll_accuracy: LL_DEFAULT_ACCURACY,
+                ll_kind: SequenceTableKind::Predefined,
                 of_table: OF_PREDEFINED.clone(),
                 of_accuracy: OF_DEFAULT_ACCURACY,
+                of_kind: SequenceTableKind::Predefined,
                 ml_table: ML_PREDEFINED.clone(),
                 ml_accuracy: ML_DEFAULT_ACCURACY,
+                ml_kind: SequenceTableKind::Predefined,
                 ll_set: false,
                 of_set: false,
                 ml_set: false,
@@ -50,21 +62,77 @@ impl SequenceDecodeTables {
                     LL_DEFAULT_ACCURACY,
                 )),
                 ll_accuracy: LL_DEFAULT_ACCURACY,
+                ll_kind: SequenceTableKind::Predefined,
                 of_table: SeqTable::promote_of(&build_decode_table_from_default(
                     &OF_DEFAULT_DIST,
                     OF_DEFAULT_ACCURACY,
                 )),
                 of_accuracy: OF_DEFAULT_ACCURACY,
+                of_kind: SequenceTableKind::Predefined,
                 ml_table: SeqTable::promote_ml(&build_decode_table_from_default(
                     &ML_DEFAULT_DIST,
                     ML_DEFAULT_ACCURACY,
                 )),
                 ml_accuracy: ML_DEFAULT_ACCURACY,
+                ml_kind: SequenceTableKind::Predefined,
                 ll_set: false,
                 of_set: false,
                 ml_set: false,
             }
         }
+    }
+
+    pub(crate) fn reset_default(&mut self) {
+        if self.ll_kind != SequenceTableKind::Predefined {
+            #[cfg(feature = "std")]
+            {
+                self.ll_table = LL_PREDEFINED.clone();
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                self.ll_table = SeqTable::promote_ll(&build_decode_table_from_default(
+                    &LL_DEFAULT_DIST,
+                    LL_DEFAULT_ACCURACY,
+                ));
+            }
+            self.ll_kind = SequenceTableKind::Predefined;
+        }
+        self.ll_accuracy = LL_DEFAULT_ACCURACY;
+        self.ll_set = false;
+
+        if self.of_kind != SequenceTableKind::Predefined {
+            #[cfg(feature = "std")]
+            {
+                self.of_table = OF_PREDEFINED.clone();
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                self.of_table = SeqTable::promote_of(&build_decode_table_from_default(
+                    &OF_DEFAULT_DIST,
+                    OF_DEFAULT_ACCURACY,
+                ));
+            }
+            self.of_kind = SequenceTableKind::Predefined;
+        }
+        self.of_accuracy = OF_DEFAULT_ACCURACY;
+        self.of_set = false;
+
+        if self.ml_kind != SequenceTableKind::Predefined {
+            #[cfg(feature = "std")]
+            {
+                self.ml_table = ML_PREDEFINED.clone();
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                self.ml_table = SeqTable::promote_ml(&build_decode_table_from_default(
+                    &ML_DEFAULT_DIST,
+                    ML_DEFAULT_ACCURACY,
+                ));
+            }
+            self.ml_kind = SequenceTableKind::Predefined;
+        }
+        self.ml_accuracy = ML_DEFAULT_ACCURACY;
+        self.ml_set = false;
     }
 }
 
@@ -166,16 +234,19 @@ pub(crate) fn parse_sequence_tables_ws(
 
     match ll_mode {
         0 => {
-            #[cfg(feature = "std")]
-            {
-                prev.ll_table = LL_PREDEFINED.clone();
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                prev.ll_table = SeqTable::promote_ll(&build_decode_table_from_default(
-                    &LL_DEFAULT_DIST,
-                    LL_DEFAULT_ACCURACY,
-                ));
+            if prev.ll_kind != SequenceTableKind::Predefined {
+                #[cfg(feature = "std")]
+                {
+                    prev.ll_table = LL_PREDEFINED.clone();
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    prev.ll_table = SeqTable::promote_ll(&build_decode_table_from_default(
+                        &LL_DEFAULT_DIST,
+                        LL_DEFAULT_ACCURACY,
+                    ));
+                }
+                prev.ll_kind = SequenceTableKind::Predefined;
             }
             prev.ll_accuracy = LL_DEFAULT_ACCURACY;
             prev.ll_set = true;
@@ -195,6 +266,7 @@ pub(crate) fn parse_sequence_tables_ws(
                 },
             );
             prev.ll_accuracy = 0;
+            prev.ll_kind = SequenceTableKind::Other;
             prev.ll_set = true;
         }
         2 => {
@@ -210,6 +282,7 @@ pub(crate) fn parse_sequence_tables_ws(
             )?;
             prev.ll_table = SeqTable::promote_ll(&ws.fse_build_buf);
             prev.ll_accuracy = acc;
+            prev.ll_kind = SequenceTableKind::Other;
             prev.ll_set = true;
         }
         _ => {
@@ -221,16 +294,19 @@ pub(crate) fn parse_sequence_tables_ws(
 
     match of_mode {
         0 => {
-            #[cfg(feature = "std")]
-            {
-                prev.of_table = OF_PREDEFINED.clone();
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                prev.of_table = SeqTable::promote_of(&build_decode_table_from_default(
-                    &OF_DEFAULT_DIST,
-                    OF_DEFAULT_ACCURACY,
-                ));
+            if prev.of_kind != SequenceTableKind::Predefined {
+                #[cfg(feature = "std")]
+                {
+                    prev.of_table = OF_PREDEFINED.clone();
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    prev.of_table = SeqTable::promote_of(&build_decode_table_from_default(
+                        &OF_DEFAULT_DIST,
+                        OF_DEFAULT_ACCURACY,
+                    ));
+                }
+                prev.of_kind = SequenceTableKind::Predefined;
             }
             prev.of_accuracy = OF_DEFAULT_ACCURACY;
             prev.of_set = true;
@@ -250,6 +326,7 @@ pub(crate) fn parse_sequence_tables_ws(
                 },
             );
             prev.of_accuracy = 0;
+            prev.of_kind = SequenceTableKind::Other;
             prev.of_set = true;
         }
         2 => {
@@ -265,6 +342,7 @@ pub(crate) fn parse_sequence_tables_ws(
             )?;
             prev.of_table = SeqTable::promote_of(&ws.fse_build_buf);
             prev.of_accuracy = acc;
+            prev.of_kind = SequenceTableKind::Other;
             prev.of_set = true;
         }
         _ => {
@@ -276,16 +354,19 @@ pub(crate) fn parse_sequence_tables_ws(
 
     match ml_mode {
         0 => {
-            #[cfg(feature = "std")]
-            {
-                prev.ml_table = ML_PREDEFINED.clone();
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                prev.ml_table = SeqTable::promote_ml(&build_decode_table_from_default(
-                    &ML_DEFAULT_DIST,
-                    ML_DEFAULT_ACCURACY,
-                ));
+            if prev.ml_kind != SequenceTableKind::Predefined {
+                #[cfg(feature = "std")]
+                {
+                    prev.ml_table = ML_PREDEFINED.clone();
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    prev.ml_table = SeqTable::promote_ml(&build_decode_table_from_default(
+                        &ML_DEFAULT_DIST,
+                        ML_DEFAULT_ACCURACY,
+                    ));
+                }
+                prev.ml_kind = SequenceTableKind::Predefined;
             }
             prev.ml_accuracy = ML_DEFAULT_ACCURACY;
             prev.ml_set = true;
@@ -305,6 +386,7 @@ pub(crate) fn parse_sequence_tables_ws(
                 },
             );
             prev.ml_accuracy = 0;
+            prev.ml_kind = SequenceTableKind::Other;
             prev.ml_set = true;
         }
         2 => {
@@ -320,6 +402,7 @@ pub(crate) fn parse_sequence_tables_ws(
             )?;
             prev.ml_table = SeqTable::promote_ml(&ws.fse_build_buf);
             prev.ml_accuracy = acc;
+            prev.ml_kind = SequenceTableKind::Other;
             prev.ml_set = true;
         }
         _ => {
