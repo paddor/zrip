@@ -123,6 +123,21 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     let last_seq = num_sequences - 1;
     let mut seq_idx: u32 = 0;
     let fast_limit = rev_reader.limit_ptr + 16;
+    while seq_idx + 4 <= last_seq && rev_reader.ptr >= fast_limit {
+        rev_reader.refill_fast();
+        decode_and_execute_update!(rev_reader, offsets);
+
+        rev_reader.refill_fast();
+        decode_and_execute_update!(rev_reader, offsets);
+
+        rev_reader.refill_fast();
+        decode_and_execute_update!(rev_reader, offsets);
+
+        rev_reader.refill_fast();
+        decode_and_execute_update!(rev_reader, offsets);
+
+        seq_idx += 4;
+    }
     while seq_idx + 2 <= last_seq && rev_reader.ptr >= fast_limit {
         rev_reader.refill_fast();
         decode_and_execute_update!(rev_reader, offsets);
