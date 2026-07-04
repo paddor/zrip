@@ -81,6 +81,59 @@ impl SequenceDecodeTables {
             }
         }
     }
+
+    pub(crate) fn reset_default(&mut self) {
+        if self.ll_kind != SequenceTableKind::Predefined {
+            #[cfg(feature = "std")]
+            {
+                self.ll_table = LL_PREDEFINED.clone();
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                self.ll_table = SeqTable::promote_ll(&build_decode_table_from_default(
+                    &LL_DEFAULT_DIST,
+                    LL_DEFAULT_ACCURACY,
+                ));
+            }
+            self.ll_kind = SequenceTableKind::Predefined;
+        }
+        self.ll_accuracy = LL_DEFAULT_ACCURACY;
+        self.ll_set = false;
+
+        if self.of_kind != SequenceTableKind::Predefined {
+            #[cfg(feature = "std")]
+            {
+                self.of_table = OF_PREDEFINED.clone();
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                self.of_table = SeqTable::promote_of(&build_decode_table_from_default(
+                    &OF_DEFAULT_DIST,
+                    OF_DEFAULT_ACCURACY,
+                ));
+            }
+            self.of_kind = SequenceTableKind::Predefined;
+        }
+        self.of_accuracy = OF_DEFAULT_ACCURACY;
+        self.of_set = false;
+
+        if self.ml_kind != SequenceTableKind::Predefined {
+            #[cfg(feature = "std")]
+            {
+                self.ml_table = ML_PREDEFINED.clone();
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                self.ml_table = SeqTable::promote_ml(&build_decode_table_from_default(
+                    &ML_DEFAULT_DIST,
+                    ML_DEFAULT_ACCURACY,
+                ));
+            }
+            self.ml_kind = SequenceTableKind::Predefined;
+        }
+        self.ml_accuracy = ML_DEFAULT_ACCURACY;
+        self.ml_set = false;
+    }
 }
 
 pub(crate) fn parse_sequence_count(data: &[u8]) -> Result<(u32, usize), DecompressError> {

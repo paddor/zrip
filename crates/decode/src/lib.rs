@@ -22,7 +22,7 @@ use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use crate::exec::decode_execute_sequences;
+use crate::exec::{decode_execute_sequences, decode_execute_single_sequence};
 use crate::literals::decode_literals_ws;
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
 use zrip_core::block::{BlockType, parse_block_header};
@@ -48,6 +48,7 @@ pub(crate) struct BlockDecodeWorkspace {
     pub fse_dist: Vec<i16>,
     pub fse_symbol_next: Vec<u16>,
     pub fse_build_buf: Vec<zrip_core::fse::FseDecodeEntry>,
+    pub seq_tables: Option<SequenceDecodeTables>,
     pub cached_dict_tables: Option<SequenceDecodeTables>,
     pub cached_dict_rep: [u32; 3],
     pub cached_dict_huf: Option<(Vec<HuffmanDecodeEntry>, u8)>,
@@ -69,6 +70,7 @@ impl BlockDecodeWorkspace {
             fse_dist: Vec::new(),
             fse_symbol_next: Vec::new(),
             fse_build_buf: Vec::new(),
+            seq_tables: Some(SequenceDecodeTables::new_default()),
             cached_dict_tables: None,
             cached_dict_rep: [1, 4, 8],
             cached_dict_huf: None,
@@ -322,7 +324,11 @@ fn decompress_frame_with_header(
                     return Err(DecompressError::InputExhausted);
                 }
                 if seq_tables.is_none() {
-                    let (initial_tables, initial_rep_offsets) = initial_sequence_state(ws, dict);
+                    let mut initial_tables = ws
+                        .seq_tables
+                        .take()
+                        .unwrap_or_else(SequenceDecodeTables::new_default);
+                    let initial_rep_offsets = initial_sequence_state(&mut initial_tables, ws, dict);
                     seq_tables = Some(initial_tables);
                     rep_offsets = initial_rep_offsets;
                 }
@@ -349,6 +355,10 @@ fn decompress_frame_with_header(
         if block_header.last_block {
             break;
         }
+    }
+
+    if let Some(tables) = seq_tables.take() {
+        ws.seq_tables = Some(tables);
     }
 
     if let Some(ref mut hasher) = hasher {
@@ -384,34 +394,37 @@ fn decompress_frame_with_header(
 }
 
 fn initial_sequence_state(
+    tables: &mut SequenceDecodeTables,
     ws: &BlockDecodeWorkspace,
     dict: Option<&zrip_core::dict::Dictionary>,
-) -> (SequenceDecodeTables, [u32; 3]) {
+) -> [u32; 3] {
     if let Some(ref cached) = ws.cached_dict_tables {
-        (cached.clone(), ws.cached_dict_rep)
+        *tables = cached.clone();
+        ws.cached_dict_rep
     } else if let Some(d) = dict {
-        let mut st = SequenceDecodeTables::new_default();
+        tables.reset_default();
         if let Some((t, l)) = d.of_table() {
-            st.of_table = crate::seq_table::SeqTable::promote_of(t);
-            st.of_accuracy = l;
-            st.of_kind = crate::sequences::SequenceTableKind::Other;
-            st.of_set = true;
+            tables.of_table = crate::seq_table::SeqTable::promote_of(t);
+            tables.of_accuracy = l;
+            tables.of_kind = crate::sequences::SequenceTableKind::Other;
+            tables.of_set = true;
         }
         if let Some((t, l)) = d.ml_table() {
-            st.ml_table = crate::seq_table::SeqTable::promote_ml(t);
-            st.ml_accuracy = l;
-            st.ml_kind = crate::sequences::SequenceTableKind::Other;
-            st.ml_set = true;
+            tables.ml_table = crate::seq_table::SeqTable::promote_ml(t);
+            tables.ml_accuracy = l;
+            tables.ml_kind = crate::sequences::SequenceTableKind::Other;
+            tables.ml_set = true;
         }
         if let Some((t, l)) = d.ll_table() {
-            st.ll_table = crate::seq_table::SeqTable::promote_ll(t);
-            st.ll_accuracy = l;
-            st.ll_kind = crate::sequences::SequenceTableKind::Other;
-            st.ll_set = true;
+            tables.ll_table = crate::seq_table::SeqTable::promote_ll(t);
+            tables.ll_accuracy = l;
+            tables.ll_kind = crate::sequences::SequenceTableKind::Other;
+            tables.ll_set = true;
         }
-        (st, *d.rep_offsets())
+        *d.rep_offsets()
     } else {
-        (SequenceDecodeTables::new_default(), [1u32, 4, 8])
+        tables.reset_default();
+        [1u32, 4, 8]
     }
 }
 
@@ -482,6 +495,27 @@ pub(crate) fn decode_sequences_dispatch(
     output: &mut Vec<u8>,
     history: &[u8],
 ) -> Result<(), DecompressError> {
+    if num_sequences == 1 {
+        if history.is_empty() {
+            return decode_execute_single_sequence::<false>(
+                seq_data,
+                seq_tables,
+                rep_offsets,
+                literals,
+                output,
+                history,
+            );
+        }
+        return decode_execute_single_sequence::<true>(
+            seq_data,
+            seq_tables,
+            rep_offsets,
+            literals,
+            output,
+            history,
+        );
+    }
+
     #[cfg(all(feature = "std", feature = "simd"))]
     {
         use std::sync::OnceLock;
