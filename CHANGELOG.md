@@ -22,7 +22,7 @@
   its fast refill path.
 - Reuse identical explicit Huffman decode tables across frames.
 - Folded Huffman weight max scanning into the weight-sum pass.
-- Refreshed the x86_64 small-input decode chart.
+- Refreshed the x86_64 benchmark charts.
 
 ## [0.8.1]
 

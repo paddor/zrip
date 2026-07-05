@@ -16,15 +16,15 @@
   <text x="151.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">C zstd</text>
   <rect x="223.0" y="271.0" width="80.0" height="34.0" fill="#f87171" rx="1"/>
   <rect x="223.0" y="245.0" width="80.0" height="26.0" fill="#c45050" rx="1"/>
-  <rect x="223.0" y="231.0" width="80.0" height="14.0" fill="#f87171" rx="1"/>
+  <rect x="223.0" y="229.6" width="80.0" height="15.4" fill="#f87171" rx="1"/>
   <text x="263.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip</text>
-  <rect x="335.0" y="261.7" width="80.0" height="43.3" fill="#f59e0b" rx="1"/>
-  <rect x="335.0" y="238.2" width="80.0" height="23.5" fill="#c47d08" rx="1"/>
-  <rect x="335.0" y="227.4" width="80.0" height="10.8" fill="#f59e0b" rx="1"/>
+  <rect x="335.0" y="261.5" width="80.0" height="43.5" fill="#f59e0b" rx="1"/>
+  <rect x="335.0" y="238.0" width="80.0" height="23.5" fill="#c47d08" rx="1"/>
+  <rect x="335.0" y="226.4" width="80.0" height="11.6" fill="#f59e0b" rx="1"/>
   <text x="375.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">structured-zstd</text>
-  <rect x="447.0" y="247.0" width="80.0" height="58.0" fill="#f472b6" rx="1"/>
-  <rect x="447.0" y="221.0" width="80.0" height="26.0" fill="#c05a92" rx="1"/>
-  <rect x="447.0" y="204.2" width="80.0" height="16.9" fill="#f472b6" rx="1"/>
+  <rect x="447.0" y="246.7" width="80.0" height="58.3" fill="#f472b6" rx="1"/>
+  <rect x="447.0" y="220.8" width="80.0" height="26.0" fill="#c05a92" rx="1"/>
+  <rect x="447.0" y="202.2" width="80.0" height="18.6" fill="#f472b6" rx="1"/>
   <text x="487.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip paranoid</text>
   <rect x="559.0" y="154.0" width="80.0" height="151.0" fill="#4ade80" rx="1"/>
   <rect x="559.0" y="123.2" width="80.0" height="30.8" fill="#3aaf60" rx="1"/>
