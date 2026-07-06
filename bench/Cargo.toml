@@ -11,8 +11,8 @@ paranoid = ["zrip/paranoid"]
 zrip = { path = "..", features = ["dict_builder", "ldm"] }
 zstd = "0.13"
 zstd-safe = "7"
-binggan = "0.14"
-lz4rip = "0.8.5"
+binggan = "0.17"
+lz4rip = "0.10.1"
 ruzstd = "0.8"
 structured-zstd = "0.0.48"
 libc = "0.2"

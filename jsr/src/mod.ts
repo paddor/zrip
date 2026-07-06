@@ -1,9 +1,9 @@
 /**
  * @module
  *
- * Pure Rust zstd codec compiled to WebAssembly. Levels -7 through 4
- * (Fast and DFast strategies). Optimized for encode throughput in transfer
- * pipelines that need standard zstd frames at high speed.
+ * Pure Rust zstd codec compiled to WebAssembly. Decodes standard zstd blocks
+ * and frames produced at any compression level. Encodes levels -8 through 4
+ * for fast transfer pipelines. First-class dictionary support.
  *
  * Automatically detects WASM SIMD support and loads the appropriate binary.
  *
@@ -49,15 +49,15 @@
  */
 
 import {
-  initSync,
   compress as wasmCompress,
-  decompress as wasmDecompress,
   compressBound as wasmCompressBound,
-  compressWithDict as wasmCompressWithDict,
-  decompressWithDict as wasmDecompressWithDict,
   Compressor as _Compressor,
+  compressWithDict as wasmCompressWithDict,
+  decompress as wasmDecompress,
   Decompressor as _Decompressor,
+  decompressWithDict as wasmDecompressWithDict,
   Dictionary as _Dictionary,
+  initSync,
 } from "./pkg/zrip_wasm.js";
 
 /**
@@ -113,9 +113,37 @@ export type Dictionary = _Dictionary;
 // Minimal valid WASM module that uses a v128 instruction.
 // WebAssembly.validate() returns true only if the engine supports simd128.
 const SIMD_TEST = new Uint8Array([
-  0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
-  0x00, 0x01, 0x7b, 0x03, 0x02, 0x01, 0x00, 0x0a, 0x0a, 0x01, 0x08, 0x00,
-  0x41, 0x00, 0xfd, 0x0f, 0xfd, 0x62, 0x0b,
+  0x00,
+  0x61,
+  0x73,
+  0x6d,
+  0x01,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x05,
+  0x01,
+  0x60,
+  0x00,
+  0x01,
+  0x7b,
+  0x03,
+  0x02,
+  0x01,
+  0x00,
+  0x0a,
+  0x0a,
+  0x01,
+  0x08,
+  0x00,
+  0x41,
+  0x00,
+  0xfd,
+  0x0f,
+  0xfd,
+  0x62,
+  0x0b,
 ]);
 
 let initialized = false;
@@ -151,13 +179,13 @@ export function initSyncFromBytes(bytes: BufferSource): void {
  * Compress data at the given zstd level. Returns a standard zstd frame.
  *
  * @param input The data to compress.
- * @param level Compression level from -7 (fastest) to 4 (best ratio). Default: 1.
+ * @param level Compression level from -8 (fastest) to 4 (best ratio). Default: 1.
  * @returns Compressed zstd frame as a `Uint8Array`.
  *
  * @example
  * ```ts
  * const compressed = compress(data);           // level 1
- * const fast = compress(data, -7);             // fastest
+ * const fast = compress(data, -8);             // fastest
  * const best = compress(data, 4);              // best ratio
  * ```
  */
@@ -190,7 +218,7 @@ export function compressBound(inputLen: number): number {
  * share common structure.
  *
  * @param input The data to compress.
- * @param level Compression level from -7 to 4.
+ * @param level Compression level from -8 to 4.
  * @param dict A {@linkcode Dictionary} instance.
  * @returns Compressed zstd frame as a `Uint8Array`.
  */

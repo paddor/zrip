@@ -2,7 +2,7 @@
   "name": "@paddor/zrip",
   "version": "0.5.1",
   "license": "MIT",
-  "description": "Pure Rust zstd codec compiled to WebAssembly. Fast compression levels -8..4 with SIMD auto-detection.",
+  "description": "Pure Rust zstd codec compiled to WebAssembly. Decodes all zstd levels, encodes -8..4, with SIMD auto-detection.",
   "exports": "./src/mod.ts",
   "publish": {
     "include": ["src/", "deno.json", "LICENSE", "README.md"],

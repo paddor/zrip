@@ -1,18 +1,14 @@
+import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
 import {
-  assertEquals,
-  assert,
-  assertThrows,
-} from "https://deno.land/std@0.224.0/assert/mod.ts";
-import {
-  init,
   compress,
-  decompress,
   compressBound,
-  compressWithDict,
-  decompressWithDict,
   Compressor,
+  compressWithDict,
+  decompress,
   Decompressor,
+  decompressWithDict,
   Dictionary,
+  init,
 } from "./mod.ts";
 
 Deno.test("init", async () => {
@@ -31,7 +27,7 @@ Deno.test("one-shot round-trip", () => {
 
 Deno.test("all levels", () => {
   const data = new TextEncoder().encode("test data for all levels".repeat(50));
-  for (let level = -7; level <= 4; level++) {
+  for (let level = -8; level <= 4; level++) {
     const compressed = compress(data, level);
     const decompressed = decompress(compressed);
     assertEquals(decompressed, data, `round-trip failed at level ${level}`);
@@ -109,18 +105,30 @@ function trainDict(): { dict: Dictionary; samples: Uint8Array } {
   }
 
   const result = new Deno.Command("zstd", {
-    args: ["--train", ...Array.from({ length: sampleStrings.length }, (_, i) => `${tmpDir}/s${i}`), "-o", `${tmpDir}/dict`],
+    args: [
+      "--train",
+      ...Array.from(
+        { length: sampleStrings.length },
+        (_, i) => `${tmpDir}/s${i}`,
+      ),
+      "-o",
+      `${tmpDir}/dict`,
+    ],
     stdout: "piped",
     stderr: "piped",
   }).outputSync();
 
   if (result.code !== 0) {
-    throw new Error(`zstd --train failed: ${new TextDecoder().decode(result.stderr)}`);
+    throw new Error(
+      `zstd --train failed: ${new TextDecoder().decode(result.stderr)}`,
+    );
   }
 
   const dictBytes = Deno.readFileSync(`${tmpDir}/dict`);
 
-  for (let i = 0; i < sampleStrings.length; i++) Deno.removeSync(`${tmpDir}/s${i}`);
+  for (let i = 0; i < sampleStrings.length; i++) {
+    Deno.removeSync(`${tmpDir}/s${i}`);
+  }
   Deno.removeSync(`${tmpDir}/dict`);
   Deno.removeSync(tmpDir);
 
@@ -144,10 +152,14 @@ Deno.test("dictionary one-shot round-trip", () => {
 
 Deno.test("dictionary all levels", () => {
   const { dict, samples } = getDict();
-  for (let level = -7; level <= 4; level++) {
+  for (let level = -8; level <= 4; level++) {
     const compressed = compressWithDict(samples, level, dict);
     const decompressed = decompressWithDict(compressed, dict);
-    assertEquals(decompressed, samples, `dict round-trip failed at level ${level}`);
+    assertEquals(
+      decompressed,
+      samples,
+      `dict round-trip failed at level ${level}`,
+    );
   }
 });
 
@@ -155,7 +167,12 @@ Deno.test("dictionary improves ratio", () => {
   const { dict } = getDict();
   // Compress a single sample that matches the dict's training data
   const sample = new TextEncoder().encode(
-    JSON.stringify({ id: 999, user: "user_5", action: "click", ts: 1700060000 }),
+    JSON.stringify({
+      id: 999,
+      user: "user_5",
+      action: "click",
+      ts: 1700060000,
+    }),
   );
   const withDict = compressWithDict(sample, 1, dict);
   const withoutDict = compress(sample, 1);
@@ -190,7 +207,12 @@ Deno.test("stateful compressor compressWithDict", () => {
   const { dict } = getDict();
   const compressor = new Compressor(1);
   const sample = new TextEncoder().encode(
-    JSON.stringify({ id: 77, user: "user_10", action: "scroll", ts: 1700004620 }),
+    JSON.stringify({
+      id: 77,
+      user: "user_10",
+      action: "scroll",
+      ts: 1700004620,
+    }),
   );
 
   const compressed = compressor.compressWithDict(sample, dict);

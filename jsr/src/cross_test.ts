@@ -1,11 +1,11 @@
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assertEquals } from "jsr:@std/assert";
 import {
-  init,
   compress,
-  decompress,
   compressWithDict,
+  decompress,
   decompressWithDict,
   Dictionary,
+  init,
 } from "./mod.ts";
 
 await init();
@@ -52,7 +52,7 @@ Deno.test("cross-validate: zstd compress -> zrip decompress", async () => {
 });
 
 // Cross-validate all levels
-for (const level of [-7, -3, -1, 1, 2, 3, 4]) {
+for (const level of [-8, -7, -3, -1, 1, 2, 3, 4]) {
   Deno.test(`cross-validate L${level}: zrip compress -> zstd decompress`, async () => {
     const data = new TextEncoder().encode(
       `level ${level} cross-validation data `.repeat(200),
@@ -69,7 +69,11 @@ for (const level of [-7, -3, -1, 1, 2, 3, 4]) {
     await writer.write(compressed);
     await writer.close();
     const output = await child.output();
-    assertEquals(output.code, 0, `zstd failed to decompress zrip L${level} output`);
+    assertEquals(
+      output.code,
+      0,
+      `zstd failed to decompress zrip L${level} output`,
+    );
     assertEquals(new Uint8Array(output.stdout), data);
   });
 }
