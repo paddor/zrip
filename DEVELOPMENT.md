@@ -116,26 +116,29 @@ cargo bench                                            # binggan, in benches/
 ### Corpus benchmarks
 
 ```bash
-cargo run --example zrip_bench --release               # zrip-only, default levels (L1+L3)
-cargo run --example zrip_bench --release -- --impl all  # include C zstd baseline
+cargo run --example zrip_bench --release        # zrip-only corpus bench
+cargo run --example zrip_bench --release -- --impl all
 ```
 
-Options: `--impl zrip|"C zstd"|all`, `--levels 1,3,4`,
+Options: `--impl zrip|"C zstd"|all`, `--levels -8,1,3`,
 `--files dickens.txt,mozilla`, `--extra /path/to/file`.
 
-Results cache in `~/.cache/zrip/{codec}.jsonl`. Delete the relevant file
-before re-benchmarking after code changes:
-
-```bash
-rm ~/.cache/zrip/zrip.jsonl
-```
+Results cache under `~/.cache/zrip/` is append-only benchmark history. Do not
+delete, truncate, or rewrite cache files when re-benchmarking after code
+changes. Run the benchmark again and append fresh rows.
 
 C zstd results are stable across zrip code changes and rarely need rerunning.
+Routine refreshes after zrip code changes benchmark only `zrip` and
+`zrip paranoid` for the relevant chart inputs. Do not run `--impl all` unless
+the user asks for all implementations, external baselines must be refreshed,
+or the benchmark harness or corpus changed in a way that affects all
+implementations.
 
 ### Paranoid mode (safe Rust, no unsafe)
 
 The `paranoid` feature compiles zrip with `forbid(unsafe_code)`. SIMD dispatch
-still works via `fearless_simd` (safe `#[target_feature]` wrappers). It must be benchmarked as a separate build:
+still works via `fearless_simd` (safe `#[target_feature]` wrappers). It must
+be benchmarked as a separate build:
 
 ```bash
 cargo run --example zrip_bench --release --features paranoid
@@ -146,13 +149,12 @@ normal bench so the chart scripts have data for all codecs.
 
 ### Benchmarking all levels
 
-zrip supports levels -7 through 4. The default bench runs L1 and L3 only.
-To bench additional levels:
+zrip supports levels -8 through 4. The default bench runs all zrip levels.
+To bench a subset of levels:
 
 ```bash
-rm ~/.cache/zrip/zrip.jsonl
-cargo run --example zrip_bench --release                          # L1 + L3
-cargo run --example zrip_bench --release -- --levels -7,-6,-5,-4,-3,-2,-1,2,4  # the rest
+cargo run --example zrip_bench --release
+cargo run --example zrip_bench --release -- --levels -1,1,3
 ```
 
 ## Charts
@@ -161,15 +163,38 @@ Plotting scripts in `scripts/`, all reading from `~/.cache/zrip/*.jsonl`:
 
 | Script | Output | Description |
 |--------|--------|-------------|
-| `plot_scatter.py` | `scatter.svg` | Encode speed vs compression ratio (geomean) |
+| `plot_scatter.py` | `scatter.svg` | Encode speed vs ratio geomean |
 | `plot_summary.py` | `summary.svg` | Summary comparison table |
 | `plot_matrix.py` | `matrix.svg` | Per-file/level heatmap matrix |
 | `plot_pipeline.py` | `pipeline.svg` | Encode+decode pipeline throughput |
-| `plot_small.py` | `small_encode.svg` | Encode speed vs input size (2K-128K) |
+| `plot_small.py` | `small_encode.svg` | Encode speed vs input size |
+| `plot_small_decode.py` | `small_decode.svg` | Small decode comparison |
+
+Chart refresh means benchmark first, appending new rows to the cache, then run
+the plotting scripts. Re-running plot scripts against old cache data only
+replots; it does not refresh the charts.
+
+For normal zrip code changes, refresh only the changed implementations:
+
+```bash
+cd bench
+cargo run --example zrip_bench --release
+cargo run --example zrip_bench --release --features paranoid
+cargo run --example zrip_bench --release -- --small-only
+cargo run --example zrip_bench --release -- \
+  --small-only --decode-only --levels 3 --impl zrip
+cargo run --example zrip_bench --release --features paranoid -- \
+  --small-only --decode-only --levels 3 --impl zrip
+cd ..
+```
+
+That updates the `zrip` and `zrip paranoid` rows used by the charts without
+rerunning stable external implementations.
 
 ### Regenerating all charts
 
-After any full-corpus benchmark run (including paranoid), regenerate all charts:
+After any full-corpus benchmark run, including paranoid, regenerate all
+charts:
 
 ```bash
 export ZRIP_HW_EXTRAS="performance governor,turbo off"
@@ -178,6 +203,7 @@ python3 scripts/plot_summary.py doc/charts/x86_64/
 python3 scripts/plot_matrix.py doc/charts/x86_64/
 python3 scripts/plot_pipeline.py doc/charts/x86_64/
 python3 scripts/plot_small.py doc/charts/x86_64/
+python3 scripts/plot_small_decode.py doc/charts/x86_64/
 ```
 
 The `ZRIP_HW_EXTRAS` env var is required when the CPU governor and turbo state
@@ -187,22 +213,23 @@ the script detects these automatically.
 
 ### Small-input benchmark + chart workflow
 
-`small_encode.svg` only includes zrip, C zstd, and structured-zstd (no paranoid).
-Use `--reuse` to keep cached results from other codecs and only re-bench zrip:
+`small_encode.svg` only includes zrip, C zstd, and structured-zstd (no
+paranoid). Default `--small-only` benchmarks zrip only:
 
 ```bash
-rm ~/.cache/zrip/x86_64/small/*/zrip.jsonl
 cd bench
-cargo run --example zrip_bench --release -- --small-only --reuse
+cargo run --example zrip_bench --release -- --small-only
 cd ..
 export ZRIP_HW_EXTRAS="performance governor,turbo off"
 python3 scripts/plot_small.py doc/charts/x86_64/
 ```
 
-### Full benchmark + chart workflow
+### All-implementation benchmark + chart workflow
+
+Use this only when refreshing all baselines, validating a benchmark harness
+change, or when explicitly asked to re-run every implementation.
 
 ```bash
-rm ~/.cache/zrip/x86_64/*/zrip.jsonl ~/.cache/zrip/x86_64/*/zrip_paranoid.jsonl
 cd bench
 cargo run --example zrip_bench --release -- --impl all
 cargo run --example zrip_bench --release --features paranoid
@@ -213,4 +240,5 @@ python3 scripts/plot_summary.py doc/charts/x86_64/
 python3 scripts/plot_matrix.py doc/charts/x86_64/
 python3 scripts/plot_pipeline.py doc/charts/x86_64/
 python3 scripts/plot_small.py doc/charts/x86_64/
+python3 scripts/plot_small_decode.py doc/charts/x86_64/
 ```
