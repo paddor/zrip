@@ -151,7 +151,7 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
 
             let offset = compute_offset_local!(offset_value, literal_length);
 
-            $rev_reader.refill_fast_unchecked();
+            $rev_reader.refill_fast_or_regular();
             ll_state = ll_e.base_line as u32 + $rev_reader.read_bits_branchless(ll_e.num_bits);
             ml_state = ml_e.base_line as u32 + $rev_reader.read_bits_branchless(ml_e.num_bits);
             of_state = of_e.base_line as u32 + $rev_reader.read_bits_branchless(of_e.num_bits);
@@ -164,31 +164,47 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     let mut seq_idx: u32 = 0;
     let fast_limit = rev_reader.limit_ptr + 16;
     while seq_idx + 4 <= last_seq && rev_reader.ptr >= fast_limit {
-        rev_reader.refill_fast_unchecked();
+        if unlikely(!rev_reader.try_refill_fast()) {
+            break;
+        }
         decode_and_execute_update_fast!(rev_reader);
+        seq_idx += 1;
 
-        rev_reader.refill_fast_unchecked();
+        if unlikely(!rev_reader.try_refill_fast()) {
+            break;
+        }
         decode_and_execute_update_fast!(rev_reader);
+        seq_idx += 1;
 
-        rev_reader.refill_fast_unchecked();
+        if unlikely(!rev_reader.try_refill_fast()) {
+            break;
+        }
         decode_and_execute_update_fast!(rev_reader);
+        seq_idx += 1;
 
-        rev_reader.refill_fast_unchecked();
+        if unlikely(!rev_reader.try_refill_fast()) {
+            break;
+        }
         decode_and_execute_update_fast!(rev_reader);
-
-        seq_idx += 4;
+        seq_idx += 1;
     }
     while seq_idx + 2 <= last_seq && rev_reader.ptr >= fast_limit {
-        rev_reader.refill_fast_unchecked();
+        if unlikely(!rev_reader.try_refill_fast()) {
+            break;
+        }
         decode_and_execute_update_fast!(rev_reader);
+        seq_idx += 1;
 
-        rev_reader.refill_fast_unchecked();
+        if unlikely(!rev_reader.try_refill_fast()) {
+            break;
+        }
         decode_and_execute_update_fast!(rev_reader);
-
-        seq_idx += 2;
+        seq_idx += 1;
     }
     while seq_idx < last_seq && rev_reader.ptr >= fast_limit {
-        rev_reader.refill_fast_unchecked();
+        if unlikely(!rev_reader.try_refill_fast()) {
+            break;
+        }
         decode_and_execute_update_fast!(rev_reader);
         seq_idx += 1;
     }

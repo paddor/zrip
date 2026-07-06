@@ -2,6 +2,7 @@
 
 use crate::bitstream::primitives;
 use crate::error::DecompressError;
+use crate::hint::{likely, unlikely};
 
 /// Reverse bitstream reader using C zstd's bitsConsumed model.
 ///
@@ -147,13 +148,25 @@ impl<'a> ReverseBitReader<'a> {
     }
 
     #[inline(always)]
-    pub fn refill_fast_unchecked(&mut self) {
+    pub fn try_refill_fast(&mut self) -> bool {
         let byte_shift = (self.bits_consumed >> 3) as usize;
-        debug_assert!(byte_shift <= self.ptr);
-        debug_assert!(self.ptr - byte_shift + 8 <= self.data.len());
-        self.ptr -= byte_shift;
-        self.bits_consumed -= (byte_shift as u32) * 8;
-        self.container = primitives::read_u64_le_unaligned(self.data, self.ptr);
+        if likely(byte_shift <= self.ptr && self.data.len() >= 8) {
+            let new_ptr = self.ptr - byte_shift;
+            if likely(new_ptr <= self.data.len() - 8) {
+                self.ptr = new_ptr;
+                self.bits_consumed -= (byte_shift as u32) * 8;
+                self.container = primitives::read_u64_le_unaligned(self.data, self.ptr);
+                return true;
+            }
+        }
+        false
+    }
+
+    #[inline(always)]
+    pub fn refill_fast_or_regular(&mut self) {
+        if unlikely(!self.try_refill_fast()) {
+            self.refill();
+        }
     }
 
     #[inline]
@@ -221,6 +234,15 @@ mod tests {
         let data = [0b0000_1101];
         let mut r = ReverseBitReader::new(&data).unwrap();
         assert_eq!(r.read_bits(3).unwrap(), 0b101);
+        assert_eq!(r.bits_remaining(), 0);
+    }
+
+    #[test]
+    fn refill_fast_or_regular_falls_back_when_overconsumed() {
+        let data = [0b0000_0001];
+        let mut r = ReverseBitReader::new(&data).unwrap();
+        r.refill_fast_or_regular();
+        assert_eq!(r.ptr, 0);
         assert_eq!(r.bits_remaining(), 0);
     }
 
