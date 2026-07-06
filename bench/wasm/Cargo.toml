@@ -8,7 +8,7 @@ publish = false
 zrip = { path = "../.." }
 zstd = { version = "0.13", optional = true }
 ruzstd = { version = "0.8", optional = true }
-structured-zstd = { version = "0.0.45", optional = true }
+structured-zstd = { version = "0.0.48", optional = true }
 
 [features]
 default = []
