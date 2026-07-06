@@ -9,8 +9,21 @@ mkdir -p "$OUT"
 
 SOURCES=(dickens.txt hdfs.json xml_collection.xml)
 SILESIA_SOURCES=(x-ray)
-SIZES=(512 1024 2048 4096 8192 16384 32768 65536 131072)
-LABELS=(512 1k 2k 4k 8k 16k 32k 64k 128k)
+SIZES=(
+    512
+    1024
+    2048
+    4096
+    8192
+    16384
+    32768
+    65536
+    131072
+    262144
+    524288
+    1048576
+)
+LABELS=(512 1k 2k 4k 8k 16k 32k 64k 128k 256k 512k 1m)
 
 for src in "${SOURCES[@]}"; do
     path="$CORPUS/$src"

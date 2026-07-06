@@ -52,7 +52,61 @@ pub(crate) fn compress_fast_block(
             hash_table,
             sequences,
         ),
+        (4, 15) => compress_fast_block_h15_mls4(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
+        (4, 16) => compress_fast_block_h16_mls4(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
+        (4, 17) => compress_fast_block_h17_mls4(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
+        (7.., 14) => compress_fast_block_h14_mls7(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
+        (7.., 15) => compress_fast_block_h15_mls7(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
         (7.., _) => compress_fast_block_mls7(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
+        (5..7, 13) => compress_fast_block_h13_mls5(
             src,
             block_start,
             block_end,
@@ -106,6 +160,94 @@ fn compress_fast_block_h14_mls4(
 
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
+fn compress_fast_block_h15_mls4(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_fast_block_impl::<15, 4>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_fast_block_h16_mls4(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_fast_block_impl::<16, 4>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_fast_block_h17_mls4(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_fast_block_impl::<17, 4>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_fast_block_h13_mls5(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_fast_block_impl::<13, 5>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
 fn compress_fast_block_mls7(
     src: &[u8],
     block_start: usize,
@@ -116,6 +258,50 @@ fn compress_fast_block_mls7(
     sequences: &mut Vec<Sequence>,
 ) {
     compress_fast_block_impl::<0, 7>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_fast_block_h14_mls7(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_fast_block_impl::<14, 7>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_fast_block_h15_mls7(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_fast_block_impl::<15, 7>(
         src,
         block_start,
         block_end,
@@ -141,20 +327,29 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
     hash_table: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    // match_at confirms 5 bytes for MLS>=5, 4 bytes for MLS<5.
-    // MLS only controls the hash function width; match confirmation is capped at 5.
-    let confirm: usize = if MLS >= 5 { 5 } else { MLS };
+    // C zstd hashes MLS bytes, but the fast parser confirms 4 bytes and
+    // extends from there. MLS controls hash width, not the accepted match
+    // length for this strategy.
+    let confirm: usize = if MLS >= 5 { 4 } else { MLS };
 
     let block_size = block_end - block_start;
     if block_size < 8 {
         return;
     }
-
-    let acceleration = params.target_length.max(1) as usize;
-    let step_size = acceleration + 1;
-    let search_strength = params.search_strength as usize;
+    let (step_size, search_strength) = if HASH_LOG == 14 && MLS == 4 {
+        (2usize, 8usize)
+    } else {
+        (
+            params.target_length.max(1) as usize + 1,
+            params.search_strength as usize,
+        )
+    };
     let ilimit = (block_end - MLS).min(src.len() - 8);
-    let max_distance = 1usize << params.window_log;
+    let max_distance = if HASH_LOG == 14 && MLS == 4 {
+        1usize << 19
+    } else {
+        1usize << params.window_log
+    };
 
     let probe_interval = (block_size / 4).max(4096).min(block_size);
     let mut probe_limit = block_start + probe_interval;
@@ -239,7 +434,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
             // First match check at ip0
             if match_idx < ip0
                 && ip0 - match_idx <= max_distance
-                && primitives::match_at::<MLS>(src, ip0, match_idx)
+                && fast_match_at::<MLS>(src, ip0, match_idx)
             {
                 let h1 = hash_pos::<HASH_LOG, MLS>(src, ip1, hash_log);
                 primitives::hash_store(hash_table, h1, ip1 as u32);
@@ -306,7 +501,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
             // Second match check at shifted ip0
             if match_idx < ip0
                 && ip0 - match_idx <= max_distance
-                && primitives::match_at::<MLS>(src, ip0, match_idx)
+                && fast_match_at::<MLS>(src, ip0, match_idx)
             {
                 if step_size + ((ip0 - anchor) >> search_strength) <= 4 {
                     primitives::hash_store(hash_table, h_ip2, ip1 as u32);
@@ -927,6 +1122,15 @@ fn hash_pos<const HASH_LOG: u32, const MLS: usize>(src: &[u8], pos: usize, hash_
         hash5_const::<HASH_LOG>(primitives::rd64(src, pos), hash_log)
     } else {
         hash4_const::<HASH_LOG>(primitives::rd32(src, pos), hash_log)
+    }
+}
+
+#[inline(always)]
+fn fast_match_at<const MLS: usize>(src: &[u8], a: usize, b: usize) -> bool {
+    if MLS >= 5 {
+        primitives::match_at::<4>(src, a, b)
+    } else {
+        primitives::match_at::<MLS>(src, a, b)
     }
 }
 

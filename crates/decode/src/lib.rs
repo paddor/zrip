@@ -34,6 +34,7 @@ use zrip_core::frame::header::{FrameHeader, parse_frame_header};
 use zrip_core::huffman::HuffmanDecodeEntry;
 use zrip_core::xxhash::Xxh64State;
 
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct BlockDecodeWorkspace {
     pub literal_buf: Vec<u8>,
     pub huf_table: Vec<HuffmanDecodeEntry>,
@@ -45,11 +46,16 @@ pub(crate) struct BlockDecodeWorkspace {
     pub huf_weights: Vec<u8>,
     pub huf_last_weights: Vec<u8>,
     pub huf_last_weights_valid: bool,
+    pub huf_last_header: Vec<u8>,
+    pub huf_last_header_valid: bool,
     pub fse_dist: Vec<i16>,
     pub fse_symbol_next: Vec<u16>,
     pub fse_build_buf: Vec<zrip_core::fse::FseDecodeEntry>,
-    pub seq_tables: Option<SequenceDecodeTables>,
-    pub cached_dict_tables: Option<SequenceDecodeTables>,
+    pub seq_tables: Option<Box<SequenceDecodeTables>>,
+    pub seq_table_header: Vec<u8>,
+    pub seq_table_cache: Option<Box<SequenceDecodeTables>>,
+    pub seq_table_cache_tables_current: bool,
+    pub cached_dict_tables: Option<Box<SequenceDecodeTables>>,
     pub cached_dict_rep: [u32; 3],
     pub cached_dict_huf: Option<(Vec<HuffmanDecodeEntry>, u8)>,
 }
@@ -67,10 +73,15 @@ impl BlockDecodeWorkspace {
             huf_weights: Vec::new(),
             huf_last_weights: Vec::new(),
             huf_last_weights_valid: false,
+            huf_last_header: Vec::new(),
+            huf_last_header_valid: false,
             fse_dist: Vec::new(),
             fse_symbol_next: Vec::new(),
             fse_build_buf: Vec::new(),
-            seq_tables: Some(SequenceDecodeTables::new_default()),
+            seq_tables: Some(Box::new(SequenceDecodeTables::new_default())),
+            seq_table_header: Vec::new(),
+            seq_table_cache: None,
+            seq_table_cache_tables_current: false,
             cached_dict_tables: None,
             cached_dict_rep: [1, 4, 8],
             cached_dict_huf: None,
@@ -99,7 +110,7 @@ impl BlockDecodeWorkspace {
             st.ll_accuracy = l;
             st.ll_set = true;
         }
-        self.cached_dict_tables = Some(st);
+        self.cached_dict_tables = Some(Box::new(st));
         self.cached_dict_rep = *dict.rep_offsets();
         if let Some((t, l)) = dict.huf_table() {
             self.cached_dict_huf = Some((t.to_vec(), l));
@@ -263,6 +274,7 @@ fn decompress_frame_with_header(
         ws.huf_table_log = l;
         ws.huf_valid = true;
         ws.huf_last_weights_valid = false;
+        ws.huf_last_header_valid = false;
     } else if let Some(d) = dict
         && let Some((t, l)) = d.huf_table()
     {
@@ -271,6 +283,7 @@ fn decompress_frame_with_header(
         ws.huf_table_log = l;
         ws.huf_valid = true;
         ws.huf_last_weights_valid = false;
+        ws.huf_last_header_valid = false;
     }
 
     let mut hasher = if header.content_checksum {
@@ -328,8 +341,9 @@ fn decompress_frame_with_header(
                     let mut initial_tables = ws
                         .seq_tables
                         .take()
-                        .unwrap_or_else(SequenceDecodeTables::new_default);
-                    let initial_rep_offsets = initial_sequence_state(&mut initial_tables, ws, dict);
+                        .unwrap_or_else(|| Box::new(SequenceDecodeTables::new_default()));
+                    let initial_rep_offsets =
+                        initial_sequence_state(initial_tables.as_mut(), ws, dict);
                     seq_tables = Some(initial_tables);
                     rep_offsets = initial_rep_offsets;
                 }
@@ -340,7 +354,7 @@ fn decompress_frame_with_header(
                     output_start,
                     max_output,
                     seq_tables
-                        .as_mut()
+                        .as_deref_mut()
                         .expect("sequence tables are initialized before compressed blocks"),
                     &mut rep_offsets,
                     ws,
@@ -396,14 +410,16 @@ fn decompress_frame_with_header(
 
 fn initial_sequence_state(
     tables: &mut SequenceDecodeTables,
-    ws: &BlockDecodeWorkspace,
+    ws: &mut BlockDecodeWorkspace,
     dict: Option<&zrip_core::dict::Dictionary>,
 ) -> [u32; 3] {
     if let Some(ref cached) = ws.cached_dict_tables {
-        *tables = cached.clone();
+        *tables = (**cached).clone();
+        ws.seq_table_cache_tables_current = false;
         ws.cached_dict_rep
     } else if let Some(d) = dict {
         tables.reset_default();
+        ws.seq_table_cache_tables_current = false;
         if let Some((t, l)) = d.of_table() {
             tables.of_table = crate::seq_table::SeqTable::promote_of(t);
             tables.of_accuracy = l;
@@ -424,7 +440,7 @@ fn initial_sequence_state(
         }
         *d.rep_offsets()
     } else {
-        tables.reset_default();
+        tables.clear_repeat_flags();
         [1u32, 4, 8]
     }
 }

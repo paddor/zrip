@@ -1,8 +1,8 @@
 # zrip
 
-Pure Rust zstd codec. Levels -8 through 4 (Fast and DFast strategies).
-Optimized for encode throughput in transfer pipelines that need standard
-zstd frames at high speed.
+Pure Rust zstd codec. The decoder reads standard zstd blocks and frames
+produced at any zstd compression level. The encoder supports levels -8 through
+4 for fast transfer pipelines. First-class dictionary support.
 
 ## Why zrip
 
@@ -19,9 +19,9 @@ LZ4-class encode speed while still producing standard zstd frames.
 primitives modules. The `paranoid` feature eliminates all remaining unsafe.
 See [SAFETY.md](SAFETY.md).
 
-**Small codebase.** ~12k lines of Rust. Levels above 4 add complexity for
-compression ratios that only matter in archival storage, not transfer
-pipelines.
+**Small codebase.** ~13k Rust SLOC. Levels above 4 add
+complexity for compression ratios that only matter in archival storage, not
+transfer pipelines.
 
 **Dictionary compression.** COVER and FastCOVER training built in for
 small-message workloads (log lines, JSON records, RPC payloads).
@@ -209,14 +209,16 @@ from C zstd.
 
 ## Levels
 
-| Level | Strategy | Hash table | Min match | Literals | Sequences |
-|------:|:---------|:-----------|:---------:|:---------|:----------|
-| -8 | Fast | 32 KB | 5 | Raw | Predefined FSE |
-| -7..-1 | Fast | 32 KB | 5 | Huffman | Predefined/custom FSE |
-| 1 | Fast | 64 KB | 4 | Huffman | Predefined/custom FSE |
-| 2 | Fast | 512 KB | 4 | Huffman | Predefined/custom FSE |
-| 3 | DFast | 2x 1 MB | 4 | Huffman | Predefined/custom FSE |
-| 4 | DFast | 2x 2 MB | 4 | Huffman | Predefined/custom FSE |
+zrip's encoder covers the fast end of the zstd speed/ratio curve. Negative
+levels favor throughput over ratio. Positive levels spend more match-finding
+work for better ratios while staying in the Fast/DFast range.
 
-Level 0 maps to the library default (currently level 1). See
-[DESIGN.md](DESIGN.md) for parameter details and pipeline behavior per level.
+Level 0 maps to the library default, currently level 1.
+
+L-8 is zrip-specific. Its purpose is to get as close to LZ4 encode speed as
+possible while still producing standard zstd frames. It does that by forcing
+raw literal blocks and using predefined sequence tables.
+
+The decoder is level-independent and supports standard zstd frames produced
+by all zstd compression levels. See [DESIGN.md](DESIGN.md) for exact encoder
+level parameters and pipeline behavior.

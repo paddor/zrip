@@ -49,8 +49,8 @@ impl SeqTable {
 
     #[cfg(feature = "paranoid")]
     #[inline(always)]
-    pub(crate) fn get_ref(&self, idx: usize) -> &FseSeqDecodeEntry {
-        &self.data[idx]
+    pub(crate) fn get(&self, idx: usize) -> FseSeqDecodeEntry {
+        self.data[idx]
     }
 
     #[cfg(not(feature = "paranoid"))]
@@ -160,7 +160,7 @@ impl Index<usize> for SeqTable {
     #[inline(always)]
     fn index(&self, idx: usize) -> &FseSeqDecodeEntry {
         // SAFETY: The FSE state machine bounds idx to [0, 1 << accuracy_log).
-        // All entries in that range are initialized by from_slice or set.
+        // All entries in that range are initialized by promote_* or set.
         unsafe { self.data[idx].assume_init_ref() }
     }
 

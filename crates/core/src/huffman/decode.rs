@@ -49,7 +49,7 @@ pub fn decode_single_stream(
             return Err(DecompressError::BadHuffmanStream);
         }
         output.push(entry.symbol);
-        let _ = reader.read_bits(entry.num_bits)?;
+        reader.bits_consumed += entry.num_bits as u32;
     }
 
     if reader.bits_remaining() != 0 {
@@ -82,9 +82,7 @@ pub fn decode_single_stream_vec(
     if table.len() < (1usize << table_log) {
         return Err(DecompressError::BadHuffmanStream);
     }
-    output.clear();
-    output.reserve(output_size);
-    primitives::set_vec_len(output, output_size);
+    prepare_output(output, output_size);
     #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
         if crate::simd::cpu_tier() >= crate::simd::CpuTier::Bmi2 {
@@ -128,9 +126,7 @@ pub fn decode_4_streams_into(
     if table.len() < (1usize << table_log) {
         return Err(DecompressError::BadHuffmanStream);
     }
-    output.clear();
-    output.reserve(output_size);
-    primitives::set_vec_len(output, output_size);
+    prepare_output(output, output_size);
     #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
         if crate::simd::cpu_tier() >= crate::simd::CpuTier::Bmi2 {
@@ -164,6 +160,20 @@ fn decode_4_streams_core_safe(
     super::decode_4stream::decode_4_streams_core(table, table_log, data, output_size, output)
 }
 
+#[cfg(not(feature = "paranoid"))]
+#[inline(always)]
+fn prepare_output(output: &mut Vec<u8>, output_size: usize) {
+    output.clear();
+    output.reserve(output_size);
+    primitives::set_vec_len(output, output_size);
+}
+
+#[cfg(feature = "paranoid")]
+#[inline(always)]
+fn prepare_output(output: &mut Vec<u8>, output_size: usize) {
+    output.resize(output_size, 0);
+}
+
 pub(super) fn decode_stream_tail(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -174,14 +184,22 @@ pub(super) fn decode_stream_tail(
     let tl = table_log as usize;
     let mut pos = 0;
 
-    reader.refill();
-    while pos + 4 <= output_size && reader.bits_remaining() >= tl + tl + tl + tl {
-        for _ in 0..4 {
-            let bits = reader.peek_bits(table_log);
-            let entry = primitives::huf_table_lookup(table, bits as usize);
+    let tl5 = (tl + tl + tl + tl + tl) as u32;
+    while pos + 5 <= output_size {
+        reader.refill();
+        if reader.bits_remaining() < tl5 as usize
+            || 64u32.saturating_sub(reader.bits_consumed) < tl5
+        {
+            break;
+        }
+
+        for _ in 0..5 {
+            let bits =
+                ((reader.container << reader.bits_consumed) >> (64 - table_log as u32)) as usize;
+            let entry = primitives::huf_table_lookup(table, bits);
             primitives::huf_output_write(output, pos, entry.symbol);
             pos += 1;
-            reader.consume_bits(entry.num_bits);
+            reader.bits_consumed += entry.num_bits as u32;
         }
     }
 
@@ -202,7 +220,7 @@ pub(super) fn decode_stream_tail(
         }
         primitives::huf_output_write(output, pos, entry.symbol);
         pos += 1;
-        let _ = reader.read_bits(entry.num_bits)?;
+        reader.bits_consumed += entry.num_bits as u32;
     }
 
     if reader.bits_remaining() != 0 {

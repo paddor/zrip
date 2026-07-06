@@ -348,6 +348,7 @@ impl CompressContext {
                     true,
                     &mut self.output,
                     &mut self.workspace,
+                    strategy::use_custom_sequence_tables(&params, input.len()),
                 );
             }
         } else {
@@ -397,6 +398,7 @@ impl CompressContext {
                         true,
                         &mut self.output,
                         &mut self.workspace,
+                        strategy::use_custom_sequence_tables(&params, input.len()),
                     );
                 }
             } else {
@@ -446,6 +448,7 @@ impl CompressContext {
                             is_last,
                             &mut self.output,
                             &mut self.workspace,
+                            strategy::use_custom_sequence_tables(&params, input.len()),
                         );
                     }
                     offset += chunk_size;
@@ -572,6 +575,7 @@ fn compress_core(
                             true,
                             output,
                             workspace,
+                            strategy::use_custom_sequence_tables(&params, input.len()),
                         );
                     }
                 } else if has_prefix {
@@ -611,6 +615,7 @@ fn compress_core(
                                 is_last,
                                 output,
                                 workspace,
+                                strategy::use_custom_sequence_tables(&params, input.len()),
                             );
                         }
                         offset += chunk_size;
@@ -655,6 +660,7 @@ fn compress_core(
                                     is_last,
                                     output,
                                     workspace,
+                                    strategy::use_custom_sequence_tables(&params, input.len()),
                                 );
                             }
                         }
@@ -684,6 +690,7 @@ fn compress_core(
                         true,
                         output,
                         workspace,
+                        strategy::use_custom_sequence_tables(&params, input.len()),
                     );
                 } else if has_prefix {
                     combined.clear();
@@ -721,6 +728,7 @@ fn compress_core(
                             is_last,
                             output,
                             workspace,
+                            strategy::use_custom_sequence_tables(&params, input.len()),
                         );
                         offset += chunk_size;
                     }
@@ -756,6 +764,7 @@ fn compress_core(
                                 is_last,
                                 output,
                                 workspace,
+                                strategy::use_custom_sequence_tables(&params, input.len()),
                             );
                         }
                         offset = block_end;

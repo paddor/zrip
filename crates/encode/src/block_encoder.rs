@@ -5,9 +5,7 @@ use alloc::vec::Vec;
 
 use crate::primitives;
 use zrip_core::Sequence;
-use zrip_core::fse::table_builder::{
-    build_decode_table, normalize_counts, serialize_fse_table_description,
-};
+use zrip_core::bitstream::writer::BitWriter;
 use zrip_core::fse::{
     FseDecodeEntry, LL_BASELINE_TABLE, LL_BITS_TABLE, LL_DEFAULT_ACCURACY, LL_DEFAULT_DIST,
     ML_BASELINE_TABLE, ML_BITS_TABLE, ML_DEFAULT_ACCURACY, ML_DEFAULT_DIST, OF_DEFAULT_ACCURACY,
@@ -51,6 +49,7 @@ pub(crate) struct BlockEncodeWorkspace {
     pub cust_writer_buf: Vec<u8>,
     pub repeat_writer_buf: Vec<u8>,
     packed_seqs: Vec<PackedSeq>,
+    custom_seq_tables: CustomSeqTables,
     pub prev_huffman: Option<HuffmanEncodeTable>,
     pub prev_ll: Option<FseEncodeTable>,
     pub prev_of: Option<FseEncodeTable>,
@@ -71,6 +70,7 @@ impl BlockEncodeWorkspace {
             cust_writer_buf: Vec::new(),
             repeat_writer_buf: Vec::new(),
             packed_seqs: Vec::new(),
+            custom_seq_tables: CustomSeqTables::new(),
             prev_huffman: None,
             prev_ll: None,
             prev_of: None,
@@ -95,6 +95,20 @@ pub(crate) struct FseEncodeTable {
     state_table: [u16; MAX_TABLE_SIZE],
     table_size: u32,
     table_log: u8,
+}
+
+impl Default for FseEncodeTable {
+    fn default() -> Self {
+        Self {
+            symbol_tt: [SymbolTT {
+                delta_nb_bits: 0,
+                delta_find_state: 0,
+            }; MAX_SYMBOLS],
+            state_table: [0; MAX_TABLE_SIZE],
+            table_size: 0,
+            table_log: 0,
+        }
+    }
 }
 
 const MAX_SYMBOLS: usize = 53;
@@ -167,6 +181,136 @@ impl FseEncodeTable {
             table_size: table_size as u32,
             table_log,
         }
+    }
+
+    fn build_from_distribution_into(
+        &mut self,
+        distribution: &[i16],
+        table_log: u8,
+        max_symbol: usize,
+    ) -> bool {
+        let table_size = 1usize << table_log;
+        let num_symbols = max_symbol + 1;
+        debug_assert!(num_symbols <= MAX_SYMBOLS);
+        debug_assert!(table_size <= MAX_TABLE_SIZE);
+
+        let mut count = [0u32; MAX_SYMBOLS];
+        for s in 0..num_symbols {
+            let probability = distribution[s];
+            count[s] = if probability == -1 {
+                1
+            } else if probability > 0 {
+                probability as u32
+            } else {
+                0
+            };
+        }
+
+        let mut cumul = [0u32; MAX_SYMBOLS + 1];
+        for s in 0..num_symbols {
+            cumul[s + 1] = cumul[s] + count[s];
+        }
+
+        let default_delta = (table_log as u32 + 1) << 16;
+        let mut symbol_tt = [SymbolTT {
+            delta_nb_bits: default_delta,
+            delta_find_state: 0,
+        }; MAX_SYMBOLS];
+        let mut total = 0i32;
+        for s in 0..num_symbols {
+            let c = count[s];
+            if c == 0 {
+                symbol_tt[s].delta_nb_bits = default_delta | (1u32 << table_log);
+                continue;
+            }
+            let max_bits_out = if c == 1 {
+                table_log as u32
+            } else {
+                table_log as u32 - (31 - (c - 1).leading_zeros())
+            };
+            let min_state_plus = c << max_bits_out;
+            symbol_tt[s].delta_nb_bits = (max_bits_out << 16).wrapping_sub(min_state_plus);
+            symbol_tt[s].delta_find_state = total - c as i32;
+            total += c as i32;
+        }
+
+        let step = (table_size >> 1) + (table_size >> 3) + 3;
+        let mask = table_size - 1;
+        let mut high_threshold = table_size - 1;
+        let mut table_symbols = [0u8; MAX_TABLE_SIZE];
+
+        for (s, &probability) in distribution.iter().enumerate().take(num_symbols) {
+            if probability == -1 {
+                if high_threshold == 0 {
+                    return false;
+                }
+                table_symbols[high_threshold] = s as u8;
+                high_threshold -= 1;
+            }
+        }
+
+        let mut position = 0usize;
+        if high_threshold == table_size - 1 {
+            for (s, &probability) in distribution.iter().enumerate().take(num_symbols) {
+                if probability <= 0 {
+                    continue;
+                }
+                let symbol = s as u8;
+                let mut remaining = probability as usize;
+                while remaining >= 4 {
+                    table_symbols[position] = symbol;
+                    position = (position + step) & mask;
+                    table_symbols[position] = symbol;
+                    position = (position + step) & mask;
+                    table_symbols[position] = symbol;
+                    position = (position + step) & mask;
+                    table_symbols[position] = symbol;
+                    position = (position + step) & mask;
+                    remaining -= 4;
+                }
+                for _ in 0..remaining {
+                    table_symbols[position] = symbol;
+                    position = (position + step) & mask;
+                }
+            }
+        } else {
+            for (s, &probability) in distribution.iter().enumerate().take(num_symbols) {
+                if probability <= 0 {
+                    continue;
+                }
+                for _ in 0..probability {
+                    table_symbols[position] = s as u8;
+                    position = (position + step) & mask;
+                    while position > high_threshold {
+                        position = (position + step) & mask;
+                    }
+                }
+            }
+        }
+
+        if position != 0 {
+            return false;
+        }
+
+        self.symbol_tt.fill(SymbolTT {
+            delta_nb_bits: default_delta,
+            delta_find_state: 0,
+        });
+        self.state_table[..table_size].fill(0);
+        self.table_size = table_size as u32;
+        self.table_log = table_log;
+
+        self.symbol_tt[..num_symbols].copy_from_slice(&symbol_tt[..num_symbols]);
+
+        let mut cumul_copy = cumul;
+        for (i, &symbol) in table_symbols.iter().enumerate().take(table_size) {
+            let s = symbol as usize;
+            let idx = cumul_copy[s] as usize;
+            self.state_table[idx] = (table_size + i) as u16;
+            cumul_copy[s] += 1;
+        }
+
+        true
     }
 
     #[inline]
@@ -247,6 +391,7 @@ pub(crate) fn encode_compressed_block(
     last: bool,
     output: &mut Vec<u8>,
     workspace: &mut BlockEncodeWorkspace,
+    use_custom_sequence_tables: bool,
 ) {
     if sequences.is_empty() {
         encode_raw_block(src, last, output);
@@ -264,12 +409,13 @@ pub(crate) fn encode_compressed_block(
 
     pack_sequences_and_literals(src, sequences, rep_offsets, workspace);
 
-    encode_literals_section(
+    let raw_literals = encode_literals_section(
         &workspace.lit_buf,
         &mut workspace.lit_section,
         &mut workspace.huf_concat,
         &mut workspace.huf_stream,
         &mut workspace.prev_huffman,
+        use_custom_sequence_tables,
     );
 
     let has_repeat =
@@ -286,7 +432,7 @@ pub(crate) fn encode_compressed_block(
         );
     }
 
-    let do_codes = n >= 64;
+    let do_codes = use_custom_sequence_tables && n >= 64;
     let seq_data = if do_codes {
         let (ll_freq, ml_freq, of_freq, total_extra_bits) =
             compute_frequencies(&workspace.packed_seqs);
@@ -300,6 +446,7 @@ pub(crate) fn encode_compressed_block(
             pred_est,
             &mut workspace.cust_seq,
             &mut workspace.cust_writer_buf,
+            &mut workspace.custom_seq_tables,
         );
         if use_custom && workspace.cust_seq.len() < pred_est {
             &workspace.cust_seq
@@ -330,12 +477,18 @@ pub(crate) fn encode_compressed_block(
         seq_data
     };
 
-    // Clear dict FSE tables after first block
+    // Clear dict FSE tables after first block.
     workspace.prev_ll = None;
     workspace.prev_of = None;
     workspace.prev_ml = None;
 
-    let block_len = workspace.lit_section.len() + seq_data.len();
+    let literal_section_len = workspace.lit_section.len()
+        + if raw_literals {
+            workspace.lit_buf.len()
+        } else {
+            0
+        };
+    let block_len = literal_section_len + seq_data.len();
     if block_len >= src.len() {
         *rep_offsets = saved_rep;
         encode_raw_block(src, last, output);
@@ -348,6 +501,9 @@ pub(crate) fn encode_compressed_block(
     output.push((header >> 8) as u8);
     output.push((header >> 16) as u8);
     output.extend_from_slice(&workspace.lit_section);
+    if raw_literals {
+        output.extend_from_slice(&workspace.lit_buf);
+    }
     output.extend_from_slice(seq_data);
 }
 
@@ -376,7 +532,7 @@ pub(crate) fn encode_compressed_block_raw(
     pack_sequences_and_literals(src, sequences, rep_offsets, workspace);
 
     workspace.lit_section.clear();
-    encode_raw_literals_section(&workspace.lit_buf, &mut workspace.lit_section);
+    encode_raw_literals_header(workspace.lit_buf.len(), &mut workspace.lit_section);
 
     encode_seq_predefined(
         &workspace.packed_seqs,
@@ -384,7 +540,8 @@ pub(crate) fn encode_compressed_block_raw(
         &mut workspace.pred_writer_buf,
     );
 
-    let block_len = workspace.lit_section.len() + workspace.pred_seq.len();
+    let block_len =
+        workspace.lit_section.len() + workspace.lit_buf.len() + workspace.pred_seq.len();
     if block_len >= src.len() {
         *rep_offsets = saved_rep;
         encode_raw_block(src, last, output);
@@ -397,6 +554,7 @@ pub(crate) fn encode_compressed_block_raw(
     output.push((header >> 8) as u8);
     output.push((header >> 16) as u8);
     output.extend_from_slice(&workspace.lit_section);
+    output.extend_from_slice(&workspace.lit_buf);
     output.extend_from_slice(&workspace.pred_seq);
 }
 
@@ -423,7 +581,8 @@ fn pack_sequences_and_literals(
 
     for (i, seq) in sequences[..n].iter().enumerate() {
         let ll = seq.literal_length as usize;
-        if lit_offset + ll <= src_len {
+        debug_assert!(lit_offset + ll <= src_len);
+        if ll != 0 {
             primitives::copy_literals_fast(src, lit_offset, &mut workspace.lit_buf, lit_pos, ll);
             lit_pos += ll;
         }
@@ -473,10 +632,11 @@ fn pack_sequences_and_literals(
         let ml_c = ml_code(seq.match_length);
         let of_c = of_code(ov);
 
-        let ll_nb = LL_BITS_TABLE[ll_c as usize];
-        let ml_nb = ML_BITS_TABLE[ml_c as usize];
-        let ll_extra = seq.literal_length - LL_BASELINE_TABLE[ll_c as usize];
-        let ml_extra = seq.match_length - ML_BASELINE_TABLE[ml_c as usize];
+        let ll_nb = primitives::slice_get(&LL_BITS_TABLE, ll_c as usize);
+        let ml_nb = primitives::slice_get(&ML_BITS_TABLE, ml_c as usize);
+        let ll_extra =
+            seq.literal_length - primitives::slice_get(&LL_BASELINE_TABLE, ll_c as usize);
+        let ml_extra = seq.match_length - primitives::slice_get(&ML_BASELINE_TABLE, ml_c as usize);
         let of_extra = ov - (1u32 << of_c);
         let extra_bits = (ll_extra as u64)
             | ((ml_extra as u64) << ll_nb)
@@ -543,7 +703,7 @@ fn huf_worth_trying(data: &[u8]) -> bool {
     if data.len() > 32768 {
         return true;
     }
-    if data.len() < 64 {
+    if data.len() < 32768 {
         return false;
     }
 
@@ -590,7 +750,8 @@ fn encode_literals_section(
     huf_concat: &mut Vec<u8>,
     huf_stream: &mut Vec<u8>,
     prev_huffman: &mut Option<HuffmanEncodeTable>,
-) {
+    try_huffman_literals: bool,
+) -> bool {
     output.clear();
 
     let use_4_streams = lits.len() >= 1024;
@@ -607,14 +768,14 @@ fn encode_literals_section(
         if compressed_size < lits.len() {
             encode_treeless_literals_header(lits.len(), compressed_size, use_4_streams, output);
             output.extend_from_slice(huf_concat);
-            return;
+            return false;
         }
     }
 
-    if !huf_worth_trying(lits) {
+    if !try_huffman_literals && !huf_worth_trying(lits) {
         *prev_huffman = None;
-        encode_raw_literals_section(lits, output);
-        return;
+        encode_raw_literals_header(lits.len(), output);
+        return true;
     }
 
     if let Some(table) = HuffmanEncodeTable::from_data(lits) {
@@ -632,12 +793,13 @@ fn encode_literals_section(
             output.extend_from_slice(&tree_desc);
             output.extend_from_slice(huf_concat);
             *prev_huffman = Some(table);
-            return;
+            return false;
         }
     }
 
     *prev_huffman = None;
-    encode_raw_literals_section(lits, output);
+    encode_raw_literals_header(lits.len(), output);
+    true
 }
 
 fn encode_treeless_literals_header(
@@ -687,9 +849,7 @@ fn encode_huf_literals_header(
     }
 }
 
-fn encode_raw_literals_section(lits: &[u8], output: &mut Vec<u8>) {
-    let size = lits.len();
-
+fn encode_raw_literals_header(size: usize, output: &mut Vec<u8>) {
     if size <= 31 {
         output.push((size as u8) << 3);
     } else if size <= 4095 {
@@ -705,8 +865,6 @@ fn encode_raw_literals_section(lits: &[u8], output: &mut Vec<u8>) {
         output.push(b1);
         output.push(b2);
     }
-
-    output.extend_from_slice(lits);
 }
 
 fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf: &mut Vec<u8>) {
@@ -891,39 +1049,196 @@ fn encode_seq_repeat(
     output.extend_from_slice(writer_buf);
 }
 
-#[allow(clippy::large_enum_variant)]
-enum TableEnc {
-    Compressed {
-        enc_table: FseEncodeTable,
-        header: Vec<u8>,
-    },
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TableMode {
+    Compressed,
     Rle(u8),
 }
 
-fn build_table_enc(freqs: &[u32], max_sym: usize, max_log: u8, n: usize) -> Option<TableEnc> {
-    let distinct: Vec<usize> = (0..=max_sym).filter(|&s| freqs[s] > 0).collect();
-    if distinct.len() <= 1 {
-        return Some(TableEnc::Rle(distinct.first().copied().unwrap_or(0) as u8));
+struct TableEnc {
+    mode: TableMode,
+    enc_table: FseEncodeTable,
+    header: Vec<u8>,
+    dist: Vec<i16>,
+}
+
+impl TableEnc {
+    fn new() -> Self {
+        Self {
+            mode: TableMode::Rle(0),
+            enc_table: FseEncodeTable::default(),
+            header: Vec::new(),
+            dist: Vec::new(),
+        }
     }
-    let num_distinct = distinct.len();
+}
+
+struct CustomSeqTables {
+    ll: TableEnc,
+    of: TableEnc,
+    ml: TableEnc,
+}
+
+impl CustomSeqTables {
+    fn new() -> Self {
+        Self {
+            ll: TableEnc::new(),
+            of: TableEnc::new(),
+            ml: TableEnc::new(),
+        }
+    }
+}
+
+fn normalize_counts_into(freqs: &[u32], accuracy_log: u8, dist: &mut Vec<i16>) {
+    let table_size = 1i32 << accuracy_log;
+    let total: u64 = freqs.iter().map(|&f| f as u64).sum();
+
+    dist.resize(freqs.len(), 0);
+    dist.fill(0);
+
+    if total == 0 {
+        return;
+    }
+
+    let mut largest_idx = 0;
+    let mut largest_freq = 0u32;
+    for (i, &freq) in freqs.iter().enumerate() {
+        if freq > largest_freq {
+            largest_freq = freq;
+            largest_idx = i;
+        }
+    }
+
+    let budget = table_size - 1;
+    let mut distributed = 0i32;
+
+    for (i, &freq) in freqs.iter().enumerate() {
+        if freq == 0 || i == largest_idx {
+            continue;
+        }
+        if distributed >= budget {
+            break;
+        }
+        let prob = ((freq as u64) * (table_size as u64) / total) as i32;
+        if prob < 1 {
+            dist[i] = -1;
+            distributed += 1;
+        } else {
+            let capped = prob.min(budget - distributed);
+            dist[i] = capped as i16;
+            distributed += capped;
+        }
+    }
+
+    dist[largest_idx] = (table_size - distributed) as i16;
+}
+
+fn serialize_fse_table_description_into(distribution: &[i16], accuracy_log: u8, out: &mut Vec<u8>) {
+    let buf = core::mem::take(out);
+    let mut writer = BitWriter::from_vec(buf);
+    writer.write_bits((accuracy_log - 5) as u32, 4);
+
+    let table_size = 1i32 << accuracy_log;
+    let mut remaining = table_size + 1;
+    let mut threshold = table_size;
+    let mut nb_bits = accuracy_log + 1;
+
+    let mut i = 0;
+    while i < distribution.len() && remaining > 1 {
+        let prob = distribution[i];
+        let count = (prob + 1) as i32;
+        let max_val = (2 * threshold - 1) - remaining;
+
+        if count < max_val {
+            writer.write_bits(count as u32, nb_bits - 1);
+        } else if count < threshold {
+            writer.write_bits(count as u32, nb_bits);
+        } else {
+            writer.write_bits((count + max_val) as u32, nb_bits);
+        }
+
+        if prob == -1 {
+            remaining -= 1;
+        } else if prob > 0 {
+            remaining -= prob as i32;
+        }
+
+        if prob == 0 {
+            let mut zeros = 0;
+            let start = i + 1;
+            while start + zeros < distribution.len() && distribution[start + zeros] == 0 {
+                zeros += 1;
+            }
+            let mut z = zeros;
+            loop {
+                if z >= 3 {
+                    writer.write_bits(3, 2);
+                    z -= 3;
+                } else {
+                    writer.write_bits(z as u32, 2);
+                    break;
+                }
+            }
+            i += 1 + zeros;
+        } else {
+            i += 1;
+        }
+
+        while remaining < threshold {
+            nb_bits -= 1;
+            threshold >>= 1;
+        }
+    }
+
+    *out = writer.into_bytes();
+}
+
+fn build_table_enc(
+    out: &mut TableEnc,
+    freqs: &[u32],
+    max_sym: usize,
+    max_log: u8,
+    n: usize,
+) -> bool {
+    let mut num_distinct = 0usize;
+    let mut rle_sym = 0usize;
+    for (s, &freq) in freqs.iter().enumerate().take(max_sym + 1) {
+        if freq > 0 {
+            num_distinct += 1;
+            rle_sym = s;
+        }
+    }
+
+    out.header.clear();
+    if num_distinct <= 1 {
+        out.mode = TableMode::Rle(rle_sym as u8);
+        return true;
+    }
     let min_log_for_sym = (32 - ((num_distinct as u32 + 1).leading_zeros())) as u8;
     let acc = optimal_table_log(max_log, n, max_sym).max(min_log_for_sym);
     if acc > max_log {
-        return None;
+        return false;
     }
-    let dist = normalize_counts(&freqs[..=max_sym], acc);
+    normalize_counts_into(&freqs[..=max_sym], acc, &mut out.dist);
+    let dist = &out.dist;
     for s in 0..=max_sym {
         if freqs[s] > 0 && dist[s] == 0 {
-            return None;
+            return false;
         }
     }
-    let header = serialize_fse_table_description(&dist, acc);
-    let decode_table = build_decode_table(&dist, acc).ok()?;
-    let enc_table = FseEncodeTable::build(&decode_table, 1 << acc, max_sym, acc);
-    Some(TableEnc::Compressed { enc_table, header })
+    serialize_fse_table_description_into(dist, acc, &mut out.header);
+    if !out
+        .enc_table
+        .build_from_distribution_into(dist, acc, max_sym)
+    {
+        return false;
+    }
+    out.mode = TableMode::Compressed;
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
+#[inline(never)]
 fn encode_seq_custom(
     packed: &[PackedSeq],
     ll_freq: &[u32; 36],
@@ -933,6 +1248,7 @@ fn encode_seq_custom(
     pred_size: usize,
     output: &mut Vec<u8>,
     writer_buf: &mut Vec<u8>,
+    tables: &mut CustomSeqTables,
 ) -> bool {
     output.clear();
 
@@ -949,27 +1265,27 @@ fn encode_seq_custom(
         return false;
     }
 
-    let Some(ll_enc) = build_table_enc(ll_freq, ll_max, 9, n) else {
+    if !build_table_enc(&mut tables.ll, ll_freq, ll_max, 9, n) {
         return false;
-    };
-    let Some(of_enc) = build_table_enc(of_freq, of_max, 8, n) else {
+    }
+    if !build_table_enc(&mut tables.of, of_freq, of_max, 8, n) {
         return false;
-    };
-    let Some(ml_enc) = build_table_enc(ml_freq, ml_max, 9, n) else {
+    }
+    if !build_table_enc(&mut tables.ml, ml_freq, ml_max, 9, n) {
         return false;
-    };
+    }
 
-    let ll_mode: u8 = match &ll_enc {
-        TableEnc::Compressed { .. } => 2,
-        TableEnc::Rle(_) => 1,
+    let ll_mode: u8 = match tables.ll.mode {
+        TableMode::Compressed => 2,
+        TableMode::Rle(_) => 1,
     };
-    let of_mode: u8 = match &of_enc {
-        TableEnc::Compressed { .. } => 2,
-        TableEnc::Rle(_) => 1,
+    let of_mode: u8 = match tables.of.mode {
+        TableMode::Compressed => 2,
+        TableMode::Rle(_) => 1,
     };
-    let ml_mode: u8 = match &ml_enc {
-        TableEnc::Compressed { .. } => 2,
-        TableEnc::Rle(_) => 1,
+    let ml_mode: u8 = match tables.ml.mode {
+        TableMode::Compressed => 2,
+        TableMode::Rle(_) => 1,
     };
 
     let num_seq = n as u32;
@@ -979,17 +1295,17 @@ fn encode_seq_custom(
 
     output.push((ll_mode << 6) | (of_mode << 4) | (ml_mode << 2));
 
-    match &ll_enc {
-        TableEnc::Rle(sym) => output.push(*sym),
-        TableEnc::Compressed { header, .. } => output.extend_from_slice(header),
+    match tables.ll.mode {
+        TableMode::Rle(sym) => output.push(sym),
+        TableMode::Compressed => output.extend_from_slice(&tables.ll.header),
     }
-    match &of_enc {
-        TableEnc::Rle(sym) => output.push(*sym),
-        TableEnc::Compressed { header, .. } => output.extend_from_slice(header),
+    match tables.of.mode {
+        TableMode::Rle(sym) => output.push(sym),
+        TableMode::Compressed => output.extend_from_slice(&tables.of.header),
     }
-    match &ml_enc {
-        TableEnc::Rle(sym) => output.push(*sym),
-        TableEnc::Compressed { header, .. } => output.extend_from_slice(header),
+    match tables.ml.mode {
+        TableMode::Rle(sym) => output.push(sym),
+        TableMode::Compressed => output.extend_from_slice(&tables.ml.header),
     }
 
     let last = &packed[n - 1];
@@ -1019,18 +1335,11 @@ fn encode_seq_custom(
 
     add_bits!(last.extra_bits, last.extra_nbits);
 
-    match (&ll_enc, &of_enc, &ml_enc) {
-        (
-            TableEnc::Compressed {
-                enc_table: ll_t, ..
-            },
-            TableEnc::Compressed {
-                enc_table: of_t, ..
-            },
-            TableEnc::Compressed {
-                enc_table: ml_t, ..
-            },
-        ) => {
+    match (tables.ll.mode, tables.of.mode, tables.ml.mode) {
+        (TableMode::Compressed, TableMode::Compressed, TableMode::Compressed) => {
+            let ll_t = &tables.ll.enc_table;
+            let of_t = &tables.of.enc_table;
+            let ml_t = &tables.ml.enc_table;
             let mut ll_s = ll_t.init_state(last.ll_c);
             let mut of_s = of_t.init_state(last.of_c);
             let mut ml_s = ml_t.init_state(last.ml_c);
@@ -1071,17 +1380,17 @@ fn encode_seq_custom(
             add_bits!(ll_s - ll_t.table_size, ll_t.table_log);
         }
         _ => {
-            let ll_table = match &ll_enc {
-                TableEnc::Compressed { enc_table, .. } => Some(enc_table),
-                TableEnc::Rle(_) => None,
+            let ll_table = match tables.ll.mode {
+                TableMode::Compressed => Some(&tables.ll.enc_table),
+                TableMode::Rle(_) => None,
             };
-            let of_table = match &of_enc {
-                TableEnc::Compressed { enc_table, .. } => Some(enc_table),
-                TableEnc::Rle(_) => None,
+            let of_table = match tables.of.mode {
+                TableMode::Compressed => Some(&tables.of.enc_table),
+                TableMode::Rle(_) => None,
             };
-            let ml_table = match &ml_enc {
-                TableEnc::Compressed { enc_table, .. } => Some(enc_table),
-                TableEnc::Rle(_) => None,
+            let ml_table = match tables.ml.mode {
+                TableMode::Compressed => Some(&tables.ml.enc_table),
+                TableMode::Rle(_) => None,
             };
 
             let mut ll_state = ll_table.as_ref().map(|t| t.init_state(last.ll_c));

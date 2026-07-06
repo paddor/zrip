@@ -148,6 +148,13 @@ pub(crate) fn decode_literals_ws(
                     return Err(DecompressError::CorruptLiterals);
                 }
                 0
+            } else if ws.huf_last_header_valid
+                && ws.huf_last_weights_valid
+                && stream_data.len() >= ws.huf_last_header.len()
+                && stream_data[..ws.huf_last_header.len()] == ws.huf_last_header
+            {
+                ws.huf_valid = true;
+                ws.huf_last_header.len()
             } else {
                 let consumed = parse_huffman_weights_into(
                     stream_data,
@@ -169,6 +176,10 @@ pub(crate) fn decode_literals_ws(
                     ws.huf_last_weights.extend_from_slice(&ws.huf_weights);
                     ws.huf_last_weights_valid = true;
                 }
+                ws.huf_last_header.clear();
+                ws.huf_last_header
+                    .extend_from_slice(&stream_data[..consumed]);
+                ws.huf_last_header_valid = true;
                 ws.huf_valid = true;
                 consumed
             };
@@ -196,12 +207,6 @@ pub(crate) fn decode_literals_ws(
             header_size + compressed_size
         }
     };
-
-    // Ensure 32 bytes of initialized padding past literal data for
-    // unconditional SIMD loads in the sequence decode loop.
-    let real_len = ws.literal_buf.len();
-    ws.literal_buf.resize(real_len + 32, 0);
-    ws.literal_buf.truncate(real_len);
 
     Ok(consumed)
 }

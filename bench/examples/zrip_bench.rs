@@ -75,6 +75,9 @@ const SMALL_FILES: &[&str] = &[
     "corpus/small/dickens_32k",
     "corpus/small/dickens_64k",
     "corpus/small/dickens_128k",
+    "corpus/small/dickens_256k",
+    "corpus/small/dickens_512k",
+    "corpus/small/dickens_1m",
     "corpus/small/hdfs_512",
     "corpus/small/hdfs_1k",
     "corpus/small/hdfs_2k",
@@ -84,6 +87,9 @@ const SMALL_FILES: &[&str] = &[
     "corpus/small/hdfs_32k",
     "corpus/small/hdfs_64k",
     "corpus/small/hdfs_128k",
+    "corpus/small/hdfs_256k",
+    "corpus/small/hdfs_512k",
+    "corpus/small/hdfs_1m",
     "corpus/small/xml_collection_512",
     "corpus/small/xml_collection_1k",
     "corpus/small/xml_collection_2k",
@@ -93,6 +99,9 @@ const SMALL_FILES: &[&str] = &[
     "corpus/small/xml_collection_32k",
     "corpus/small/xml_collection_64k",
     "corpus/small/xml_collection_128k",
+    "corpus/small/xml_collection_256k",
+    "corpus/small/xml_collection_512k",
+    "corpus/small/xml_collection_1m",
     "corpus/small/x-ray_512",
     "corpus/small/x-ray_1k",
     "corpus/small/x-ray_2k",
@@ -102,6 +111,9 @@ const SMALL_FILES: &[&str] = &[
     "corpus/small/x-ray_32k",
     "corpus/small/x-ray_64k",
     "corpus/small/x-ray_128k",
+    "corpus/small/x-ray_256k",
+    "corpus/small/x-ray_512k",
+    "corpus/small/x-ray_1m",
 ];
 
 fn cpu_nanos() -> u64 {
@@ -1036,7 +1048,10 @@ fn dict_source_name(file_name: &str) -> String {
         .trim_end_matches("_16k")
         .trim_end_matches("_32k")
         .trim_end_matches("_64k")
-        .trim_end_matches("_128k");
+        .trim_end_matches("_128k")
+        .trim_end_matches("_256k")
+        .trim_end_matches("_512k")
+        .trim_end_matches("_1m");
     let base = base
         .trim_end_matches(".txt")
         .trim_end_matches(".json")

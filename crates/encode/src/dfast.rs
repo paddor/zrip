@@ -44,8 +44,48 @@ pub(crate) fn compress_dfast_block(
     hash_long: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    match params.min_match {
-        ..=4 => compress_dfast_block_impl::<0, 0, 4>(
+    match (params.min_match, params.hash_log, params.chain_log) {
+        (..=4, 15, 15) => compress_dfast_block_h15_mls4(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_short,
+            hash_long,
+            sequences,
+        ),
+        (..=4, 16, 16) => compress_dfast_block_h16_mls4(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_short,
+            hash_long,
+            sequences,
+        ),
+        (..=4, 17, 17) => compress_dfast_block_h17_mls4(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_short,
+            hash_long,
+            sequences,
+        ),
+        (..=4, 18, 18) => compress_dfast_block_h18_mls4(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_short,
+            hash_long,
+            sequences,
+        ),
+        (..=4, _, _) => compress_dfast_block_impl::<0, 0, 4>(
             src,
             block_start,
             block_end,
@@ -66,6 +106,102 @@ pub(crate) fn compress_dfast_block(
             sequences,
         ),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_dfast_block_h15_mls4(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_short: &mut [u32],
+    hash_long: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_dfast_block_impl::<15, 15, 4>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_short,
+        hash_long,
+        sequences,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_dfast_block_h16_mls4(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_short: &mut [u32],
+    hash_long: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_dfast_block_impl::<16, 16, 4>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_short,
+        hash_long,
+        sequences,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_dfast_block_h17_mls4(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_short: &mut [u32],
+    hash_long: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_dfast_block_impl::<17, 17, 4>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_short,
+        hash_long,
+        sequences,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_dfast_block_h18_mls4(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_short: &mut [u32],
+    hash_long: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    compress_dfast_block_impl::<18, 18, 4>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_short,
+        hash_long,
+        sequences,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -114,13 +250,20 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
     if block_size < 16 {
         return;
     }
-
     let acceleration = params.target_length.max(1) as usize;
     let step_size = acceleration + 1;
     let search_strength = params.search_strength as usize;
-    let search_log = params.search_log;
+    let search_log = if HASH_LOG == 18 && SHORT_LOG == 18 && MLS == 4 {
+        1
+    } else {
+        params.search_log
+    };
     let ilimit = block_end - 8;
-    let max_distance = 1usize << params.window_log;
+    let max_distance = if HASH_LOG == 18 && SHORT_LOG == 18 && MLS == 4 {
+        1usize << 21
+    } else {
+        1usize << params.window_log
+    };
 
     let probe_interval = (block_size / 4).max(4096).min(block_size);
     let mut probe_limit = block_start + probe_interval;

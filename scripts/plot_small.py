@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Generate encode speed vs compression ratio chart for small inputs (<256 KB).
+"""Generate encode speed vs compression ratio chart for small inputs (<= 1 MiB).
 
 Reads ~/.cache/zrip/L*/{codec}.jsonl, filters to small corpus files,
 writes small_encode.svg. One panel per source (dickens, hdfs, xml_collection),
-X-axis: input size (log), Y-axis: encode MB/s.
+X-axis: input size (log), Y-axis: encode MB/s (log).
 
 Two shaded bands per codec: Fast (L-8..L2) and DFast (L3..L4).
 Boundary lines labeled at the right edge.
@@ -23,19 +23,60 @@ CODEC_ORDER = ["C zstd", "zrip", "structured-zstd"]
 COLORS = {
     "C zstd":          "#60a5fa",
     "zrip":            "#f87171",
+    "zrip paranoid":   "#f472b6",
     "structured-zstd": "#f59e0b",
 }
 
 LABELS = {
     "C zstd":          "C zstd (libzstd)",
     "zrip":            "zrip (Rust)",
+    "zrip paranoid":   "zrip paranoid (safe SIMD, no unsafe)",
     "structured-zstd": "structured-zstd 0.0.48 (Rust)",
 }
 
 SMALL_PREFIXES = ["dickens", "hdfs", "xml_collection", "x-ray"]
-SMALL_SUFFIXES = ["_512", "_1k", "_2k", "_4k", "_8k", "_16k", "_32k", "_64k", "_128k"]
-SMALL_SIZES = [512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072]
-SIZE_LABELS = ["512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K"]
+SMALL_SUFFIXES = [
+    "_512",
+    "_1k",
+    "_2k",
+    "_4k",
+    "_8k",
+    "_16k",
+    "_32k",
+    "_64k",
+    "_128k",
+    "_256k",
+    "_512k",
+    "_1m",
+]
+SMALL_SIZES = [
+    512,
+    1024,
+    2048,
+    4096,
+    8192,
+    16384,
+    32768,
+    65536,
+    131072,
+    262144,
+    524288,
+    1048576,
+]
+SIZE_LABELS = [
+    "512",
+    "1K",
+    "2K",
+    "4K",
+    "8K",
+    "16K",
+    "32K",
+    "64K",
+    "128K",
+    "256K",
+    "512K",
+    "1M",
+]
 
 BAND_LEVELS = list(range(-8, 5))    # -8..4
 INTERIOR_LEVELS = list(range(-7, 4))  # -7..3 (faint lines inside band)
@@ -177,7 +218,7 @@ def generate_svg(data):
         )
 
     log_min = math.log10(400)
-    log_max = math.log10(200000)
+    log_max = math.log10(1200000)
 
     for pi, prefix in enumerate(SMALL_PREFIXES):
         xl = left_margin
@@ -187,16 +228,23 @@ def generate_svg(data):
         pw = xr - xl
         pcx = (xl + xr) / 2
 
-        panel_max = 0
+        panel_min = float("inf")
+        panel_max = 0.0
         for codec in CODEC_ORDER:
             rows = data.get(codec, [])
             for level in BAND_LEVELS:
                 for suffix in SMALL_SUFFIXES:
                     name = prefix + suffix
                     mbs = get_mbs(rows, name, level)
-                    if mbs is not None and mbs > panel_max:
-                        panel_max = mbs
+                    if mbs is not None and mbs > 0:
+                        panel_min = min(panel_min, mbs)
+                        panel_max = max(panel_max, mbs)
+        if not math.isfinite(panel_min) or panel_max <= 0:
+            continue
+        y_min_mbs = panel_min / 1.15
         y_max_mbs = panel_max * 1.15
+        log_y_min = math.log10(y_min_mbs)
+        log_y_max = math.log10(y_max_mbs)
 
         L.append(
             f'  <rect x="{xl}" y="{p_top}" width="{pw}" height="{panel_h}"'
@@ -214,7 +262,7 @@ def generate_svg(data):
             return xl + frac * pw
 
         def map_y(mbs):
-            frac = mbs / y_max_mbs
+            frac = (math.log10(mbs) - log_y_min) / (log_y_max - log_y_min)
             return p_bot - frac * (p_bot - p_top)
 
         for si, (size, label) in enumerate(zip(SMALL_SIZES, SIZE_LABELS)):
@@ -229,11 +277,10 @@ def generate_svg(data):
                     f' fill="#7d8590" font-size="9">{label}</text>'
                 )
 
-        y_step = nice_y_step(y_max_mbs)
-        v = y_step
-        while v < y_max_mbs:
-            yy = map_y(v)
+        for tick in log_ticks(y_min_mbs, y_max_mbs):
+            yy = map_y(tick)
             if p_top + 5 < yy < p_bot - 5:
+                tick_label = f"{tick:g}" if tick < 10 else f"{int(tick)}"
                 L.append(
                     f'  <line x1="{xl}" y1="{yy:.1f}" x2="{xr}" y2="{yy:.1f}"'
                     f' stroke="#21262d" stroke-width="1"/>'
@@ -241,9 +288,8 @@ def generate_svg(data):
                 L.append(
                     f'  <text x="{xl - 8}" y="{yy:.1f}" text-anchor="end"'
                     f' dominant-baseline="middle" fill="#7d8590" font-size="9">'
-                    f'{int(v)}</text>'
+                    f'{tick_label}</text>'
                 )
-            v += y_step
 
         for codec in CODEC_ORDER:
             rows = data.get(codec, [])
@@ -328,7 +374,7 @@ def generate_svg(data):
     L.append(
         f'  <text x="20" y="{y_mid}" text-anchor="middle" fill="#e6edf3"'
         f' font-size="11" font-weight="600"'
-        f' transform="rotate(-90,20,{y_mid})">encode MB/s</text>'
+        f' transform="rotate(-90,20,{y_mid})">encode MB/s (log scale)</text>'
     )
 
     # Legend: single row — codecs then meta items
@@ -372,14 +418,16 @@ def generate_svg(data):
     return "\n".join(L) + "\n"
 
 
-def nice_y_step(max_val):
-    raw = max_val / 5
-    mag = 10 ** math.floor(math.log10(max(raw, 1e-9)))
-    for s in [1, 2, 5, 10]:
-        step = s * mag
-        if max_val / step <= 7:
-            return step
-    return mag * 10
+def log_ticks(min_val, max_val):
+    ticks = []
+    lo = math.floor(math.log10(min_val))
+    hi = math.ceil(math.log10(max_val))
+    for exp in range(lo, hi + 1):
+        for mult in [1, 2, 5]:
+            tick = mult * (10 ** exp)
+            if min_val <= tick <= max_val:
+                ticks.append(tick)
+    return ticks
 
 
 def main():

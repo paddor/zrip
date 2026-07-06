@@ -751,7 +751,7 @@ mod ldm {
             .collect();
         let mut data = Vec::new();
         data.extend_from_slice(&dup_block);
-        for i in 0..72 {
+        for i in 0..144 {
             let filler: Vec<u8> = format!("filler block {i:04} content ")
                 .bytes()
                 .cycle()
@@ -761,11 +761,11 @@ mod ldm {
         }
         data.extend_from_slice(&dup_block);
         let l4 = zrip::compress(&data, 4).unwrap();
-        let opts = zrip::Options::default().window_log(24);
+        let opts = zrip::Options::default().window_log(25);
         let large_win = zrip::compress_opts(&data, 4, &opts).unwrap();
         assert!(
             large_win.len() < l4.len(),
-            "window_log=24 should beat L4 (window_log=23) on ~9M-distance match: large_win={} l4={}",
+            "window_log=25 should beat L4 (window_log=24) on ~18M-distance match: large_win={} l4={}",
             large_win.len(),
             l4.len(),
         );

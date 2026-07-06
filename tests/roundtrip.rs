@@ -454,6 +454,19 @@ fn compress_context_roundtrip() {
     assert_eq!(&decompressed2, data2);
 }
 
+#[cfg(all(feature = "std", not(miri)))]
+#[test]
+fn decompress_context_borrows_large_output_for_reuse() {
+    let data = vec![0x42u8; 600 * 1024];
+    let compressed = zrip::compress(&data, 1).unwrap();
+
+    let mut ctx = zrip::DecompressContext::new();
+    let decompressed = ctx.decompress(&compressed).unwrap();
+
+    assert!(matches!(decompressed, std::borrow::Cow::Borrowed(_)));
+    assert_eq!(&*decompressed, &data[..]);
+}
+
 // ===== Output size limits =====
 
 #[cfg(not(miri))]

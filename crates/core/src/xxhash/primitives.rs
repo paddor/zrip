@@ -2,6 +2,8 @@
 #[inline(always)]
 pub(crate) fn read_u32_le(data: &[u8], offset: usize) -> u32 {
     debug_assert!(offset + 4 <= data.len());
+    // SAFETY: offset..offset+4 is in bounds, and read_unaligned accepts any
+    // alignment.
     u32::from_le(unsafe { (data.as_ptr().add(offset) as *const u32).read_unaligned() })
 }
 
@@ -15,6 +17,8 @@ pub(crate) fn read_u32_le(data: &[u8], offset: usize) -> u32 {
 #[inline(always)]
 pub(crate) fn read_u64_le(data: &[u8], offset: usize) -> u64 {
     debug_assert!(offset + 8 <= data.len());
+    // SAFETY: offset..offset+8 is in bounds, and read_unaligned accepts any
+    // alignment.
     u64::from_le(unsafe { (data.as_ptr().add(offset) as *const u64).read_unaligned() })
 }
 
@@ -30,6 +34,9 @@ pub(super) fn bulk_rounds(data: &[u8], v1: &mut u64, v2: &mut u64, v3: &mut u64,
     let len = data.len();
     debug_assert!(len >= 32);
 
+    // SAFETY: bulk_end and unroll_end are rounded down from len, so every
+    // pointer stays within data. Each loop body reads complete 8-byte lanes
+    // before advancing beyond those rounded limits.
     unsafe {
         let mut p = data.as_ptr();
         let bulk_end = data.as_ptr().add(len & !31);

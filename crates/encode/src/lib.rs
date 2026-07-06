@@ -219,6 +219,7 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
                                 is_last,
                                 output,
                                 &mut workspace,
+                                strategy::use_custom_sequence_tables(params, input.len()),
                             );
                         }
                     }
@@ -276,6 +277,7 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
                             is_last,
                             output,
                             &mut workspace,
+                            strategy::use_custom_sequence_tables(params, input.len()),
                         );
                     }
                     offset = block_end;
@@ -348,6 +350,7 @@ pub fn compress_with_dict(
                     true,
                     &mut output,
                     &mut workspace,
+                    strategy::use_custom_sequence_tables(&params, input.len()),
                 );
             }
         } else {
@@ -392,6 +395,7 @@ pub fn compress_with_dict(
                                 is_last,
                                 &mut output,
                                 &mut workspace,
+                                strategy::use_custom_sequence_tables(&params, input.len()),
                             );
                         }
                         offset += chunk_size;
@@ -432,6 +436,7 @@ pub fn compress_with_dict(
                             is_last,
                             &mut output,
                             &mut workspace,
+                            strategy::use_custom_sequence_tables(&params, input.len()),
                         );
                         offset += chunk_size;
                     }

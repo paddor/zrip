@@ -26,8 +26,8 @@ Const-generic dispatch on minimum match length via
 | MLS | Hash function | Used at levels |
 |-----|---------------|----------------|
 | 4   | `hash4` (PRIME32_1) | 1..2 |
-| 5   | `hash5` (PRIME64_1) | -6..-1 |
-| 7   | `hash7` (custom PRIME7) | -8..-7 |
+| 5   | `hash5` (PRIME64_1) | -8..-1 |
+| 7   | `hash7` (custom PRIME7) | custom params only |
 
 Hash table prefetch on x86_64 (`_mm_prefetch`) and aarch64 (inline asm
 `prfm pldl1keep`) hides memory latency in the match-finding loop.
@@ -47,22 +47,24 @@ match. Same incompressibility bail-out as Fast.
 
 ### Level parameters (`crates/encode/src/strategy.rs`)
 
-Based on C zstd's `ZSTD_defaultCParameters` table, with L-8 added by zrip:
+Based on C zstd's `ZSTD_defaultCParameters` table, with L-8 added by zrip.
+Level 0 is not a separate parameter set; it maps to the library default,
+currently level 1.
 
-| Level | Strategy | Hash table | Window | Min match | Target length | Notes |
-|------:|:---------|:-----------|:-------|:---------:|:-------------:|:------|
-| -8 | Fast | 32 KB | 512 KB | 5 | 7 | `force_raw_literals` (zrip-only) |
-| -7 | Fast | 32 KB | 512 KB | 5 | 7 | |
-| -6 | Fast | 32 KB | 512 KB | 5 | 6 | |
-| -5 | Fast | 32 KB | 512 KB | 5 | 5 | |
-| -4 | Fast | 32 KB | 512 KB | 5 | 4 | |
-| -3 | Fast | 32 KB | 512 KB | 5 | 3 | |
-| -2 | Fast | 32 KB | 512 KB | 5 | 2 | |
-| -1 | Fast | 32 KB | 512 KB | 5 | 1 | |
-| 1 | Fast | 64 KB | 512 KB | 4 | 1 | |
-| 2 | Fast | 512 KB | 1 MB | 4 | 1 | |
-| 3 | DFast | 2x 1 MB | 2 MB | 4 | 1 | Dual hash |
-| 4 | DFast | 2x 2 MB | 8 MB | 4 | 1 | |
+| Level | Strategy | Hash table | Window | Min match | Target | Search log | Search strength | Notes |
+|------:|:---------|:-----------|:-------|:---------:|-------:|-----------:|----------------:|:------|
+| -8 | Fast | 32 KiB | 512 KiB | 5 | 7 | 0 | 7 | `force_raw_literals` (zrip-only) |
+| -7 | Fast | 64 KiB | 512 KiB | 5 | 9 | 0 | 7 | Tiny inputs use target 6 |
+| -6 | Fast | 64 KiB | 512 KiB | 5 | 7 | 0 | 7 | |
+| -5 | Fast | 64 KiB | 512 KiB | 5 | 6 | 0 | 7 | |
+| -4 | Fast | 64 KiB | 512 KiB | 5 | 5 | 0 | 7 | |
+| -3 | Fast | 64 KiB | 512 KiB | 5 | 4 | 0 | 7 | |
+| -2 | Fast | 64 KiB | 512 KiB | 5 | 3 | 0 | 7 | |
+| -1 | Fast | 64 KiB | 512 KiB | 5 | 2 | 0 | 7 | |
+| 1 | Fast | 64 KiB | 512 KiB | 4 | 1 | 0 | 8 | default |
+| 2 | Fast | 512 KiB | 1 MiB | 4 | 1 | 0 | 8 | |
+| 3 | DFast | 2x 1 MiB | 2 MiB | 4 | 1 | 1 | 5 | Dual hash; 32-128 KiB uses strength 7 |
+| 4 | DFast | 2x 4 MiB | 16 MiB | 4 | 1 | 0 | 8 | Dual hash |
 
 Negative levels trade ratio for throughput by increasing `target_length`
 (skip acceleration). Higher `target_length` means more positions are skipped
@@ -85,18 +87,18 @@ long 8-byte matches) for better match quality at lower throughput.
 build-Huffman-table-encode-discard cycle for blocks where Huffman overhead
 exceeds savings:
 
-1. Per-level size ramp (`strategy.rs:apply_raw_literals_size_override`):
-   inputs below a level-dependent threshold always use raw literals.
-   L-7: 16 KB, L-6: 8 KB, L-5: 4 KB, L-4: 2 KB, L-3: 1 KB,
-   L-2 and above: 0 (rely on entropy pre-check). L-8 always uses raw
-   regardless of size.
+1. Size override (`strategy.rs:apply_raw_literals_size_override`): L-8 always
+   uses raw literals. Other Fast levels only force raw literals when
+   `min_match >= 5`, `target_length == 7`, and the input is <= 16 KiB. With
+   the built-in table, this applies to L-6. Other levels rely on the entropy
+   pre-check.
 
 2. Entropy pre-check (`block_encoder.rs:huf_worth_trying`): for blocks
-   <= 32 KB that passed the size ramp, estimates compressed size from a
+   <= 32 KiB that passed the size ramp, estimates compressed size from a
    byte histogram using integer-only fixed-point log2. Skips Huffman if
    estimated savings (including tree description overhead) are below
    ~3%. Also bails immediately if `max_sym > 128` (high byte range means
-   expensive tree description for marginal gain). Blocks > 32 KB always
+   expensive tree description for marginal gain). Blocks > 32 KiB always
    try Huffman since tree overhead is negligible at that scale.
 
 
@@ -126,7 +128,7 @@ recomputing.
 
 **SymbolTT encoding scheme.** Two-field per-symbol struct (`delta_nb_bits`,
 `delta_find_state`) encodes variable-width emission and state transition in
-one lookup. ~1.3 KB total footprint vs ~20 KB for full tables.
+one lookup. ~1.3 KiB total footprint vs ~20 KiB for full tables.
 
 **Incompressibility fast path**: `block_looks_incompressible()` samples the
 first 1024 bytes. Skips compression if >= 200 distinct byte values and max
@@ -154,10 +156,10 @@ Adapts setup cost to input size:
 | Tier | Input size | Hash setup | Match finder | Literals |
 |------|-----------|-----------|-------------|----------|
 | A (micro) | <= per-level threshold | zero small input table | `compress_fast_attached` (linear scan, dual-lookup) | raw |
-| B (small) | threshold-16 KB | zero moderate input table | `compress_fast_attached` (linear scan, dual-lookup) | Huffman from dict |
-| C (large) | > 16 KB | copy full snapshot | `compress_fast_block` (4-cursor pipeline) | Huffman from dict |
+| B (small) | threshold-16 KiB | zero moderate input table | `compress_fast_attached` (linear scan, dual-lookup) | Huffman from dict |
+| C (large) | > 16 KiB | copy full snapshot | `compress_fast_block` (4-cursor pipeline) | Huffman from dict |
 
-Thresholds: `ATTACH_THRESHOLD` (16 KB), per-level raw literals ramp (see
+Thresholds: `ATTACH_THRESHOLD` (16 KiB), per-level raw literals ramp (see
 level parameters above). DFast strategy (levels 3-4) always uses the copy
 path.
 
@@ -466,9 +468,10 @@ per frame.
 
 ## Unsafe boundary
 
-The decoder implementation is `#![forbid(unsafe_code)]` with zero `unsafe`
-blocks. Platform dispatch is handled by `fearless_simd::dispatch!`, which
-encapsulates `#[target_feature]` calling internally.
+Decode execution (`exec.rs`) and sequence parsing (`sequences.rs`) are
+`#![forbid(unsafe_code)]`. Platform dispatch is handled by
+`fearless_simd::dispatch!`, which encapsulates `#[target_feature]` calling
+internally.
 
 Encoder unsafe is confined to `encode/src/primitives.rs` (16 blocks):
 
@@ -499,8 +502,9 @@ unsafe { (src.as_ptr().add(pos) as *const u32).read_unaligned() }
 Core crate unsafe follows the same pattern in `bitstream/`, `huffman/`,
 `xxhash/` primitives modules.
 
-`assert_rep_valid` uses both `debug_assert!` and `core::hint::assert_unchecked`
-to help the optimizer prove bounds.
+Decoder support unsafe lives in `decode/src/fast_vec.rs` (wild-copy and Vec
+length primitives) and `decode/src/seq_table.rs` (`MaybeUninit` FSE table
+reads).
 
 
 ## Core bitstream primitives
