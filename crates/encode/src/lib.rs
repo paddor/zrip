@@ -13,7 +13,6 @@ pub(crate) mod fast;
 #[cfg(feature = "ldm")]
 pub(crate) mod ldm;
 pub(crate) mod primitives;
-pub(crate) mod sequences;
 pub mod strategy;
 #[cfg(feature = "std")]
 pub mod streaming;
