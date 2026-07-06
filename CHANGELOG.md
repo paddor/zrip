@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+## [0.8.2]
+
+### Added
+
+- Added decode APIs for zstd frames whose 4-byte magic number is stored out
+  of band, matching OpenZL transform payloads.
+- Added `scripts/miri_unsafe_primitives.sh`, a bounded parallel Miri runner
+  for the unsafe encode and decode primitive tests.
+- Added `release-plz` automation for release PRs, tags, crates.io
+  publishing, and GitHub releases.
+
+### Changed
+
+- Avoid repeated predefined LL/OF/ML sequence table clones when compressed
+  blocks keep using predefined sequence tables.
+- Specialized one-sequence decode execution and wide match copies for tiny
+  OpenZL-style zstd frames.
+- Unrolled the multi-sequence decode loop when the reverse bit reader can use
+  its fast refill path.
+- Reuse identical explicit Huffman decode tables across frames.
+- Folded Huffman weight max scanning into the weight-sum pass.
+- Tuned encoder levels L-7 through L4 for smoother speed and ratio spacing,
+  including the small-input curves.
+- Simplified and documented unsafe primitive boundaries in the encode,
+  decode, and core crates.
+- Updated README, DESIGN, SAFETY, and DEVELOPMENT docs for level 0 behavior,
+  all-level decode support, current unsafe boundaries, and release audit
+  workflow.
+- Updated JSR package docs and tests for L-8 encode support and all-level
+  decode compatibility.
+- Bumped benchmark comparison dependencies, including structured-zstd 0.0.48.
+- Refreshed x86_64 and wasm32 benchmark charts.
+
 ## [0.8.1]
 
 ### Changed
