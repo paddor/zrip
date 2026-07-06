@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "paranoid", forbid(unsafe_code))]
+#![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -12,54 +12,6 @@ use zrip_core::fse::{
     OF_DEFAULT_DIST,
 };
 use zrip_core::huffman::encode::HuffmanEncodeTable;
-
-#[cfg(not(feature = "paranoid"))]
-macro_rules! bitstream_flush {
-    ($buf:expr, $pos:expr, $bits:expr) => {{
-        // SAFETY: sequence writers reserve enough scratch capacity before
-        // entering the flush loop and expose only initialized bytes at the end.
-        unsafe { primitives::bitstream_flush($buf, $pos, $bits) }
-    }};
-}
-
-#[cfg(feature = "paranoid")]
-macro_rules! bitstream_flush {
-    ($buf:expr, $pos:expr, $bits:expr) => {
-        primitives::bitstream_flush($buf, $pos, $bits)
-    };
-}
-
-#[cfg(not(feature = "paranoid"))]
-macro_rules! bitstream_write_byte {
-    ($buf:expr, $pos:expr, $val:expr) => {{
-        // SAFETY: sequence writers reserve enough scratch capacity before
-        // writing trailing bytes.
-        unsafe { primitives::bitstream_write_byte($buf, $pos, $val) }
-    }};
-}
-
-#[cfg(feature = "paranoid")]
-macro_rules! bitstream_write_byte {
-    ($buf:expr, $pos:expr, $val:expr) => {
-        primitives::bitstream_write_byte($buf, $pos, $val)
-    };
-}
-
-#[cfg(not(feature = "paranoid"))]
-macro_rules! set_vec_len {
-    ($buf:expr, $len:expr) => {{
-        // SAFETY: all bytes up to len have been initialized by the sequence
-        // bitstream writer.
-        unsafe { primitives::set_vec_len($buf, $len) }
-    }};
-}
-
-#[cfg(feature = "paranoid")]
-macro_rules! set_vec_len {
-    ($buf:expr, $len:expr) => {
-        primitives::set_vec_len($buf, $len)
-    };
-}
 
 #[inline]
 fn write_seq_count(output: &mut Vec<u8>, num_seq: u32) {
@@ -922,8 +874,7 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     let last = &packed[n - 1];
 
     let max_out = n * 18 + 16;
-    writer_buf.clear();
-    writer_buf.reserve(max_out);
+    let mut bitstream = primitives::BitstreamScratch::new(writer_buf, max_out);
 
     let mut ll_state = tables.ll.init_state(last.ll_c);
     let mut of_state = tables.of.init_state(last.of_c);
@@ -941,7 +892,7 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     }
     macro_rules! flush_fast {
         () => {
-            bitstream_flush!(writer_buf, pos, bits);
+            bitstream.flush(pos, bits);
             let nb = (bits_used >> 3) as usize;
             pos += nb;
             bits >>= (nb << 3) as u64;
@@ -984,13 +935,13 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     add_bits!(1u32, 1u8);
     flush_fast!();
     while bits_used > 0 {
-        bitstream_write_byte!(writer_buf, pos, bits as u8);
+        bitstream.write_byte(pos, bits as u8);
         bits >>= 8;
         bits_used = bits_used.saturating_sub(8);
         pos += 1;
     }
-    set_vec_len!(writer_buf, pos);
-    output.extend_from_slice(writer_buf);
+    bitstream.finish(pos);
+    output.extend_from_slice(bitstream.as_slice());
 }
 
 fn encode_seq_repeat(
@@ -1014,8 +965,7 @@ fn encode_seq_repeat(
     let last = &packed[n - 1];
 
     let max_out = n * 18 + 16;
-    writer_buf.clear();
-    writer_buf.reserve(max_out);
+    let mut bitstream = primitives::BitstreamScratch::new(writer_buf, max_out);
 
     let mut ll_s = ll_t.init_state(last.ll_c);
     let mut of_s = of_t.init_state(last.of_c);
@@ -1033,7 +983,7 @@ fn encode_seq_repeat(
     }
     macro_rules! flush_fast {
         () => {
-            bitstream_flush!(writer_buf, pos, bits);
+            bitstream.flush(pos, bits);
             let nb = (bits_used >> 3) as usize;
             pos += nb;
             bits >>= (nb << 3) as u64;
@@ -1081,13 +1031,13 @@ fn encode_seq_repeat(
     add_bits!(1u32, 1u8);
     flush_fast!();
     while bits_used > 0 {
-        bitstream_write_byte!(writer_buf, pos, bits as u8);
+        bitstream.write_byte(pos, bits as u8);
         bits >>= 8;
         bits_used = bits_used.saturating_sub(8);
         pos += 1;
     }
-    set_vec_len!(writer_buf, pos);
-    output.extend_from_slice(writer_buf);
+    bitstream.finish(pos);
+    output.extend_from_slice(bitstream.as_slice());
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1352,8 +1302,7 @@ fn encode_seq_custom(
     let last = &packed[n - 1];
 
     let max_out = n * 18 + 16;
-    writer_buf.clear();
-    writer_buf.reserve(max_out);
+    let mut bitstream = primitives::BitstreamScratch::new(writer_buf, max_out);
     let mut pos: usize = 0;
     let mut bits: u64 = 0;
     let mut bits_used: u32 = 0;
@@ -1366,7 +1315,7 @@ fn encode_seq_custom(
     }
     macro_rules! flush_fast {
         () => {
-            bitstream_flush!(writer_buf, pos, bits);
+            bitstream.flush(pos, bits);
             let nb = (bits_used >> 3) as usize;
             pos += nb;
             bits >>= (nb << 3) as u64;
@@ -1478,13 +1427,13 @@ fn encode_seq_custom(
     add_bits!(1u32, 1u8);
     flush_fast!();
     while bits_used > 0 {
-        bitstream_write_byte!(writer_buf, pos, bits as u8);
+        bitstream.write_byte(pos, bits as u8);
         bits >>= 8;
         bits_used = bits_used.saturating_sub(8);
         pos += 1;
     }
-    set_vec_len!(writer_buf, pos);
-    output.extend_from_slice(writer_buf);
+    bitstream.finish(pos);
+    output.extend_from_slice(bitstream.as_slice());
 
     true
 }

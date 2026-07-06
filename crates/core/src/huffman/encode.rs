@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "paranoid", forbid(unsafe_code))]
+#![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
 use alloc::vec;
@@ -7,38 +7,6 @@ use alloc::vec::Vec;
 
 use super::primitives;
 use crate::huffman::{MAX_BITS, MAX_SYMBOL_VALUE};
-
-#[cfg(all(feature = "alloc", not(feature = "paranoid")))]
-macro_rules! huf_set_vec_len {
-    ($buf:expr, $len:expr) => {{
-        // SAFETY: Huffman bitstream writers initialize bytes before exposing
-        // them through the Vec length.
-        unsafe { primitives::set_vec_len($buf, $len) }
-    }};
-}
-
-#[cfg(all(feature = "alloc", feature = "paranoid"))]
-macro_rules! huf_set_vec_len {
-    ($buf:expr, $len:expr) => {
-        primitives::set_vec_len($buf, $len)
-    };
-}
-
-#[cfg(all(feature = "alloc", not(feature = "paranoid")))]
-macro_rules! huf_bitstream_flush {
-    ($buf:expr, $pos:expr, $bits:expr) => {{
-        // SAFETY: the Huffman stream reserves enough scratch capacity before
-        // entering the flush loop.
-        unsafe { primitives::bitstream_flush_vec($buf, $pos, $bits) }
-    }};
-}
-
-#[cfg(all(feature = "alloc", feature = "paranoid"))]
-macro_rules! huf_bitstream_flush {
-    ($buf:expr, $pos:expr, $bits:expr) => {
-        primitives::bitstream_flush_vec($buf, $pos, $bits)
-    };
-}
 
 #[derive(Clone)]
 pub struct HuffmanEncodeTable {
@@ -173,22 +141,17 @@ impl HuffmanEncodeTable {
     }
 
     pub fn encode_single_stream_into(&self, data: &[u8], buf: &mut Vec<u8>) {
-        buf.clear();
         let tl = self.table_log as usize;
         let unroll: usize = (32usize).checked_div(tl).unwrap_or(1).max(2);
 
-        buf.reserve(data.len() + 16);
+        let mut bitstream = primitives::BitstreamScratch::new(buf, data.len() + 16);
         let mut bits: u64 = 0;
         let mut bits_used: u8 = 0;
         let mut wpos: usize = 0;
 
         macro_rules! flush_bits {
             () => {
-                if wpos + 8 > buf.capacity() {
-                    huf_set_vec_len!(buf, wpos);
-                    buf.reserve(64);
-                }
-                huf_bitstream_flush!(buf, wpos, bits);
+                bitstream.flush(wpos, bits);
                 let nb = (bits_used >> 3) as usize;
                 wpos += nb;
                 bits >>= nb << 3;
@@ -222,14 +185,15 @@ impl HuffmanEncodeTable {
             }
         }
 
-        huf_set_vec_len!(buf, wpos);
         bits |= 1u64 << bits_used;
         bits_used += 1;
         while bits_used > 0 {
-            buf.push(bits as u8);
+            bitstream.write_byte(wpos, bits as u8);
+            wpos += 1;
             bits >>= 8;
             bits_used = bits_used.saturating_sub(8);
         }
+        bitstream.finish(wpos);
     }
 
     pub fn encode_4_streams(&self, data: &[u8]) -> Vec<u8> {
