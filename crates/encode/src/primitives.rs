@@ -203,7 +203,10 @@ pub(crate) fn prefetch_ht(table: &[u32], idx: usize) {
     }
 }
 
-#[cfg(any(miri, feature = "paranoid"))]
+#[cfg(all(
+    any(miri, feature = "paranoid"),
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 #[inline(always)]
 pub(crate) fn prefetch_ht(_table: &[u32], _idx: usize) {}
 
