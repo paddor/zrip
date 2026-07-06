@@ -66,11 +66,11 @@ impl BitWriter {
 
     #[inline(always)]
     pub fn write_bits(&mut self, value: u32, n: u8) {
-        debug_assert!(n <= 25);
         if n == 0 {
             return;
         }
-        debug_assert!(value < (1u32 << n));
+        assert!(n <= 25, "bit count must be <= 25");
+        assert!(value < (1u32 << n), "value does not fit in bit count");
         self.bits |= (value as u64) << self.bits_used;
         self.bits_used += n;
         if self.bits_used >= 32 {
@@ -126,6 +126,16 @@ impl BitWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[should_panic(expected = "bit count must be <= 25")]
+    fn write_bits_rejects_large_public_bit_count() {
+        // Regression: `write_bits` is a safe public API, so violating its
+        // maximum bit-count contract must stop before the unsafe flush path can
+        // expose uninitialized bytes via `set_len`.
+        let mut writer = BitWriter::new();
+        writer.write_bits(0, 255);
+    }
 
     #[test]
     fn write_and_read_back() {

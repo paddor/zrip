@@ -429,6 +429,10 @@ fn fuzz_corpus_dict_generate() {
 
 /// Miri: load pre-built fixture, decode-only. No dict training, no encode.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "requires filesystem access; run with -Zmiri-disable-isolation"
+)]
 fn fuzz_corpus_dict_decode_miri() {
     let Ok(fixture) = std::fs::read(FIXTURE_PATH) else {
         eprintln!("skipping: run fuzz_corpus_dict_generate first to create fixture");
