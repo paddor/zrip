@@ -92,6 +92,15 @@ pub fn level_params_for_size(level: i32, src_len: usize) -> Option<LevelParams> 
         params.chain_log = params.chain_log.min(src_log).max(HASH_LOG_MIN);
         params.window_log = params.window_log.min(src_log);
     }
+    // Large-input L-7 acceleration skips too aggressively on tiny text slices.
+    if level == -7 && src_len <= 16 * 1024 {
+        params.hash_log = params.hash_log.min(13);
+        params.chain_log = params.chain_log.min(13);
+        params.target_length = 6;
+    }
+    if level == 3 && (32 * 1024..=128 * 1024).contains(&src_len) {
+        params.search_strength = 7;
+    }
     Some(params)
 }
 
@@ -102,18 +111,10 @@ pub fn apply_raw_literals_size_override(params: &mut LevelParams, input_len: usi
     if params.strategy != Strategy::Fast || params.force_raw_literals {
         return;
     }
-    if params.min_match < 5 || params.target_length < 7 {
+    if params.min_match < 5 || params.target_length != 7 {
         return;
     }
-    let threshold = match params.target_length {
-        7.. => 16384,
-        6 => 8192,
-        5 => 4096,
-        4 => 2048,
-        3 => 1024,
-        _ => 0,
-    };
-    if input_len <= threshold {
+    if input_len <= 16384 {
         params.force_raw_literals = true;
     }
 }
@@ -123,21 +124,13 @@ pub(crate) fn use_custom_sequence_tables(params: &LevelParams, input_len: usize)
         return false;
     }
 
-    let small_input = (32768..=zrip_core::frame::MAX_BLOCK_SIZE).contains(&input_len);
-    if small_input {
-        match params.strategy {
-            Strategy::Fast => {
-                if params.min_match == 4 && params.target_length == 1 && params.hash_log <= 17 {
-                    return false;
-                }
-            }
-            Strategy::DFast => {
-                if params.min_match == 4 && params.target_length == 1 && params.search_strength <= 5
-                {
-                    return false;
-                }
-            }
-        }
+    if (32768..=zrip_core::frame::MAX_BLOCK_SIZE).contains(&input_len)
+        && params.strategy == Strategy::DFast
+        && params.min_match == 4
+        && params.target_length == 1
+        && params.search_strength < 5
+    {
+        return false;
     }
     true
 }
@@ -172,7 +165,7 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             chain_log: 14,
             search_log: 0,
             min_match: 5,
-            target_length: 8,
+            target_length: 9,
             search_strength: 7,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
