@@ -102,6 +102,9 @@ pub fn apply_raw_literals_size_override(params: &mut LevelParams, input_len: usi
     if params.strategy != Strategy::Fast || params.force_raw_literals {
         return;
     }
+    if params.min_match < 5 || params.target_length < 7 {
+        return;
+    }
     let threshold = match params.target_length {
         7.. => 16384,
         6 => 8192,
@@ -113,6 +116,30 @@ pub fn apply_raw_literals_size_override(params: &mut LevelParams, input_len: usi
     if input_len <= threshold {
         params.force_raw_literals = true;
     }
+}
+
+pub(crate) fn use_custom_sequence_tables(params: &LevelParams, input_len: usize) -> bool {
+    if params.strategy == Strategy::Fast && params.min_match >= 5 && params.hash_log <= 13 {
+        return false;
+    }
+
+    let small_input = (32768..=zrip_core::frame::MAX_BLOCK_SIZE).contains(&input_len);
+    if small_input {
+        match params.strategy {
+            Strategy::Fast => {
+                if params.min_match == 4 && params.target_length == 1 && params.hash_log <= 17 {
+                    return false;
+                }
+            }
+            Strategy::DFast => {
+                if params.min_match == 4 && params.target_length == 1 && params.search_strength <= 5
+                {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 /// Returns the maximum hash_log for a given level.
@@ -141,11 +168,11 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         -7 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
-            hash_log: 13,
-            chain_log: 13,
+            hash_log: 14,
+            chain_log: 14,
             search_log: 0,
             min_match: 5,
-            target_length: 7,
+            target_length: 8,
             search_strength: 7,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
@@ -154,11 +181,11 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         -6 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
-            hash_log: 13,
-            chain_log: 13,
+            hash_log: 14,
+            chain_log: 14,
             search_log: 0,
             min_match: 5,
-            target_length: 6,
+            target_length: 7,
             search_strength: 7,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
@@ -167,11 +194,11 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         -5 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
-            hash_log: 13,
-            chain_log: 13,
+            hash_log: 14,
+            chain_log: 14,
             search_log: 0,
             min_match: 5,
-            target_length: 5,
+            target_length: 6,
             search_strength: 7,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
@@ -180,11 +207,11 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         -4 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
-            hash_log: 13,
-            chain_log: 13,
+            hash_log: 14,
+            chain_log: 14,
             search_log: 0,
             min_match: 5,
-            target_length: 4,
+            target_length: 5,
             search_strength: 7,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
@@ -193,11 +220,11 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         -3 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
-            hash_log: 13,
-            chain_log: 13,
+            hash_log: 14,
+            chain_log: 14,
             search_log: 0,
             min_match: 5,
-            target_length: 3,
+            target_length: 4,
             search_strength: 7,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
@@ -206,11 +233,11 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         -2 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
-            hash_log: 13,
-            chain_log: 13,
+            hash_log: 14,
+            chain_log: 14,
             search_log: 0,
             min_match: 5,
-            target_length: 2,
+            target_length: 3,
             search_strength: 7,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
@@ -219,11 +246,11 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         -1 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
-            hash_log: 13,
-            chain_log: 13,
+            hash_log: 14,
+            chain_log: 14,
             search_log: 0,
             min_match: 5,
-            target_length: 1,
+            target_length: 2,
             search_strength: 7,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
@@ -270,13 +297,13 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         },
         4 => LevelParams {
             strategy: Strategy::DFast,
-            window_log: 23,
-            hash_log: 19,
-            chain_log: 19,
-            search_log: 1,
+            window_log: 24,
+            hash_log: 20,
+            chain_log: 20,
+            search_log: 0,
             min_match: 4,
             target_length: 1,
-            search_strength: 6,
+            search_strength: 8,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
             ldm_params: None,

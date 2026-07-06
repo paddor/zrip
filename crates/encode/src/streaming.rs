@@ -326,6 +326,7 @@ impl<W: Write> FrameEncoder<W> {
                     last,
                     &mut self.block_out,
                     &mut self.workspace,
+                    true,
                 );
             }
         }

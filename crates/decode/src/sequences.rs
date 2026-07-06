@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "alloc")]
+use alloc::boxed::Box;
+
 use crate::BlockDecodeWorkspace;
 use crate::seq_table::SeqTable;
 use zrip_core::bitstream::reader::BitReader;
@@ -12,6 +15,7 @@ use zrip_core::fse::{
     LL_MAX_ACCURACY_LOG, ML_BASELINE_TABLE, ML_BITS_TABLE, ML_DEFAULT_ACCURACY, ML_DEFAULT_DIST,
     ML_MAX_ACCURACY_LOG, OF_DEFAULT_ACCURACY, OF_DEFAULT_DIST, OF_MAX_ACCURACY_LOG,
 };
+use zrip_core::hint::likely;
 
 #[derive(Clone)]
 pub(crate) struct SequenceDecodeTables {
@@ -134,6 +138,12 @@ impl SequenceDecodeTables {
         self.ml_accuracy = ML_DEFAULT_ACCURACY;
         self.ml_set = false;
     }
+
+    pub(crate) fn clear_repeat_flags(&mut self) {
+        self.ll_set = false;
+        self.of_set = false;
+        self.ml_set = false;
+    }
 }
 
 pub(crate) fn parse_sequence_count(data: &[u8]) -> Result<(u32, usize), DecompressError> {
@@ -165,7 +175,7 @@ pub(crate) fn compute_offset(
     literal_length: u32,
     offsets: &mut [u32; 3],
 ) -> u32 {
-    if offset_value > 3 {
+    if likely(offset_value > 3) {
         let offset = offset_value - 3;
         offsets[2] = offsets[1];
         offsets[1] = offsets[0];
@@ -229,6 +239,23 @@ pub(crate) fn parse_sequence_tables_ws(
     let ll_mode = (mode_byte >> 6) & 0x03;
     let of_mode = (mode_byte >> 4) & 0x03;
     let ml_mode = (mode_byte >> 2) & 0x03;
+    let cacheable = ll_mode != 3 && of_mode != 3 && ml_mode != 3;
+
+    if cacheable
+        && let Some(cached) = &ws.seq_table_cache
+        && data.len() >= ws.seq_table_header.len()
+        && data[..ws.seq_table_header.len()] == ws.seq_table_header
+    {
+        if ws.seq_table_cache_tables_current {
+            prev.ll_set = cached.ll_set;
+            prev.of_set = cached.of_set;
+            prev.ml_set = cached.ml_set;
+        } else {
+            prev.clone_from(cached.as_ref());
+            ws.seq_table_cache_tables_current = true;
+        }
+        return Ok(ws.seq_table_header.len());
+    }
 
     let mut reader = BitReader::new(&data[1..]);
 
@@ -412,5 +439,15 @@ pub(crate) fn parse_sequence_tables_ws(
         }
     }
 
-    Ok(1 + reader.bytes_consumed())
+    let consumed = 1 + reader.bytes_consumed();
+    if cacheable {
+        ws.seq_table_header.clear();
+        ws.seq_table_header.extend_from_slice(&data[..consumed]);
+        ws.seq_table_cache = Some(Box::new(prev.clone()));
+        ws.seq_table_cache_tables_current = true;
+    } else {
+        ws.seq_table_cache_tables_current = false;
+    }
+
+    Ok(consumed)
 }

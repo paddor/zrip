@@ -73,7 +73,32 @@ impl DecompressContext {
     ) -> Result<Cow<'_, [u8]>, DecompressError> {
         self.output.clear();
         let dict_ref = self.dict.as_ref();
-        let mut offset = 0;
+        if input.len() >= 4 {
+            let magic = u32::from_le_bytes([input[0], input[1], input[2], input[3]]);
+            if magic == zrip_core::frame::ZSTD_MAGIC {
+                let consumed = 4 + super::decompress_frame_after_magic(
+                    &input[4..],
+                    &mut self.output,
+                    max_output,
+                    dict_ref,
+                    &mut self.ws,
+                )?;
+                if consumed == input.len() {
+                    return Ok(Cow::Borrowed(&self.output));
+                }
+                return self.decompress_tail(input, consumed, max_output);
+            }
+        }
+        self.decompress_tail(input, 0, max_output)
+    }
+
+    fn decompress_tail(
+        &mut self,
+        input: &[u8],
+        mut offset: usize,
+        max_output: usize,
+    ) -> Result<Cow<'_, [u8]>, DecompressError> {
+        let dict_ref = self.dict.as_ref();
         while offset < input.len() {
             let remaining = &input[offset..];
             if let Some(skip_len) = super::skip_skippable_frame(remaining) {
@@ -89,11 +114,7 @@ impl DecompressContext {
             )?;
             offset += consumed;
         }
-        if self.output.len() >= zrip_core::LARGE_OUTPUT_THRESHOLD {
-            Ok(Cow::Owned(core::mem::take(&mut self.output)))
-        } else {
-            Ok(Cow::Borrowed(&self.output))
-        }
+        Ok(Cow::Borrowed(&self.output))
     }
 
     /// Decompresses one zstd frame whose 4-byte magic number is stored out of band.
@@ -112,11 +133,7 @@ impl DecompressContext {
             self.dict.as_ref(),
             &mut self.ws,
         )?;
-        if self.output.len() >= zrip_core::LARGE_OUTPUT_THRESHOLD {
-            Ok(Cow::Owned(core::mem::take(&mut self.output)))
-        } else {
-            Ok(Cow::Borrowed(&self.output))
-        }
+        Ok(Cow::Borrowed(&self.output))
     }
 
     /// Decompresses one zstd frame without its magic number into `output`.
@@ -167,5 +184,25 @@ mod tests {
             .unwrap();
         assert_eq!(written, 5);
         assert_eq!(output, b"prefixhello");
+    }
+
+    #[test]
+    fn decompress_fast_path_continues_after_first_frame() {
+        fn raw_frame(bytes: &[u8]) -> Vec<u8> {
+            let mut frame = Vec::new();
+            frame.extend_from_slice(&zrip_core::frame::ZSTD_MAGIC.to_le_bytes());
+            frame.push(0x20);
+            frame.push(bytes.len() as u8);
+            push_block_header(&mut frame, true, 0, bytes.len());
+            frame.extend_from_slice(bytes);
+            frame
+        }
+
+        let mut stream = raw_frame(b"hello");
+        stream.extend_from_slice(&raw_frame(b"there"));
+
+        let mut ctx = DecompressContext::new();
+        let output = ctx.decompress(&stream).unwrap();
+        assert_eq!(&*output, b"hellothere");
     }
 }
