@@ -3,11 +3,12 @@
 ## Unsafe boundary
 
 **Decoder:** `exec.rs` and `sequences.rs` are `#![forbid(unsafe_code)]`.
-Unsafe decode primitives (unaligned copies, `Vec::set_len`, `build_pattern_u64`)
-live in `decode/src/fast_vec.rs`, gated by `#[cfg(not(feature = "paranoid"))]`
-with `debug_assert!` guards. SIMD dispatch uses `fearless_simd::dispatch!` in
-`lib.rs` (no manual `unsafe` dispatch calls). No `unsafe` is exposed in the
-public API.
+Unsafe decode support lives in `decode/src/fast_vec.rs` and
+`decode/src/seq_table.rs`: unaligned copies, `Vec::set_len`,
+`build_pattern_u64`, and `MaybeUninit` table reads. These paths are gated by
+`#[cfg(not(feature = "paranoid"))]` with `debug_assert!` guards. SIMD dispatch
+uses `fearless_simd::dispatch!` in `lib.rs` (no manual `unsafe` dispatch calls).
+No `unsafe` is exposed in the public API.
 
 **Encoder:** unsafe is confined to `encode/src/primitives.rs` (16 blocks):
 `get_unchecked`, `read_unaligned`, `set_len`, `count_match_raw`, `prefetch`.

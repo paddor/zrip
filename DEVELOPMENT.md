@@ -59,12 +59,22 @@ MIRIFLAGS="-Zmiri-symbolic-alignment-check -Zmiri-retag-fields -Zmiri-many-seeds
   cargo +nightly miri test --no-default-features --features alloc -- --no-capture
 ```
 
-### Miri decode-path (fast, ~20s)
+### Miri unsafe primitives (bounded, ~10-15m target)
 
-Targeted tests for the unsafe primitives in `fast_vec.rs` and dict decode:
+Targeted tests for the unsafe primitives in `encode/src/primitives.rs` and
+`decode/src/fast_vec.rs`:
 
 ```bash
-cargo +nightly miri test -p zrip-decode fast_vec
+scripts/miri_unsafe_primitives.sh
+```
+
+Set `MIRI_JOBS=6` (the default) to run decode copy shards in parallel. The
+decode copy tests cover the full offset/length matrices. The shards keep the
+wall time bounded by spreading the matrix across multiple Miri processes.
+
+Additional Miri-compatible decode path smoke tests:
+
+```bash
 cargo +nightly miri test -- roundtrip_small_offset roundtrip_rle_like roundtrip_varied_literal
 MIRIFLAGS="-Zmiri-disable-isolation" \
   cargo +nightly miri test -- fuzz_corpus_dict_decode_miri
