@@ -168,9 +168,9 @@ impl HuffmanEncodeTable {
         while pos >= unroll {
             pos -= unroll;
             for j in 0..unroll {
-                let b = primitives::get_unchecked_byte(data, pos + (unroll - 1 - j));
-                let c = primitives::get_unchecked_u16(&self.codes, b as usize) as u64;
-                let n = primitives::get_unchecked_u8_arr(&self.num_bits, b as usize);
+                let b = primitives::byte_at(data, pos + (unroll - 1 - j));
+                let c = primitives::u16_at(&self.codes, b as usize) as u64;
+                let n = primitives::u8_at(&self.num_bits, b as usize);
                 bits |= c << bits_used;
                 bits_used += n;
             }
@@ -180,9 +180,9 @@ impl HuffmanEncodeTable {
         }
         while pos > 0 {
             pos -= 1;
-            let b = primitives::get_unchecked_byte(data, pos);
-            let c = primitives::get_unchecked_u16(&self.codes, b as usize) as u64;
-            let n = primitives::get_unchecked_u8_arr(&self.num_bits, b as usize);
+            let b = primitives::byte_at(data, pos);
+            let c = primitives::u16_at(&self.codes, b as usize) as u64;
+            let n = primitives::u8_at(&self.num_bits, b as usize);
             bits |= c << bits_used;
             bits_used += n;
             if bits_used >= 32 {

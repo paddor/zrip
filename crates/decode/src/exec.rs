@@ -162,8 +162,8 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
 
     let last_seq = num_sequences - 1;
     let mut seq_idx: u32 = 0;
-    let fast_limit = rev_reader.limit_ptr + 16;
-    while seq_idx + 4 <= last_seq && rev_reader.ptr >= fast_limit {
+    let fast_limit = rev_reader.limit_ptr() + 16;
+    while seq_idx + 4 <= last_seq && rev_reader.ptr() >= fast_limit {
         if unlikely(!rev_reader.try_refill_fast()) {
             break;
         }
@@ -188,7 +188,7 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
         decode_and_execute_update_fast!(rev_reader);
         seq_idx += 1;
     }
-    while seq_idx + 2 <= last_seq && rev_reader.ptr >= fast_limit {
+    while seq_idx + 2 <= last_seq && rev_reader.ptr() >= fast_limit {
         if unlikely(!rev_reader.try_refill_fast()) {
             break;
         }
@@ -201,7 +201,7 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
         decode_and_execute_update_fast!(rev_reader);
         seq_idx += 1;
     }
-    while seq_idx < last_seq && rev_reader.ptr >= fast_limit {
+    while seq_idx < last_seq && rev_reader.ptr() >= fast_limit {
         if unlikely(!rev_reader.try_refill_fast()) {
             break;
         }

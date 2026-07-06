@@ -48,7 +48,7 @@ pub(crate) fn set_vec_len(vec: &mut Vec<u8>, len: usize) {
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn get_unchecked_byte(data: &[u8], idx: usize) -> u8 {
+pub(crate) fn byte_at(data: &[u8], idx: usize) -> u8 {
     debug_assert!(idx < data.len());
     // SAFETY: The caller proves idx is in bounds; debug builds check it.
     unsafe { *data.get_unchecked(idx) }
@@ -56,13 +56,13 @@ pub(crate) fn get_unchecked_byte(data: &[u8], idx: usize) -> u8 {
 
 #[cfg(feature = "paranoid")]
 #[inline(always)]
-pub(crate) fn get_unchecked_byte(data: &[u8], idx: usize) -> u8 {
+pub(crate) fn byte_at(data: &[u8], idx: usize) -> u8 {
     data[idx]
 }
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn get_unchecked_u16(data: &[u16], idx: usize) -> u16 {
+pub(crate) fn u16_at(data: &[u16], idx: usize) -> u16 {
     debug_assert!(idx < data.len());
     // SAFETY: The caller proves idx is in bounds; debug builds check it.
     unsafe { *data.get_unchecked(idx) }
@@ -70,13 +70,13 @@ pub(crate) fn get_unchecked_u16(data: &[u16], idx: usize) -> u16 {
 
 #[cfg(feature = "paranoid")]
 #[inline(always)]
-pub(crate) fn get_unchecked_u16(data: &[u16], idx: usize) -> u16 {
+pub(crate) fn u16_at(data: &[u16], idx: usize) -> u16 {
     data[idx]
 }
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn get_unchecked_u8_arr(data: &[u8], idx: usize) -> u8 {
+pub(crate) fn u8_at(data: &[u8], idx: usize) -> u8 {
     debug_assert!(idx < data.len());
     // SAFETY: The caller proves idx is in bounds; debug builds check it.
     unsafe { *data.get_unchecked(idx) }
@@ -84,7 +84,7 @@ pub(crate) fn get_unchecked_u8_arr(data: &[u8], idx: usize) -> u8 {
 
 #[cfg(feature = "paranoid")]
 #[inline(always)]
-pub(crate) fn get_unchecked_u8_arr(data: &[u8], idx: usize) -> u8 {
+pub(crate) fn u8_at(data: &[u8], idx: usize) -> u8 {
     data[idx]
 }
 

@@ -11,11 +11,11 @@ use crate::hint::{likely, unlikely};
 /// a double-shift: `(container << consumed) >> (64 - n)` = 2 ops vs the old model's
 /// 3 ops (shift + mask + subtract).
 pub struct ReverseBitReader<'a> {
-    pub data: &'a [u8],
-    pub container: u64,
-    pub bits_consumed: u32,
-    pub ptr: usize,
-    pub limit_ptr: usize,
+    pub(crate) data: &'a [u8],
+    pub(crate) container: u64,
+    pub(crate) bits_consumed: u32,
+    pub(crate) ptr: usize,
+    pub(crate) limit_ptr: usize,
 }
 
 impl<'a> ReverseBitReader<'a> {
@@ -75,7 +75,7 @@ impl<'a> ReverseBitReader<'a> {
             let mut val = 0u64;
             let avail = self.data.len() - self.ptr;
             for i in 0..avail {
-                val |= (primitives::get_byte_unchecked(self.data, self.ptr + i) as u64) << (i * 8);
+                val |= (primitives::byte_at(self.data, self.ptr + i) as u64) << (i * 8);
             }
             self.container = val;
         }
@@ -132,6 +132,16 @@ impl<'a> ReverseBitReader<'a> {
         if unlikely(!self.try_refill_fast()) {
             self.refill();
         }
+    }
+
+    #[inline]
+    pub fn ptr(&self) -> usize {
+        self.ptr
+    }
+
+    #[inline]
+    pub fn limit_ptr(&self) -> usize {
+        self.limit_ptr
     }
 
     #[inline]

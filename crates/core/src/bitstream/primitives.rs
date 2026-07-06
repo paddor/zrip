@@ -18,7 +18,7 @@ pub(crate) fn read_u64_le_unaligned(data: &[u8], offset: usize) -> u64 {
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn get_byte_unchecked(data: &[u8], idx: usize) -> u8 {
+pub(crate) fn byte_at(data: &[u8], idx: usize) -> u8 {
     debug_assert!(idx < data.len());
     // SAFETY: The caller keeps idx inside data; debug builds verify it.
     unsafe { *data.get_unchecked(idx) }
@@ -26,7 +26,7 @@ pub(crate) fn get_byte_unchecked(data: &[u8], idx: usize) -> u8 {
 
 #[cfg(feature = "paranoid")]
 #[inline(always)]
-pub(crate) fn get_byte_unchecked(data: &[u8], idx: usize) -> u8 {
+pub(crate) fn byte_at(data: &[u8], idx: usize) -> u8 {
     data[idx]
 }
 

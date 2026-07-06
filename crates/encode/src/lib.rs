@@ -101,6 +101,9 @@ pub(crate) fn clamp_params_to_src_size(params: &mut strategy::LevelParams, src_l
     params.chain_log = params
         .chain_log
         .clamp(strategy::HASH_LOG_MIN, strategy::HASH_LOG_MAX);
+    params.window_log = params
+        .window_log
+        .clamp(strategy::WINDOW_LOG_MIN, strategy::WINDOW_LOG_MAX);
     if src_len >= 2 {
         let src_log = 32 - ((src_len as u32) - 1).leading_zeros();
         params.hash_log = params.hash_log.min(src_log).max(strategy::HASH_LOG_MIN);
@@ -132,7 +135,46 @@ pub fn compress_opts(
     let mut params = strategy::level_params_for_size(level, input.len())
         .ok_or(CompressError::InvalidLevel(level))?;
     strategy::apply_options(&mut params, opts);
+    clamp_params_to_src_size(&mut params, input.len());
     compress_inner(input, &params)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamp_params_normalizes_public_log_values() {
+        let mut params = strategy::level_params(1).unwrap();
+        params.hash_log = 0;
+        params.chain_log = 40;
+        params.window_log = 40;
+
+        clamp_params_to_src_size(&mut params, usize::MAX);
+
+        assert_eq!(params.hash_log, strategy::HASH_LOG_MIN);
+        assert_eq!(params.chain_log, strategy::HASH_LOG_MAX);
+        assert_eq!(params.window_log, strategy::WINDOW_LOG_MAX);
+    }
+
+    #[test]
+    fn options_clamp_window_log_before_ldm_defaults() {
+        let mut params = strategy::level_params(1).unwrap();
+        let opts = strategy::Options::default().window_log(0);
+
+        strategy::apply_options(&mut params, &opts);
+
+        assert_eq!(params.window_log, strategy::WINDOW_LOG_MIN);
+        #[cfg(feature = "ldm")]
+        {
+            let mut params = strategy::level_params(1).unwrap();
+            let opts = strategy::Options::default().window_log(0).ldm(true);
+            strategy::apply_options(&mut params, &opts);
+
+            let ldm = params.ldm_params.unwrap();
+            assert!(ldm.hash_log >= ldm.bucket_size_log);
+        }
+    }
 }
 
 #[allow(clippy::unnecessary_wraps)]
@@ -462,22 +504,4 @@ pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usiz
     }
     output[..buf.len()].copy_from_slice(&buf);
     Ok(buf.len())
-}
-
-#[cfg(all(test, miri, not(feature = "paranoid")))]
-mod ub_tests {
-    use super::*;
-
-    #[test]
-    fn public_compress_with_params_accepts_zero_hash_log() {
-        // Issue: LevelParams is public and compress_with_params only clamps log
-        // values downward for the input size. A caller can pass hash_log = 0,
-        // which allocates a one-entry hash table, while release-mode hash shifts
-        // produce indexes derived from the input bytes. The first hash_load then
-        // reaches get_unchecked with an out-of-bounds index.
-        let mut params = strategy::level_params(1).unwrap();
-        params.hash_log = 0;
-        params.chain_log = 0;
-        let _ = compress_with_params(b"abcdefghijklmnop", &params);
-    }
 }

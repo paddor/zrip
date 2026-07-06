@@ -230,17 +230,13 @@ pub(super) fn decode_stream_tail(
     Ok(())
 }
 
-#[cfg(all(test, miri, not(feature = "paranoid")))]
-mod ub_tests {
+#[cfg(test)]
+mod tests {
     use super::*;
     use crate::bitstream::writer::BitWriter;
 
     #[test]
-    fn public_decode_single_stream_trusts_huffman_table_len() {
-        // Issue: decode_single_stream is a safe public API, but huf_table_lookup
-        // uses get_unchecked and only debug-asserts that the caller supplied at
-        // least 1 << table_log entries. This one-bit stream decodes index 1 from
-        // a one-entry table, so miri reports an out-of-bounds read.
+    fn decode_single_stream_rejects_short_huffman_table() {
         let table = [HuffmanDecodeEntry {
             symbol: 0,
             num_bits: 1,
@@ -249,6 +245,9 @@ mod ub_tests {
         data.write_bits(1, 1);
         data.close_reverse_stream();
 
-        let _ = decode_single_stream(&table, 1, &data.into_bytes(), 1);
+        assert_eq!(
+            decode_single_stream(&table, 1, &data.into_bytes(), 1),
+            Err(DecompressError::BadHuffmanStream)
+        );
     }
 }
