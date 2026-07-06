@@ -407,23 +407,6 @@ pub(crate) fn wild_copy_match_single(vec: &mut Vec<u8>, offset: usize, len: usiz
 mod tests {
     use super::*;
 
-    #[cfg(miri)]
-    fn test_lengths(max_len: usize) -> Vec<usize> {
-        let mut lengths = Vec::new();
-        for len in [
-            1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256,
-        ] {
-            if len <= max_len {
-                lengths.push(len);
-            }
-        }
-        if !lengths.contains(&max_len) {
-            lengths.push(max_len);
-        }
-        lengths
-    }
-
-    #[cfg(not(miri))]
     fn test_lengths(max_len: usize) -> Vec<usize> {
         (1..=max_len).collect()
     }
