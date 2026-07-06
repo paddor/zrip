@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(feature = "paranoid", forbid(unsafe_code))]
 
 #[cfg(feature = "alloc")]
 use alloc::vec;
@@ -7,6 +7,38 @@ use alloc::vec::Vec;
 
 use super::primitives;
 use crate::huffman::{MAX_BITS, MAX_SYMBOL_VALUE};
+
+#[cfg(all(feature = "alloc", not(feature = "paranoid")))]
+macro_rules! huf_set_vec_len {
+    ($buf:expr, $len:expr) => {{
+        // SAFETY: Huffman bitstream writers initialize bytes before exposing
+        // them through the Vec length.
+        unsafe { primitives::set_vec_len($buf, $len) }
+    }};
+}
+
+#[cfg(all(feature = "alloc", feature = "paranoid"))]
+macro_rules! huf_set_vec_len {
+    ($buf:expr, $len:expr) => {
+        primitives::set_vec_len($buf, $len)
+    };
+}
+
+#[cfg(all(feature = "alloc", not(feature = "paranoid")))]
+macro_rules! huf_bitstream_flush {
+    ($buf:expr, $pos:expr, $bits:expr) => {{
+        // SAFETY: the Huffman stream reserves enough scratch capacity before
+        // entering the flush loop.
+        unsafe { primitives::bitstream_flush_vec($buf, $pos, $bits) }
+    }};
+}
+
+#[cfg(all(feature = "alloc", feature = "paranoid"))]
+macro_rules! huf_bitstream_flush {
+    ($buf:expr, $pos:expr, $bits:expr) => {
+        primitives::bitstream_flush_vec($buf, $pos, $bits)
+    };
+}
 
 #[derive(Clone)]
 pub struct HuffmanEncodeTable {
@@ -153,10 +185,10 @@ impl HuffmanEncodeTable {
         macro_rules! flush_bits {
             () => {
                 if wpos + 8 > buf.capacity() {
-                    primitives::set_vec_len(buf, wpos);
+                    huf_set_vec_len!(buf, wpos);
                     buf.reserve(64);
                 }
-                primitives::bitstream_flush_vec(buf, wpos, bits);
+                huf_bitstream_flush!(buf, wpos, bits);
                 let nb = (bits_used >> 3) as usize;
                 wpos += nb;
                 bits >>= nb << 3;
@@ -168,9 +200,9 @@ impl HuffmanEncodeTable {
         while pos >= unroll {
             pos -= unroll;
             for j in 0..unroll {
-                let b = primitives::byte_at(data, pos + (unroll - 1 - j));
-                let c = primitives::u16_at(&self.codes, b as usize) as u64;
-                let n = primitives::u8_at(&self.num_bits, b as usize);
+                let b = data[pos + (unroll - 1 - j)];
+                let c = self.codes[b as usize] as u64;
+                let n = self.num_bits[b as usize];
                 bits |= c << bits_used;
                 bits_used += n;
             }
@@ -180,9 +212,9 @@ impl HuffmanEncodeTable {
         }
         while pos > 0 {
             pos -= 1;
-            let b = primitives::byte_at(data, pos);
-            let c = primitives::u16_at(&self.codes, b as usize) as u64;
-            let n = primitives::u8_at(&self.num_bits, b as usize);
+            let b = data[pos];
+            let c = self.codes[b as usize] as u64;
+            let n = self.num_bits[b as usize];
             bits |= c << bits_used;
             bits_used += n;
             if bits_used >= 32 {
@@ -190,7 +222,7 @@ impl HuffmanEncodeTable {
             }
         }
 
-        primitives::set_vec_len(buf, wpos);
+        huf_set_vec_len!(buf, wpos);
         bits |= 1u64 << bits_used;
         bits_used += 1;
         while bits_used > 0 {

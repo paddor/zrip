@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(feature = "paranoid", forbid(unsafe_code))]
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -12,6 +12,54 @@ use zrip_core::fse::{
     OF_DEFAULT_DIST,
 };
 use zrip_core::huffman::encode::HuffmanEncodeTable;
+
+#[cfg(not(feature = "paranoid"))]
+macro_rules! bitstream_flush {
+    ($buf:expr, $pos:expr, $bits:expr) => {{
+        // SAFETY: sequence writers reserve enough scratch capacity before
+        // entering the flush loop and expose only initialized bytes at the end.
+        unsafe { primitives::bitstream_flush($buf, $pos, $bits) }
+    }};
+}
+
+#[cfg(feature = "paranoid")]
+macro_rules! bitstream_flush {
+    ($buf:expr, $pos:expr, $bits:expr) => {
+        primitives::bitstream_flush($buf, $pos, $bits)
+    };
+}
+
+#[cfg(not(feature = "paranoid"))]
+macro_rules! bitstream_write_byte {
+    ($buf:expr, $pos:expr, $val:expr) => {{
+        // SAFETY: sequence writers reserve enough scratch capacity before
+        // writing trailing bytes.
+        unsafe { primitives::bitstream_write_byte($buf, $pos, $val) }
+    }};
+}
+
+#[cfg(feature = "paranoid")]
+macro_rules! bitstream_write_byte {
+    ($buf:expr, $pos:expr, $val:expr) => {
+        primitives::bitstream_write_byte($buf, $pos, $val)
+    };
+}
+
+#[cfg(not(feature = "paranoid"))]
+macro_rules! set_vec_len {
+    ($buf:expr, $len:expr) => {{
+        // SAFETY: all bytes up to len have been initialized by the sequence
+        // bitstream writer.
+        unsafe { primitives::set_vec_len($buf, $len) }
+    }};
+}
+
+#[cfg(feature = "paranoid")]
+macro_rules! set_vec_len {
+    ($buf:expr, $len:expr) => {
+        primitives::set_vec_len($buf, $len)
+    };
+}
 
 #[inline]
 fn write_seq_count(output: &mut Vec<u8>, num_seq: u32) {
@@ -315,12 +363,12 @@ impl FseEncodeTable {
 
     #[inline]
     fn init_state(&self, symbol: u8) -> u32 {
-        let tt = primitives::slice_get_ref(&self.symbol_tt, symbol as usize);
+        let tt = &self.symbol_tt[symbol as usize];
         let nb_bits_out = tt.delta_nb_bits.wrapping_add(1 << 15) >> 16;
         let base_state = (nb_bits_out << 16).wrapping_sub(tt.delta_nb_bits);
         let idx = (base_state >> nb_bits_out) as i32 + tt.delta_find_state;
         debug_assert!(idx >= 0);
-        primitives::slice_get(&self.state_table, idx as usize) as u32
+        self.state_table[idx as usize] as u32
     }
 }
 
@@ -572,19 +620,19 @@ fn pack_sequences_and_literals(
     workspace.packed_seqs.clear();
     workspace.packed_seqs.reserve(n);
 
-    let mut lit_pos = 0usize;
     let mut lit_offset = 0usize;
 
     let mut rep0 = rep_offsets[0];
     let mut rep1 = rep_offsets[1];
     let mut rep2 = rep_offsets[2];
 
-    for (i, seq) in sequences[..n].iter().enumerate() {
+    for seq in &sequences[..n] {
         let ll = seq.literal_length as usize;
         debug_assert!(lit_offset + ll <= src_len);
         if ll != 0 {
-            primitives::copy_literals_fast(src, lit_offset, &mut workspace.lit_buf, lit_pos, ll);
-            lit_pos += ll;
+            workspace
+                .lit_buf
+                .extend_from_slice(&src[lit_offset..lit_offset + ll]);
         }
         lit_offset += ll + seq.match_length as usize;
 
@@ -632,40 +680,33 @@ fn pack_sequences_and_literals(
         let ml_c = ml_code(seq.match_length);
         let of_c = of_code(ov);
 
-        let ll_nb = primitives::slice_get(&LL_BITS_TABLE, ll_c as usize);
-        let ml_nb = primitives::slice_get(&ML_BITS_TABLE, ml_c as usize);
-        let ll_extra =
-            seq.literal_length - primitives::slice_get(&LL_BASELINE_TABLE, ll_c as usize);
-        let ml_extra = seq.match_length - primitives::slice_get(&ML_BASELINE_TABLE, ml_c as usize);
+        let ll_nb = LL_BITS_TABLE[ll_c as usize];
+        let ml_nb = ML_BITS_TABLE[ml_c as usize];
+        let ll_extra = seq.literal_length - LL_BASELINE_TABLE[ll_c as usize];
+        let ml_extra = seq.match_length - ML_BASELINE_TABLE[ml_c as usize];
         let of_extra = ov - (1u32 << of_c);
         let extra_bits = (ll_extra as u64)
             | ((ml_extra as u64) << ll_nb)
             | ((of_extra as u64) << (ll_nb + ml_nb));
         let extra_nbits = ll_nb + ml_nb + of_c;
 
-        primitives::vec_write_at(
-            &mut workspace.packed_seqs,
-            i,
-            PackedSeq {
-                extra_bits,
-                ll_c,
-                ml_c,
-                of_c,
-                extra_nbits,
-            },
-        );
+        workspace.packed_seqs.push(PackedSeq {
+            extra_bits,
+            ll_c,
+            ml_c,
+            of_c,
+            extra_nbits,
+        });
     }
-    primitives::set_vec_len(&mut workspace.packed_seqs, n);
     rep_offsets[0] = rep0;
     rep_offsets[1] = rep1;
     rep_offsets[2] = rep2;
 
     if lit_offset < src_len {
-        let tail = src_len - lit_offset;
-        primitives::copy_literals_fast(src, lit_offset, &mut workspace.lit_buf, lit_pos, tail);
-        lit_pos += tail;
+        workspace
+            .lit_buf
+            .extend_from_slice(&src[lit_offset..src_len]);
     }
-    primitives::set_vec_len(&mut workspace.lit_buf, lit_pos);
 }
 
 fn compute_frequencies(packed: &[PackedSeq]) -> ([u32; 36], [u32; 53], [u32; 32], u64) {
@@ -878,7 +919,7 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     output.push(0x00);
 
     let tables = predefined_tables();
-    let last = primitives::slice_get_ref(packed, n - 1);
+    let last = &packed[n - 1];
 
     let max_out = n * 18 + 16;
     writer_buf.clear();
@@ -900,7 +941,7 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     }
     macro_rules! flush_fast {
         () => {
-            primitives::bitstream_flush(writer_buf, pos, bits);
+            bitstream_flush!(writer_buf, pos, bits);
             let nb = (bits_used >> 3) as usize;
             pos += nb;
             bits >>= (nb << 3) as u64;
@@ -909,19 +950,19 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     }
     macro_rules! encode_transition {
         ($table:expr, $symbol:expr, $state:expr) => {{
-            let tt = primitives::slice_get_ref(&$table.symbol_tt, $symbol as usize);
+            let tt = &$table.symbol_tt[$symbol as usize];
             let nb = (tt.delta_nb_bits.wrapping_add($state)) >> 16;
             add_bits!($state & ((1u32 << nb) - 1), nb);
             let idx = ($state >> nb) as i32 + tt.delta_find_state;
             debug_assert!(idx >= 0);
-            $state = primitives::slice_get(&$table.state_table, idx as usize) as u32;
+            $state = $table.state_table[idx as usize] as u32;
         }};
     }
 
     add_bits!(last.extra_bits, last.extra_nbits);
 
     for k in (0..n - 1).rev() {
-        let p = primitives::slice_get_ref(packed, k);
+        let p = &packed[k];
 
         flush_fast!();
         encode_transition!(tables.of, p.of_c, of_state);
@@ -943,12 +984,12 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
     add_bits!(1u32, 1u8);
     flush_fast!();
     while bits_used > 0 {
-        primitives::bitstream_write_byte(writer_buf, pos, bits as u8);
+        bitstream_write_byte!(writer_buf, pos, bits as u8);
         bits >>= 8;
         bits_used = bits_used.saturating_sub(8);
         pos += 1;
     }
-    primitives::set_vec_len(writer_buf, pos);
+    set_vec_len!(writer_buf, pos);
     output.extend_from_slice(writer_buf);
 }
 
@@ -970,7 +1011,7 @@ fn encode_seq_repeat(
     // Mode byte: repeat (3) for all three streams
     output.push((3 << 6) | (3 << 4) | (3 << 2));
 
-    let last = primitives::slice_get_ref(packed, n - 1);
+    let last = &packed[n - 1];
 
     let max_out = n * 18 + 16;
     writer_buf.clear();
@@ -992,7 +1033,7 @@ fn encode_seq_repeat(
     }
     macro_rules! flush_fast {
         () => {
-            primitives::bitstream_flush(writer_buf, pos, bits);
+            bitstream_flush!(writer_buf, pos, bits);
             let nb = (bits_used >> 3) as usize;
             pos += nb;
             bits >>= (nb << 3) as u64;
@@ -1003,29 +1044,29 @@ fn encode_seq_repeat(
     add_bits!(last.extra_bits, last.extra_nbits);
 
     for k in (0..n - 1).rev() {
-        let p = primitives::slice_get_ref(packed, k);
+        let p = &packed[k];
 
         flush_fast!();
         {
-            let tt = primitives::slice_get_ref(&of_t.symbol_tt, p.of_c as usize);
+            let tt = &of_t.symbol_tt[p.of_c as usize];
             let nb = (tt.delta_nb_bits.wrapping_add(of_s)) >> 16;
             add_bits!(of_s & ((1u32 << nb) - 1), nb);
             let idx = (of_s >> nb) as i32 + tt.delta_find_state;
-            of_s = primitives::slice_get(&of_t.state_table, idx as usize) as u32;
+            of_s = of_t.state_table[idx as usize] as u32;
         }
         {
-            let tt = primitives::slice_get_ref(&ml_t.symbol_tt, p.ml_c as usize);
+            let tt = &ml_t.symbol_tt[p.ml_c as usize];
             let nb = (tt.delta_nb_bits.wrapping_add(ml_s)) >> 16;
             add_bits!(ml_s & ((1u32 << nb) - 1), nb);
             let idx = (ml_s >> nb) as i32 + tt.delta_find_state;
-            ml_s = primitives::slice_get(&ml_t.state_table, idx as usize) as u32;
+            ml_s = ml_t.state_table[idx as usize] as u32;
         }
         {
-            let tt = primitives::slice_get_ref(&ll_t.symbol_tt, p.ll_c as usize);
+            let tt = &ll_t.symbol_tt[p.ll_c as usize];
             let nb = (tt.delta_nb_bits.wrapping_add(ll_s)) >> 16;
             add_bits!(ll_s & ((1u32 << nb) - 1), nb);
             let idx = (ll_s >> nb) as i32 + tt.delta_find_state;
-            ll_s = primitives::slice_get(&ll_t.state_table, idx as usize) as u32;
+            ll_s = ll_t.state_table[idx as usize] as u32;
         }
         flush_fast!();
 
@@ -1040,12 +1081,12 @@ fn encode_seq_repeat(
     add_bits!(1u32, 1u8);
     flush_fast!();
     while bits_used > 0 {
-        primitives::bitstream_write_byte(writer_buf, pos, bits as u8);
+        bitstream_write_byte!(writer_buf, pos, bits as u8);
         bits >>= 8;
         bits_used = bits_used.saturating_sub(8);
         pos += 1;
     }
-    primitives::set_vec_len(writer_buf, pos);
+    set_vec_len!(writer_buf, pos);
     output.extend_from_slice(writer_buf);
 }
 
@@ -1325,7 +1366,7 @@ fn encode_seq_custom(
     }
     macro_rules! flush_fast {
         () => {
-            primitives::bitstream_flush(writer_buf, pos, bits);
+            bitstream_flush!(writer_buf, pos, bits);
             let nb = (bits_used >> 3) as usize;
             pos += nb;
             bits >>= (nb << 3) as u64;
@@ -1345,29 +1386,29 @@ fn encode_seq_custom(
             let mut ml_s = ml_t.init_state(last.ml_c);
 
             for k in (0..n - 1).rev() {
-                let p = primitives::slice_get_ref(packed, k);
+                let p = &packed[k];
 
                 flush_fast!();
                 {
-                    let tt = primitives::slice_get_ref(&of_t.symbol_tt, p.of_c as usize);
+                    let tt = &of_t.symbol_tt[p.of_c as usize];
                     let nb = (tt.delta_nb_bits.wrapping_add(of_s)) >> 16;
                     add_bits!(of_s & ((1u32 << nb) - 1), nb);
                     let idx = (of_s >> nb) as i32 + tt.delta_find_state;
-                    of_s = primitives::slice_get(&of_t.state_table, idx as usize) as u32;
+                    of_s = of_t.state_table[idx as usize] as u32;
                 }
                 {
-                    let tt = primitives::slice_get_ref(&ml_t.symbol_tt, p.ml_c as usize);
+                    let tt = &ml_t.symbol_tt[p.ml_c as usize];
                     let nb = (tt.delta_nb_bits.wrapping_add(ml_s)) >> 16;
                     add_bits!(ml_s & ((1u32 << nb) - 1), nb);
                     let idx = (ml_s >> nb) as i32 + tt.delta_find_state;
-                    ml_s = primitives::slice_get(&ml_t.state_table, idx as usize) as u32;
+                    ml_s = ml_t.state_table[idx as usize] as u32;
                 }
                 {
-                    let tt = primitives::slice_get_ref(&ll_t.symbol_tt, p.ll_c as usize);
+                    let tt = &ll_t.symbol_tt[p.ll_c as usize];
                     let nb = (tt.delta_nb_bits.wrapping_add(ll_s)) >> 16;
                     add_bits!(ll_s & ((1u32 << nb) - 1), nb);
                     let idx = (ll_s >> nb) as i32 + tt.delta_find_state;
-                    ll_s = primitives::slice_get(&ll_t.state_table, idx as usize) as u32;
+                    ll_s = ll_t.state_table[idx as usize] as u32;
                 }
                 flush_fast!();
 
@@ -1400,11 +1441,11 @@ fn encode_seq_custom(
             macro_rules! encode_transition_opt {
                 ($table:expr, $state:expr, $symbol:expr) => {
                     if let (Some(t), Some(s)) = (&$table, &mut $state) {
-                        let tt = primitives::slice_get_ref(&t.symbol_tt, $symbol as usize);
+                        let tt = &t.symbol_tt[$symbol as usize];
                         let nb = (tt.delta_nb_bits.wrapping_add(*s)) >> 16;
                         add_bits!(*s & ((1u32 << nb) - 1), nb);
                         let idx = (*s >> nb) as i32 + tt.delta_find_state;
-                        *s = primitives::slice_get(&t.state_table, idx as usize) as u32;
+                        *s = t.state_table[idx as usize] as u32;
                     }
                 };
             }
@@ -1437,12 +1478,12 @@ fn encode_seq_custom(
     add_bits!(1u32, 1u8);
     flush_fast!();
     while bits_used > 0 {
-        primitives::bitstream_write_byte(writer_buf, pos, bits as u8);
+        bitstream_write_byte!(writer_buf, pos, bits as u8);
         bits >>= 8;
         bits_used = bits_used.saturating_sub(8);
         pos += 1;
     }
-    primitives::set_vec_len(writer_buf, pos);
+    set_vec_len!(writer_buf, pos);
     output.extend_from_slice(writer_buf);
 
     true

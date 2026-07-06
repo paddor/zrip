@@ -131,8 +131,8 @@ mod tests {
     #[should_panic(expected = "bit count must be <= 25")]
     fn write_bits_rejects_large_public_bit_count() {
         // Regression: `write_bits` is a safe public API, so violating its
-        // maximum bit-count contract must stop before the unsafe flush path can
-        // expose uninitialized bytes via `set_len`.
+        // maximum bit-count contract must stop before the flush path shifts by
+        // an invalid amount.
         let mut writer = BitWriter::new();
         writer.write_bits(0, 255);
     }

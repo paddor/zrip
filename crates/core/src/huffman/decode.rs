@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(feature = "paranoid", forbid(unsafe_code))]
 
 #[cfg(feature = "alloc")]
 use alloc::vec;
@@ -9,6 +9,15 @@ use super::primitives;
 use crate::bitstream::reader_reverse::ReverseBitReader;
 use crate::error::DecompressError;
 use crate::huffman::{HuffmanDecodeEntry, MAX_TABLE_LOG};
+
+#[cfg(not(feature = "paranoid"))]
+macro_rules! huf_set_vec_len {
+    ($buf:expr, $len:expr) => {{
+        // SAFETY: decode_stream_tail writes every byte in the resized output
+        // before callers can observe it.
+        unsafe { primitives::set_vec_len($buf, $len) }
+    }};
+}
 
 pub fn decode_single_stream(
     table: &[HuffmanDecodeEntry],
@@ -168,7 +177,7 @@ fn decode_4_streams_core_safe(
 fn prepare_output(output: &mut Vec<u8>, output_size: usize) {
     output.clear();
     output.reserve(output_size);
-    primitives::set_vec_len(output, output_size);
+    huf_set_vec_len!(output, output_size);
 }
 
 #[cfg(feature = "paranoid")]

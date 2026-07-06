@@ -3,9 +3,10 @@ use alloc::vec::Vec;
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn rd32(src: &[u8], pos: usize) -> u32 {
+pub(crate) unsafe fn rd32(src: &[u8], pos: usize) -> u32 {
     debug_assert!(pos + 4 <= src.len());
-    // SAFETY: pos..pos+4 is inside src; read_unaligned permits any alignment.
+    // SAFETY: The caller guarantees pos..pos+4 is inside src. read_unaligned
+    // permits any byte alignment.
     unsafe { (src.as_ptr().add(pos) as *const u32).read_unaligned() }
 }
 
@@ -17,9 +18,10 @@ pub(crate) fn rd32(src: &[u8], pos: usize) -> u32 {
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn rd64(src: &[u8], pos: usize) -> u64 {
+pub(crate) unsafe fn rd64(src: &[u8], pos: usize) -> u64 {
     debug_assert!(pos + 8 <= src.len());
-    // SAFETY: pos..pos+8 is inside src; read_unaligned permits any alignment.
+    // SAFETY: The caller guarantees pos..pos+8 is inside src. read_unaligned
+    // permits any byte alignment.
     unsafe { (src.as_ptr().add(pos) as *const u64).read_unaligned() }
 }
 
@@ -31,23 +33,9 @@ pub(crate) fn rd64(src: &[u8], pos: usize) -> u64 {
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn src_byte(src: &[u8], pos: usize) -> u8 {
-    debug_assert!(pos < src.len());
-    // SAFETY: The match finder keeps pos in bounds; debug builds verify it.
-    unsafe { *src.get_unchecked(pos) }
-}
-
-#[cfg(feature = "paranoid")]
-#[inline(always)]
-pub(crate) fn src_byte(src: &[u8], pos: usize) -> u8 {
-    src[pos]
-}
-
-#[cfg(not(feature = "paranoid"))]
-#[inline(always)]
-pub(crate) fn hash_load(table: &[u32], idx: usize) -> u32 {
+pub(crate) unsafe fn hash_load(table: &[u32], idx: usize) -> u32 {
     debug_assert!(idx < table.len());
-    // SAFETY: The hash index is masked/sized to table bounds by the caller.
+    // SAFETY: The caller guarantees idx is in bounds.
     unsafe { *table.get_unchecked(idx) }
 }
 
@@ -59,9 +47,9 @@ pub(crate) fn hash_load(table: &[u32], idx: usize) -> u32 {
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn hash_store(table: &mut [u32], idx: usize, val: u32) {
+pub(crate) unsafe fn hash_store(table: &mut [u32], idx: usize, val: u32) {
     debug_assert!(idx < table.len());
-    // SAFETY: The hash index is masked/sized to table bounds by the caller.
+    // SAFETY: The caller guarantees idx is in bounds.
     unsafe { *table.get_unchecked_mut(idx) = val }
 }
 
@@ -71,6 +59,24 @@ pub(crate) fn hash_store(table: &mut [u32], idx: usize, val: u32) {
     table[idx] = val;
 }
 
+#[cfg(not(feature = "paranoid"))]
+#[inline(always)]
+pub(crate) unsafe fn match_at<const MLS: usize>(src: &[u8], a: usize, b: usize) -> bool {
+    if MLS >= 7 {
+        // SAFETY: The caller guarantees both reads are in bounds.
+        unsafe { rd64(src, a) == rd64(src, b) }
+    } else if MLS >= 5 {
+        // SAFETY: The caller guarantees both reads are in bounds.
+        let va = unsafe { rd64(src, a) };
+        let vb = unsafe { rd64(src, b) };
+        ((va ^ vb) << (64 - 8 * MLS)) == 0
+    } else {
+        // SAFETY: The caller guarantees both reads are in bounds.
+        unsafe { rd32(src, a) == rd32(src, b) }
+    }
+}
+
+#[cfg(feature = "paranoid")]
 #[inline(always)]
 pub(crate) fn match_at<const MLS: usize>(src: &[u8], a: usize, b: usize) -> bool {
     if MLS >= 7 {
@@ -86,7 +92,7 @@ pub(crate) fn match_at<const MLS: usize>(src: &[u8], a: usize, b: usize) -> bool
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn count_match(src: &[u8], p1: usize, p2: usize, limit: usize) -> usize {
+pub(crate) unsafe fn count_match(src: &[u8], p1: usize, p2: usize, limit: usize) -> usize {
     debug_assert!(p1 <= limit && limit <= src.len());
     debug_assert!(p2 < p1, "match position must be behind cursor");
     debug_assert!(p2 < src.len());
@@ -180,115 +186,47 @@ fn cold_rep_panic(r0: u32, r1: u32) -> ! {
 #[cfg(all(target_arch = "x86_64", not(miri), not(feature = "paranoid")))]
 #[inline(always)]
 pub(crate) fn prefetch_ht(table: &[u32], idx: usize) {
-    debug_assert!(idx < table.len());
-    // SAFETY: The hash-table index is in bounds. Prefetch is only a cache hint
-    // and does not dereference the pointer architecturally.
-    unsafe {
-        core::arch::x86_64::_mm_prefetch(
-            table.as_ptr().add(idx) as *const i8,
-            core::arch::x86_64::_MM_HINT_T0,
-        );
+    if let Some(slot) = table.get(idx) {
+        // SAFETY: slot comes from a valid shared reference. Prefetch is only a
+        // cache hint and does not mutate through the pointer.
+        unsafe {
+            core::arch::x86_64::_mm_prefetch(
+                core::ptr::from_ref(slot).cast::<i8>(),
+                core::arch::x86_64::_MM_HINT_T0,
+            );
+        }
     }
 }
 
 #[cfg(all(target_arch = "aarch64", not(miri), not(feature = "paranoid")))]
 #[inline(always)]
 pub(crate) fn prefetch_ht(table: &[u32], idx: usize) {
-    debug_assert!(idx < table.len());
-    // SAFETY: The hash-table index is in bounds, and the inline assembly emits
-    // only an AArch64 prefetch hint for that address.
-    unsafe {
-        let ptr = table.as_ptr().add(idx) as *const u8;
-        core::arch::asm!("prfm pldl1keep, [{x}]", x = in(reg) ptr, options(nostack, preserves_flags));
+    if let Some(slot) = table.get(idx) {
+        // SAFETY: slot comes from a valid shared reference, and the inline
+        // assembly emits only an AArch64 prefetch hint for that address.
+        unsafe {
+            let ptr = core::ptr::from_ref(slot).cast::<u8>();
+            core::arch::asm!("prfm pldl1keep, [{x}]", x = in(reg) ptr, options(nostack, preserves_flags));
+        }
     }
 }
 
-#[cfg(all(
-    any(miri, feature = "paranoid"),
-    any(target_arch = "x86_64", target_arch = "aarch64")
+#[cfg(any(
+    all(
+        any(miri, feature = "paranoid"),
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ),
+    not(any(target_arch = "x86_64", target_arch = "aarch64"))
 ))]
 #[inline(always)]
 pub(crate) fn prefetch_ht(_table: &[u32], _idx: usize) {}
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn slice_get<T: Copy>(slice: &[T], idx: usize) -> T {
-    debug_assert!(idx < slice.len());
-    // SAFETY: The caller proves idx is in bounds; debug builds verify it.
-    unsafe { *slice.get_unchecked(idx) }
-}
-
-#[cfg(feature = "paranoid")]
-#[inline(always)]
-pub(crate) fn slice_get<T: Copy>(slice: &[T], idx: usize) -> T {
-    slice[idx]
-}
-
-#[cfg(not(feature = "paranoid"))]
-#[inline(always)]
-pub(crate) fn slice_get_ref<T>(slice: &[T], idx: usize) -> &T {
-    debug_assert!(idx < slice.len());
-    // SAFETY: The caller proves idx is in bounds; debug builds verify it.
-    unsafe { slice.get_unchecked(idx) }
-}
-
-#[cfg(feature = "paranoid")]
-#[inline(always)]
-pub(crate) fn slice_get_ref<T>(slice: &[T], idx: usize) -> &T {
-    &slice[idx]
-}
-
-#[cfg(not(feature = "paranoid"))]
-#[inline(always)]
-pub(crate) fn copy_literals_fast(
-    src: &[u8],
-    src_off: usize,
-    dst: &mut Vec<u8>,
-    dst_off: usize,
-    len: usize,
-) {
-    debug_assert!(src_off + len <= src.len());
-    debug_assert!(dst_off + len <= dst.capacity());
-    debug_assert!(
-        len > 16 || dst_off + 16 <= dst.capacity(),
-        "copy_literals_fast requires 16 bytes of dst headroom for short copies"
-    );
-    // SAFETY: Source and destination ranges are checked above. The short-copy
-    // path has explicit 16-byte headroom; the fallback copies exactly len bytes.
-    unsafe {
-        let s = src.as_ptr().add(src_off);
-        let d = dst.as_mut_ptr().add(dst_off);
-        if len <= 16 && src_off + 16 <= src.len() {
-            (d as *mut u64).write_unaligned((s as *const u64).read_unaligned());
-            (d.add(8) as *mut u64).write_unaligned((s.add(8) as *const u64).read_unaligned());
-        } else {
-            core::ptr::copy_nonoverlapping(s, d, len);
-        }
-    }
-}
-
-#[cfg(feature = "paranoid")]
-#[inline(always)]
-pub(crate) fn copy_literals_fast(
-    src: &[u8],
-    src_off: usize,
-    dst: &mut Vec<u8>,
-    dst_off: usize,
-    len: usize,
-) {
-    let needed = dst_off + len;
-    if dst.len() < needed {
-        dst.resize(needed, 0);
-    }
-    dst[dst_off..dst_off + len].copy_from_slice(&src[src_off..src_off + len]);
-}
-
-#[cfg(not(feature = "paranoid"))]
-#[inline(always)]
-pub(crate) fn bitstream_flush(buf: &mut Vec<u8>, pos: usize, bits: u64) {
+pub(crate) unsafe fn bitstream_flush(buf: &mut Vec<u8>, pos: usize, bits: u64) {
     debug_assert!(pos + 8 <= buf.capacity());
-    // SAFETY: The bitstream writer reserves pos+8 capacity before flushing.
-    // The write initializes bytes that will later be exposed.
+    // SAFETY: The caller reserves pos+8 capacity before flushing. The write
+    // initializes bytes that will later be exposed.
     unsafe {
         (buf.as_mut_ptr().add(pos) as *mut u64).write_unaligned(bits.to_le());
     }
@@ -306,9 +244,9 @@ pub(crate) fn bitstream_flush(buf: &mut Vec<u8>, pos: usize, bits: u64) {
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn bitstream_write_byte(buf: &mut Vec<u8>, pos: usize, val: u8) {
+pub(crate) unsafe fn bitstream_write_byte(buf: &mut Vec<u8>, pos: usize, val: u8) {
     debug_assert!(pos < buf.capacity());
-    // SAFETY: The bitstream writer reserves pos+1 capacity before this write.
+    // SAFETY: The caller reserves pos+1 capacity before this write.
     unsafe { *buf.as_mut_ptr().add(pos) = val }
 }
 
@@ -323,55 +261,48 @@ pub(crate) fn bitstream_write_byte(buf: &mut Vec<u8>, pos: usize, val: u8) {
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn vec_write_at<T>(vec: &mut Vec<T>, idx: usize, val: T) {
-    debug_assert!(idx < vec.capacity());
-    // SAFETY: The caller reserves idx+1 capacity and treats this slot as
-    // uninitialized until set_vec_len exposes it.
-    unsafe { vec.as_mut_ptr().add(idx).write(val) }
-}
-
-#[cfg(feature = "paranoid")]
-#[inline(always)]
-pub(crate) fn vec_write_at<T: Default + Clone>(vec: &mut Vec<T>, idx: usize, val: T) {
-    if vec.len() <= idx {
-        vec.resize(idx + 1, T::default());
-    }
-    vec[idx] = val;
-}
-
-#[cfg(not(feature = "paranoid"))]
-#[inline(always)]
-pub(crate) fn set_vec_len<T>(vec: &mut Vec<T>, len: usize) {
+pub(crate) unsafe fn set_vec_len(vec: &mut Vec<u8>, len: usize) {
     debug_assert!(len <= vec.capacity());
-    // SAFETY: Callers only expose elements that have already been initialized.
+    // SAFETY: Callers only expose bytes that have already been initialized.
     unsafe { vec.set_len(len) }
 }
 
 #[cfg(feature = "paranoid")]
 #[inline(always)]
-pub(crate) fn set_vec_len<T: Default + Clone>(vec: &mut Vec<T>, len: usize) {
-    vec.resize(len, T::default());
+pub(crate) fn set_vec_len(vec: &mut Vec<u8>, len: usize) {
+    vec.resize(len, 0);
 }
 
 #[cfg(test)]
 mod tests {
     use super::count_match;
 
+    #[cfg(not(feature = "paranoid"))]
+    fn test_count_match(src: &[u8], p1: usize, p2: usize, limit: usize) -> usize {
+        // SAFETY: test cases pass in-bounds positions with p2 behind p1.
+        unsafe { count_match(src, p1, p2, limit) }
+    }
+
+    #[cfg(feature = "paranoid")]
+    fn test_count_match(src: &[u8], p1: usize, p2: usize, limit: usize) -> usize {
+        count_match(src, p1, p2, limit)
+    }
+
     #[test]
     fn count_match_handles_short_limits() {
         let src = b"abcdabcx";
 
-        assert_eq!(count_match(src, 4, 0, 4), 0);
-        assert_eq!(count_match(src, 4, 0, 5), 1);
-        assert_eq!(count_match(src, 4, 0, 7), 3);
-        assert_eq!(count_match(src, 4, 0, 8), 3);
+        assert_eq!(test_count_match(src, 4, 0, 4), 0);
+        assert_eq!(test_count_match(src, 4, 0, 5), 1);
+        assert_eq!(test_count_match(src, 4, 0, 7), 3);
+        assert_eq!(test_count_match(src, 4, 0, 8), 3);
     }
 
     #[test]
     fn count_match_handles_exact_eight_byte_match() {
         let src = b"abcdefghabcdefghq";
 
-        assert_eq!(count_match(src, 8, 0, 16), 8);
-        assert_eq!(count_match(src, 8, 0, 17), 8);
+        assert_eq!(test_count_match(src, 8, 0, 16), 8);
+        assert_eq!(test_count_match(src, 8, 0, 17), 8);
     }
 }

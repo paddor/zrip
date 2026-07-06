@@ -6,10 +6,7 @@ use super::HuffmanDecodeEntry;
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 pub(crate) fn huf_table_lookup(table: &[HuffmanDecodeEntry], idx: usize) -> HuffmanDecodeEntry {
-    debug_assert!(idx < table.len());
-    // SAFETY: Huffman decode state bounds idx to the decode table; debug builds
-    // verify the invariant at this leaf.
-    unsafe { *table.get_unchecked(idx) }
+    table[idx]
 }
 
 #[cfg(feature = "paranoid")]
@@ -21,9 +18,7 @@ pub(crate) fn huf_table_lookup(table: &[HuffmanDecodeEntry], idx: usize) -> Huff
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 pub(crate) fn huf_output_write(output: &mut [u8], pos: usize, val: u8) {
-    debug_assert!(pos < output.len());
-    // SAFETY: The decode loop writes each symbol inside the output slice.
-    unsafe { *output.get_unchecked_mut(pos) = val }
+    output[pos] = val;
 }
 
 #[cfg(feature = "paranoid")]
@@ -34,9 +29,9 @@ pub(crate) fn huf_output_write(output: &mut [u8], pos: usize, val: u8) {
 
 #[cfg(all(feature = "alloc", not(feature = "paranoid")))]
 #[inline(always)]
-pub(crate) fn set_vec_len(vec: &mut Vec<u8>, len: usize) {
+pub(crate) unsafe fn set_vec_len(vec: &mut Vec<u8>, len: usize) {
     debug_assert!(len <= vec.capacity());
-    // SAFETY: Huffman builders initialize all bytes before exposing them.
+    // SAFETY: Callers only expose bytes that have already been initialized.
     unsafe { vec.set_len(len) }
 }
 
@@ -46,54 +41,12 @@ pub(crate) fn set_vec_len(vec: &mut Vec<u8>, len: usize) {
     vec.resize(len, 0);
 }
 
-#[cfg(not(feature = "paranoid"))]
-#[inline(always)]
-pub(crate) fn byte_at(data: &[u8], idx: usize) -> u8 {
-    debug_assert!(idx < data.len());
-    // SAFETY: The caller proves idx is in bounds; debug builds check it.
-    unsafe { *data.get_unchecked(idx) }
-}
-
-#[cfg(feature = "paranoid")]
-#[inline(always)]
-pub(crate) fn byte_at(data: &[u8], idx: usize) -> u8 {
-    data[idx]
-}
-
-#[cfg(not(feature = "paranoid"))]
-#[inline(always)]
-pub(crate) fn u16_at(data: &[u16], idx: usize) -> u16 {
-    debug_assert!(idx < data.len());
-    // SAFETY: The caller proves idx is in bounds; debug builds check it.
-    unsafe { *data.get_unchecked(idx) }
-}
-
-#[cfg(feature = "paranoid")]
-#[inline(always)]
-pub(crate) fn u16_at(data: &[u16], idx: usize) -> u16 {
-    data[idx]
-}
-
-#[cfg(not(feature = "paranoid"))]
-#[inline(always)]
-pub(crate) fn u8_at(data: &[u8], idx: usize) -> u8 {
-    debug_assert!(idx < data.len());
-    // SAFETY: The caller proves idx is in bounds; debug builds check it.
-    unsafe { *data.get_unchecked(idx) }
-}
-
-#[cfg(feature = "paranoid")]
-#[inline(always)]
-pub(crate) fn u8_at(data: &[u8], idx: usize) -> u8 {
-    data[idx]
-}
-
 #[cfg(all(feature = "alloc", not(feature = "paranoid")))]
 #[inline(always)]
-pub(crate) fn bitstream_flush_vec(buf: &mut Vec<u8>, pos: usize, bits: u64) {
+pub(crate) unsafe fn bitstream_flush_vec(buf: &mut Vec<u8>, pos: usize, bits: u64) {
     debug_assert!(pos + 8 <= buf.capacity());
-    // SAFETY: The bitstream writer reserves pos+8 capacity before flushing.
-    // The write initializes bytes that will be exposed by set_len.
+    // SAFETY: The caller reserves pos+8 capacity before flushing. The write
+    // initializes bytes that will later be exposed.
     unsafe {
         (buf.as_mut_ptr().add(pos) as *mut u64).write_unaligned(bits.to_le());
     }

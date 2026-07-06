@@ -75,7 +75,7 @@ impl<'a> ReverseBitReader<'a> {
             let mut val = 0u64;
             let avail = self.data.len() - self.ptr;
             for i in 0..avail {
-                val |= (primitives::byte_at(self.data, self.ptr + i) as u64) << (i * 8);
+                val |= (self.data[self.ptr + i] as u64) << (i * 8);
             }
             self.container = val;
         }

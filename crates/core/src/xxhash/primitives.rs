@@ -1,9 +1,10 @@
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 pub(crate) fn read_u32_le(data: &[u8], offset: usize) -> u32 {
-    debug_assert!(offset + 4 <= data.len());
-    // SAFETY: offset..offset+4 is in bounds, and read_unaligned accepts any
-    // alignment.
+    let end = offset.checked_add(4).expect("read offset overflow");
+    assert!(end <= data.len());
+    // SAFETY: The assertion proves offset..offset+4 is inside data, and
+    // read_unaligned accepts any alignment.
     u32::from_le(unsafe { (data.as_ptr().add(offset) as *const u32).read_unaligned() })
 }
 
@@ -16,9 +17,10 @@ pub(crate) fn read_u32_le(data: &[u8], offset: usize) -> u32 {
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 pub(crate) fn read_u64_le(data: &[u8], offset: usize) -> u64 {
-    debug_assert!(offset + 8 <= data.len());
-    // SAFETY: offset..offset+8 is in bounds, and read_unaligned accepts any
-    // alignment.
+    let end = offset.checked_add(8).expect("read offset overflow");
+    assert!(end <= data.len());
+    // SAFETY: The assertion proves offset..offset+8 is inside data, and
+    // read_unaligned accepts any alignment.
     u64::from_le(unsafe { (data.as_ptr().add(offset) as *const u64).read_unaligned() })
 }
 

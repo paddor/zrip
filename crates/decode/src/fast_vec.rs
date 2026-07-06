@@ -3,6 +3,17 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
+#[cfg(not(feature = "paranoid"))]
+#[inline(always)]
+fn assert_headroom(vec: &Vec<u8>, len: usize, headroom: usize) {
+    let needed = vec
+        .len()
+        .checked_add(len)
+        .and_then(|n| n.checked_add(headroom))
+        .expect("decode copy length overflow");
+    assert!(needed <= vec.capacity());
+}
+
 /// 16-byte copy via two u64 load/stores.
 ///
 /// # Safety
@@ -125,8 +136,9 @@ unsafe fn fast_extend_from_ptr(vec: &mut Vec<u8>, sp: *const u8, len: usize) {
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 pub(crate) fn fast_extend_from_slice(vec: &mut Vec<u8>, src: &[u8]) {
-    // SAFETY: src.as_ptr() is readable for src.len() bytes. The decoder reserves
-    // wildcopy headroom before reaching this primitive.
+    assert_headroom(vec, src.len(), 16);
+    // SAFETY: src.as_ptr() is readable for src.len() bytes, and the assertion
+    // above proves the destination has the required headroom.
     unsafe {
         fast_extend_from_ptr(vec, src.as_ptr(), src.len());
     }
@@ -149,11 +161,12 @@ pub(crate) fn fast_extend_from_slice_range(
     if len == 0 {
         return;
     }
-    debug_assert!(start + len <= src.len());
-    // SAFETY: start..start+len is inside src, and the decoder reserves wildcopy
-    // headroom before reaching this primitive.
+    let range = &src[start..start + len];
+    assert_headroom(vec, len, 16);
+    // SAFETY: range.as_ptr() is readable for len bytes, and the assertion above
+    // proves the destination has the required headroom.
     unsafe {
-        fast_extend_from_ptr(vec, src.as_ptr().add(start), len);
+        fast_extend_from_ptr(vec, range.as_ptr(), len);
     }
 }
 
@@ -212,10 +225,10 @@ unsafe fn build_pattern_u64(src: *const u8, offset: usize) -> u64 {
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 pub(crate) fn wild_copy_match(vec: &mut Vec<u8>, offset: usize, len: usize) {
-    debug_assert!(offset > 0 && offset <= vec.len());
-    debug_assert!(vec.len() + len + 16 <= vec.capacity());
-    // SAFETY: The decoder validates offset and reserves enough output headroom
-    // before calling this primitive. Each copy arm handles its overlap pattern.
+    assert!(offset > 0 && offset <= vec.len());
+    assert_headroom(vec, len, 16);
+    // SAFETY: offset is validated above, and reserve ensures enough output
+    // headroom. Each copy arm handles its overlap pattern.
     unsafe {
         let ptr = vec.as_mut_ptr();
         let op = ptr.add(vec.len());
@@ -315,10 +328,10 @@ unsafe fn wild_copy_match_16plus_from_ptr(src: *const u8, op: *mut u8, offset: u
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 pub(crate) fn wild_copy_match_16plus(vec: &mut Vec<u8>, offset: usize, len: usize) {
-    debug_assert!(offset >= 16 && offset <= vec.len());
-    debug_assert!(vec.len() + len + 64 <= vec.capacity());
-    // SAFETY: The decoder validates offset and reserves 64 bytes of wildcopy
-    // headroom before calling this wider-copy variant.
+    assert!(offset >= 16 && offset <= vec.len());
+    assert_headroom(vec, len, 64);
+    // SAFETY: offset is validated above, and reserve ensures the 64 bytes of
+    // wildcopy headroom required by this wider-copy variant.
     unsafe {
         let ptr = vec.as_mut_ptr();
         let op = ptr.add(vec.len());
@@ -360,10 +373,10 @@ pub(crate) fn wild_copy_match_16plus(vec: &mut Vec<u8>, offset: usize, len: usiz
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
 pub(crate) fn wild_copy_match_single(vec: &mut Vec<u8>, offset: usize, len: usize) {
-    debug_assert!(offset > 0 && offset <= vec.len());
-    debug_assert!(vec.len() + len + 64 <= vec.capacity());
-    // SAFETY: The single-sequence path reserves 64 bytes of wildcopy headroom
-    // and validates offset before calling this primitive.
+    assert!(offset > 0 && offset <= vec.len());
+    assert_headroom(vec, len, 64);
+    // SAFETY: offset is validated above, and reserve ensures the 64 bytes of
+    // wildcopy headroom required by this single-sequence variant.
     unsafe {
         let ptr = vec.as_mut_ptr();
         let op = ptr.add(vec.len());

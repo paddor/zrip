@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(feature = "paranoid", forbid(unsafe_code))]
 
 #[cfg(feature = "alloc")]
 use alloc::vec;
@@ -10,6 +10,100 @@ use crate::strategy::LevelParams;
 use zrip_core::Sequence;
 use zrip_core::hash::{PRIME32_1, PRIME64_1};
 use zrip_core::hint::unlikely;
+
+#[cfg(not(feature = "paranoid"))]
+macro_rules! rd32 {
+    ($src:expr, $pos:expr) => {{
+        // SAFETY: fast.rs only calls rd32 at positions guarded by the block
+        // limits or by previously validated match positions.
+        unsafe { primitives::rd32($src, $pos) }
+    }};
+}
+
+#[cfg(feature = "paranoid")]
+macro_rules! rd32 {
+    ($src:expr, $pos:expr) => {
+        primitives::rd32($src, $pos)
+    };
+}
+
+#[cfg(not(feature = "paranoid"))]
+macro_rules! rd64 {
+    ($src:expr, $pos:expr) => {{
+        // SAFETY: fast.rs only calls rd64 at positions guarded by the block
+        // limits or by previously validated match positions.
+        unsafe { primitives::rd64($src, $pos) }
+    }};
+}
+
+#[cfg(feature = "paranoid")]
+macro_rules! rd64 {
+    ($src:expr, $pos:expr) => {
+        primitives::rd64($src, $pos)
+    };
+}
+
+#[cfg(not(feature = "paranoid"))]
+macro_rules! hash_load {
+    ($table:expr, $idx:expr) => {{
+        // SAFETY: hash indexes are produced from table-sized hash logs.
+        unsafe { primitives::hash_load($table, $idx) }
+    }};
+}
+
+#[cfg(feature = "paranoid")]
+macro_rules! hash_load {
+    ($table:expr, $idx:expr) => {
+        primitives::hash_load($table, $idx)
+    };
+}
+
+#[cfg(not(feature = "paranoid"))]
+macro_rules! hash_store {
+    ($table:expr, $idx:expr, $val:expr) => {{
+        // SAFETY: hash indexes are produced from table-sized hash logs.
+        unsafe { primitives::hash_store($table, $idx, $val) }
+    }};
+}
+
+#[cfg(feature = "paranoid")]
+macro_rules! hash_store {
+    ($table:expr, $idx:expr, $val:expr) => {
+        primitives::hash_store($table, $idx, $val)
+    };
+}
+
+#[cfg(not(feature = "paranoid"))]
+macro_rules! count_match {
+    ($src:expr, $p1:expr, $p2:expr, $limit:expr) => {{
+        // SAFETY: all call sites pass positions within the current block with
+        // p2 behind p1 and limit bounded by the block end.
+        unsafe { primitives::count_match($src, $p1, $p2, $limit) }
+    }};
+}
+
+#[cfg(feature = "paranoid")]
+macro_rules! count_match {
+    ($src:expr, $p1:expr, $p2:expr, $limit:expr) => {
+        primitives::count_match($src, $p1, $p2, $limit)
+    };
+}
+
+#[cfg(not(feature = "paranoid"))]
+macro_rules! match_at {
+    ($src:expr, $a:expr, $b:expr, $mls:expr) => {{
+        // SAFETY: match candidates are checked against block bounds before
+        // reaching this comparison.
+        unsafe { primitives::match_at::<$mls>($src, $a, $b) }
+    }};
+}
+
+#[cfg(feature = "paranoid")]
+macro_rules! match_at {
+    ($src:expr, $a:expr, $b:expr, $mls:expr) => {
+        primitives::match_at::<$mls>($src, $a, $b)
+    };
+}
 
 pub(crate) fn compress_fast(
     src: &[u8],
@@ -377,31 +471,27 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
         }
 
         let mut h0 = hash_pos::<HASH_LOG, MLS>(src, ip0, hash_log);
-        let mut match_idx = primitives::hash_load(hash_table, h0) as usize;
+        let mut match_idx = hash_load!(hash_table, h0) as usize;
 
         loop {
             // Write hash for ip0 (before any checks, matching C zstd order)
-            primitives::hash_store(hash_table, h0, ip0 as u32);
+            hash_store!(hash_table, h0, ip0 as u32);
 
             // Rep check at step-ahead position ip2
             if ip2 >= rep1 {
-                let ip2_val = primitives::rd32(src, ip2);
-                let rep_val = primitives::rd32(src, ip2 - rep1);
+                let ip2_val = rd32!(src, ip2);
+                let rep_val = rd32!(src, ip2 - rep1);
                 if ip2_val == rep_val {
                     let fill_pos = ip0;
                     ip0 = ip2;
                     // 1-byte backward extension (C zstd style)
-                    if ip0 > anchor
-                        && primitives::src_byte(src, ip0 - 1)
-                            == primitives::src_byte(src, ip0 - rep1 - 1)
-                    {
+                    if ip0 > anchor && ip0 > rep1 && src[ip0 - 1] == src[ip0 - rep1 - 1] {
                         ip0 -= 1;
                     }
                     let h1 = hash_pos::<HASH_LOG, MLS>(src, ip1, hash_log);
-                    primitives::hash_store(hash_table, h1, ip1 as u32);
+                    hash_store!(hash_table, h1, ip1 as u32);
                     let back = ip2 - ip0;
-                    let mlen =
-                        primitives::count_match(src, ip2 + 4, ip2 - rep1 + 4, block_end) + 4 + back;
+                    let mlen = count_match!(src, ip2 + 4, ip2 - rep1 + 4, block_end) + 4 + back;
                     total_match_bytes += mlen;
                     let lit_len = (ip0 - anchor) as u32;
                     sequences.push(Sequence {
@@ -437,22 +527,20 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
                 && fast_match_at::<MLS>(src, ip0, match_idx)
             {
                 let h1 = hash_pos::<HASH_LOG, MLS>(src, ip1, hash_log);
-                primitives::hash_store(hash_table, h1, ip1 as u32);
+                hash_store!(hash_table, h1, ip1 as u32);
                 let fill_pos = ip0;
                 let mut back = 0usize;
                 while ip0 > anchor + back
                     && match_idx > back + block_start
-                    && primitives::src_byte(src, ip0 - back - 1)
-                        == primitives::src_byte(src, match_idx - back - 1)
+                    && src[ip0 - back - 1] == src[match_idx - back - 1]
                 {
                     back += 1;
                 }
                 let match_start = ip0 - back;
                 let offset = (match_start - (match_idx - back)) as u32;
-                let mlen =
-                    primitives::count_match(src, ip0 + confirm, match_idx + confirm, block_end)
-                        + confirm
-                        + back;
+                let mlen = count_match!(src, ip0 + confirm, match_idx + confirm, block_end)
+                    + confirm
+                    + back;
                 total_match_bytes += mlen;
                 let lit_len = (match_start - anchor) as u32;
                 sequences.push(Sequence {
@@ -485,7 +573,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
 
             // First shift: compute h1 for ip1, reuse as h0
             let h1 = hash_pos::<HASH_LOG, MLS>(src, ip1, hash_log);
-            match_idx = primitives::hash_load(hash_table, h1) as usize;
+            match_idx = hash_load!(hash_table, h1) as usize;
             h0 = h1;
             let h_ip2 = hash_pos::<HASH_LOG, MLS>(src, ip2, hash_log);
             ip0 = ip1;
@@ -496,7 +584,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
             primitives::prefetch_ht(hash_table, h_ip2);
 
             // Write hash for shifted ip0
-            primitives::hash_store(hash_table, h0, ip0 as u32);
+            hash_store!(hash_table, h0, ip0 as u32);
 
             // Second match check at shifted ip0
             if match_idx < ip0
@@ -504,23 +592,21 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
                 && fast_match_at::<MLS>(src, ip0, match_idx)
             {
                 if step_size + ((ip0 - anchor) >> search_strength) <= 4 {
-                    primitives::hash_store(hash_table, h_ip2, ip1 as u32);
+                    hash_store!(hash_table, h_ip2, ip1 as u32);
                 }
                 let fill_pos = ip0;
                 let mut back = 0usize;
                 while ip0 > anchor + back
                     && match_idx > back + block_start
-                    && primitives::src_byte(src, ip0 - back - 1)
-                        == primitives::src_byte(src, match_idx - back - 1)
+                    && src[ip0 - back - 1] == src[match_idx - back - 1]
                 {
                     back += 1;
                 }
                 let match_start = ip0 - back;
                 let offset = (match_start - (match_idx - back)) as u32;
-                let mlen =
-                    primitives::count_match(src, ip0 + confirm, match_idx + confirm, block_end)
-                        + confirm
-                        + back;
+                let mlen = count_match!(src, ip0 + confirm, match_idx + confirm, block_end)
+                    + confirm
+                    + back;
                 total_match_bytes += mlen;
                 let lit_len = (match_start - anchor) as u32;
                 sequences.push(Sequence {
@@ -552,7 +638,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
             }
 
             // Second shift with step gap
-            match_idx = primitives::hash_load(hash_table, h_ip2) as usize;
+            match_idx = hash_load!(hash_table, h_ip2) as usize;
             h0 = h_ip2;
             #[allow(unused_variables)]
             let h_next = hash_pos::<HASH_LOG, MLS>(src, ip2, hash_log);
@@ -601,12 +687,12 @@ fn rep2_match_loop<const HASH_LOG: u32, const MLS: usize>(
         return;
     }
     while *ip <= ilimit && *ip >= *rep2 {
-        let val = primitives::rd32(src, *ip);
-        let rval = primitives::rd32(src, *ip - *rep2);
+        let val = rd32!(src, *ip);
+        let rval = rd32!(src, *ip - *rep2);
         if val != rval {
             break;
         }
-        let rlen = primitives::count_match(src, *ip + 4, *ip - *rep2 + 4, block_end) + 4;
+        let rlen = count_match!(src, *ip + 4, *ip - *rep2 + 4, block_end) + 4;
         core::mem::swap(rep1, rep2);
         insert_hash_mls::<HASH_LOG, MLS>(src, *ip, hash_log, hash_table);
         sequences.push(Sequence {
@@ -633,14 +719,14 @@ pub(crate) fn prefill_hash_table(
     let step = (prefix_len / hash_size).max(1);
     let mut i = 0;
     while i + 4 <= prefix_len {
-        let h = hash4_const::<0>(primitives::rd32(combined, i), hash_log);
-        primitives::hash_store(hash_table, h, i as u32);
+        let h = hash4_const::<0>(rd32!(combined, i), hash_log);
+        hash_store!(hash_table, h, i as u32);
         i += step;
     }
     let tail_start = prefix_len.saturating_sub(64);
     for i in tail_start..prefix_len.saturating_sub(3) {
-        let h = hash4_const::<0>(primitives::rd32(combined, i), hash_log);
-        primitives::hash_store(hash_table, h, i as u32);
+        let h = hash4_const::<0>(rd32!(combined, i), hash_log);
+        hash_store!(hash_table, h, i as u32);
     }
 }
 
@@ -702,11 +788,9 @@ pub(crate) fn compress_fast_attached(
 
     while ip < limit {
         let rep0 = rep[0] as usize;
-        if (rep0 > 0) & (ip >= rep0)
-            && primitives::rd32(combined, ip) == primitives::rd32(combined, ip - rep0)
-        {
+        if (rep0 > 0) & (ip >= rep0) && rd32!(combined, ip) == rd32!(combined, ip - rep0) {
             let clen = combined.len();
-            let mut match_len = primitives::count_match(combined, ip + 4, ip - rep0 + 4, clen) + 4;
+            let mut match_len = count_match!(combined, ip + 4, ip - rep0 + 4, clen) + 4;
             let mut back = 0usize;
             while ip - back > anchor
                 && ip - back > rep0
@@ -742,20 +826,19 @@ pub(crate) fn compress_fast_attached(
         let search_start = ip;
 
         loop {
-            let val = primitives::rd32(combined, ip);
+            let val = rd32!(combined, ip);
 
             let h_input = hash4_const::<0>(val, input_hash_log);
-            let input_match = primitives::hash_load(hash_table, h_input) as usize;
-            primitives::hash_store(hash_table, h_input, ip as u32);
+            let input_match = hash_load!(hash_table, h_input) as usize;
+            hash_store!(hash_table, h_input, ip as u32);
 
             if input_match >= prefix_len
                 && input_match < ip
                 && ip - input_match <= window
-                && val == primitives::rd32(combined, input_match)
+                && val == rd32!(combined, input_match)
             {
                 let clen = combined.len();
-                let mut match_len =
-                    primitives::count_match(combined, ip + 4, input_match + 4, clen) + 4;
+                let mut match_len = count_match!(combined, ip + 4, input_match + 4, clen) + 4;
                 let match_pos = input_match;
                 let mut back = 0usize;
                 while ip - back > anchor
@@ -806,15 +889,14 @@ pub(crate) fn compress_fast_attached(
             }
 
             let h_dict = hash4_const::<0>(val, dict_hash_log);
-            let dict_match = primitives::hash_load(dict_hash, h_dict) as usize;
+            let dict_match = hash_load!(dict_hash, h_dict) as usize;
             if dict_match < prefix_len
                 && ip - dict_match <= window
-                && val == primitives::rd32(combined, dict_match)
+                && val == rd32!(combined, dict_match)
             {
                 let clen = combined.len();
                 let match_pos = dict_match;
-                let mut match_len =
-                    primitives::count_match(combined, ip + 4, match_pos + 4, clen) + 4;
+                let mut match_len = count_match!(combined, ip + 4, match_pos + 4, clen) + 4;
                 let mut back = 0usize;
                 while ip - back > anchor
                     && match_pos > back
@@ -915,11 +997,9 @@ pub(crate) fn compress_fast_with_prefix_reuse(
 
     while ip < limit {
         let rep0 = rep[0] as usize;
-        if (rep0 > 0) & (ip >= rep0)
-            && primitives::rd32(combined, ip) == primitives::rd32(combined, ip - rep0)
-        {
+        if (rep0 > 0) & (ip >= rep0) && rd32!(combined, ip) == rd32!(combined, ip - rep0) {
             let clen = combined.len();
-            let mut match_len = primitives::count_match(combined, ip + 4, ip - rep0 + 4, clen) + 4;
+            let mut match_len = count_match!(combined, ip + 4, ip - rep0 + 4, clen) + 4;
             let mut back = 0usize;
             while ip - back > anchor
                 && ip - back > rep0
@@ -955,21 +1035,18 @@ pub(crate) fn compress_fast_with_prefix_reuse(
         let search_start = ip;
 
         loop {
-            let val = primitives::rd32(combined, ip);
+            let val = rd32!(combined, ip);
             let h = hash4_const::<0>(val, params.hash_log);
 
             // Probe input hash table (read + write)
-            let input_match = primitives::hash_load(hash_table, h) as usize;
-            primitives::hash_store(hash_table, h, ip as u32);
+            let input_match = hash_load!(hash_table, h) as usize;
+            hash_store!(hash_table, h, ip as u32);
 
             // Primary table lookup (prefix + input entries, evolves during matching)
-            if input_match < ip
-                && ip - input_match <= window
-                && val == primitives::rd32(combined, input_match)
+            if input_match < ip && ip - input_match <= window && val == rd32!(combined, input_match)
             {
                 let clen = combined.len();
-                let mut match_len =
-                    primitives::count_match(combined, ip + 4, input_match + 4, clen) + 4;
+                let mut match_len = count_match!(combined, ip + 4, input_match + 4, clen) + 4;
                 let match_pos = input_match;
                 let mut back = 0usize;
                 while ip - back > anchor
@@ -1023,10 +1100,10 @@ pub(crate) fn compress_fast_with_prefix_reuse(
             // to hash collisions. Only for small inputs where every byte
             // matters; on large inputs the extra sequences hurt encoding.
             if use_dict_fallback {
-                let dict_match = primitives::hash_load(dict_hash, h) as usize;
-                if dict_match < plen && val == primitives::rd32(combined, dict_match) {
+                let dict_match = hash_load!(dict_hash, h) as usize;
+                if dict_match < plen && val == rd32!(combined, dict_match) {
                     let clen = combined.len();
-                    let dlen = primitives::count_match(combined, ip + 4, dict_match + 4, clen) + 4;
+                    let dlen = count_match!(combined, ip + 4, dict_match + 4, clen) + 4;
                     if dlen >= 6 {
                         let match_pos = dict_match;
                         let mut match_len = dlen;
@@ -1117,28 +1194,28 @@ fn hash7_const<const HASH_LOG: u32>(value: u64, hash_log: u32) -> usize {
 #[inline(always)]
 fn hash_pos<const HASH_LOG: u32, const MLS: usize>(src: &[u8], pos: usize, hash_log: u32) -> usize {
     if MLS >= 7 {
-        hash7_const::<HASH_LOG>(primitives::rd64(src, pos), hash_log)
+        hash7_const::<HASH_LOG>(rd64!(src, pos), hash_log)
     } else if MLS >= 5 {
-        hash5_const::<HASH_LOG>(primitives::rd64(src, pos), hash_log)
+        hash5_const::<HASH_LOG>(rd64!(src, pos), hash_log)
     } else {
-        hash4_const::<HASH_LOG>(primitives::rd32(src, pos), hash_log)
+        hash4_const::<HASH_LOG>(rd32!(src, pos), hash_log)
     }
 }
 
 #[inline(always)]
 fn fast_match_at<const MLS: usize>(src: &[u8], a: usize, b: usize) -> bool {
     if MLS >= 5 {
-        primitives::match_at::<4>(src, a, b)
+        match_at!(src, a, b, 4)
     } else {
-        primitives::match_at::<MLS>(src, a, b)
+        match_at!(src, a, b, MLS)
     }
 }
 
 #[inline]
 fn insert_hash<const HASH_LOG: u32>(src: &[u8], ip: usize, hash_log: u32, hash_table: &mut [u32]) {
     if ip + 4 <= src.len() {
-        let h = hash4_const::<HASH_LOG>(primitives::rd32(src, ip), hash_log);
-        primitives::hash_store(hash_table, h, ip as u32);
+        let h = hash4_const::<HASH_LOG>(rd32!(src, ip), hash_log);
+        hash_store!(hash_table, h, ip as u32);
     }
 }
 
@@ -1151,7 +1228,7 @@ fn insert_hash_mls<const HASH_LOG: u32, const MLS: usize>(
 ) {
     if ip + MLS <= src.len() {
         let h = hash_pos::<HASH_LOG, MLS>(src, ip, hash_log);
-        primitives::hash_store(hash_table, h, ip as u32);
+        hash_store!(hash_table, h, ip as u32);
     }
 }
 
@@ -1164,14 +1241,14 @@ fn insert_complementary_fast<const HASH_LOG: u32>(
 ) {
     let pos1 = match_start + 2;
     if pos1 + 4 <= src.len() && pos1 < match_end {
-        let h = hash4_const::<HASH_LOG>(primitives::rd32(src, pos1), hash_log);
-        primitives::hash_store(hash_table, h, pos1 as u32);
+        let h = hash4_const::<HASH_LOG>(rd32!(src, pos1), hash_log);
+        hash_store!(hash_table, h, pos1 as u32);
     }
     if match_end >= 2 {
         let pos2 = match_end - 2;
         if pos2 + 4 <= src.len() && pos2 > match_start + 2 {
-            let h = hash4_const::<HASH_LOG>(primitives::rd32(src, pos2), hash_log);
-            primitives::hash_store(hash_table, h, pos2 as u32);
+            let h = hash4_const::<HASH_LOG>(rd32!(src, pos2), hash_log);
+            hash_store!(hash_table, h, pos2 as u32);
         }
     }
 }
@@ -1194,8 +1271,8 @@ fn rep_match_loop_fast<const HASH_LOG: u32>(
             break;
         }
         let r0 = rep[0] as usize;
-        if (r0 > 0) & (*ip >= r0) && primitives::rd32(src, *ip) == primitives::rd32(src, *ip - r0) {
-            let ml = primitives::count_match(src, *ip + 4, *ip - r0 + 4, block_end) + 4;
+        if (r0 > 0) & (*ip >= r0) && rd32!(src, *ip) == rd32!(src, *ip - r0) {
+            let ml = count_match!(src, *ip + 4, *ip - r0 + 4, block_end) + 4;
             sequences.push(Sequence {
                 literal_length: 0,
                 offset: r0 as u32,
@@ -1207,9 +1284,9 @@ fn rep_match_loop_fast<const HASH_LOG: u32>(
             continue;
         }
         let r1 = rep[1] as usize;
-        if (r1 > 0) & (*ip >= r1) && primitives::rd32(src, *ip) == primitives::rd32(src, *ip - r1) {
+        if (r1 > 0) & (*ip >= r1) && rd32!(src, *ip) == rd32!(src, *ip - r1) {
             rep.swap(0, 1);
-            let ml = primitives::count_match(src, *ip + 4, *ip - r1 + 4, block_end) + 4;
+            let ml = count_match!(src, *ip + 4, *ip - r1 + 4, block_end) + 4;
             sequences.push(Sequence {
                 literal_length: 0,
                 offset: r1 as u32,
@@ -1221,5 +1298,30 @@ fn rep_match_loop_fast<const HASH_LOG: u32>(
             continue;
         }
         break;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn step_ahead_rep_at_offset_start_does_not_underflow_back_extension() {
+        let src = b"abababababababab";
+        let params = crate::strategy::level_params_for_size(1, src.len()).unwrap();
+        let mut hash_table = vec![0u32; 1usize << params.hash_log];
+        let mut sequences = Vec::new();
+
+        compress_fast_block(
+            src,
+            0,
+            src.len(),
+            &params,
+            &[2, 4, 8],
+            &mut hash_table,
+            &mut sequences,
+        );
+
+        assert!(!sequences.is_empty());
     }
 }
