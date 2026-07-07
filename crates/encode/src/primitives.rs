@@ -219,6 +219,7 @@ pub(crate) fn prefetch_ht(table: &[u32], idx: usize) {
     not(any(target_arch = "x86_64", target_arch = "aarch64"))
 ))]
 #[inline(always)]
+#[allow(dead_code)]
 pub(crate) fn prefetch_ht(_table: &[u32], _idx: usize) {}
 
 #[cfg(feature = "alloc")]

@@ -29,10 +29,14 @@ GitHub releases. Configuration lives in `release-plz.toml`.
    `## [x.y.z]` section below `## [Unreleased]`. Never modify existing
    versioned sections.
 
-3. **Run any needed release audit.** Use the Miri and fuzz commands below
+3. **Bump the JSR package when publishing WASM.** Update
+   `jsr/deno.json`, rebuild the package with `cd jsr && bash build.sh`, and
+   refresh wasm32 charts if Rust codec performance changed.
+
+4. **Run any needed release audit.** Use the Miri and fuzz commands below
    when the release risk warrants an extended audit.
 
-4. **Merge the release PR.** release-plz tags and publishes to crates.io
+5. **Merge the release PR.** release-plz tags and publishes to crates.io
    automatically.
 
 ## Fuzz

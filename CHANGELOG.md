@@ -11,6 +11,7 @@
 - Added `scripts/overnight_memory_audit.sh`, a pre-release Miri and ASAN fuzz
   audit harness that records per-phase logs and summaries while reusing the
   bounded unsafe-primitives Miri helper.
+- Bumped JSR package `@paddor/zrip` to 0.5.2 for the current Rust codec.
 
 ### Changed
 
@@ -24,7 +25,8 @@
   decode hot path.
 - Kept `paranoid` primitive loads in safe Rust while reducing redundant
   bounds checks with fixed-size slice chunks.
-- Documented the chart refresh workflow and refreshed x86_64 benchmark charts.
+- Documented the chart refresh workflow and refreshed x86_64 and wasm32
+  benchmark charts.
 - Bumped the internal `zrip-core` crate to 0.9.0 for its internal API cleanup;
   `zrip`, `zrip-encode`, and `zrip-decode` remain patch releases.
 
