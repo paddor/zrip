@@ -8,6 +8,9 @@
 
 - Added Miri regression coverage for unsafe-boundary failures and
   adversarial malformed inputs found during the safety audit.
+- Added `scripts/overnight_memory_audit.sh`, a pre-release Miri and ASAN fuzz
+  audit harness that records per-phase logs and summaries while reusing the
+  bounded unsafe-primitives Miri helper.
 
 ### Changed
 

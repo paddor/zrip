@@ -47,53 +47,37 @@ cargo +nightly fuzz run c_compress_zrip_decompress
 
 ## Pre-release Miri + fuzz audit
 
-Before tagging a release, run Miri and all fuzz targets for extended duration.
+Before tagging a release, run the scripted memory audit. It runs:
 
-### Miri (256 seeds)
+- targeted Miri tests for unsafe encode and decode primitives;
+- full alloc-mode Miri with strict flags and 256 seed variations;
+- Miri decode smoke tests, including the dictionary corpus fixture;
+- every fuzz target under AddressSanitizer, with corrupt targets first.
 
-Runs the full test suite under Miri with Stacked Borrows checking, 256 seed
-variations. Takes several hours depending on the number of test binaries.
-
-```bash
-MIRIFLAGS="-Zmiri-symbolic-alignment-check -Zmiri-retag-fields -Zmiri-many-seeds=0..256" \
-  cargo +nightly miri test --no-default-features --features alloc -- --no-capture
-```
-
-### Miri unsafe primitives (bounded, ~10-15m target)
-
-Targeted tests for the unsafe primitives in `encode/src/primitives.rs` and
-`decode/src/fast_vec.rs`:
+For the full release duration, run each fuzz target for 3 hours:
 
 ```bash
-scripts/miri_unsafe_primitives.sh
+FUZZ_SECONDS_PER_TARGET=10800 scripts/overnight_memory_audit.sh
 ```
 
-Set `MIRI_JOBS=6` (the default) to run decode copy shards in parallel. The
-decode copy tests cover the full offset/length matrices. The shards keep the
-wall time bounded by spreading the matrix across multiple Miri processes.
+For an overnight pass, the script defaults to 30 minutes per fuzz target.
+Logs, artifacts, and TSV summaries are written under
+`tmp/overnight-memory-audit/$RUN_ID/`.
 
-Additional Miri-compatible decode path smoke tests:
+The targeted Miri phase delegates to `scripts/miri_unsafe_primitives.sh`,
+which can still be run directly for a bounded unsafe-primitives audit.
+
+Useful controls:
 
 ```bash
-cargo +nightly miri test -- roundtrip_small_offset roundtrip_rle_like roundtrip_varied_literal
-MIRIFLAGS="-Zmiri-disable-isolation" \
-  cargo +nightly miri test -- fuzz_corpus_dict_decode_miri
+SMOKE=1 scripts/overnight_memory_audit.sh          # quick harness check
+CPU_COUNT=8 scripts/overnight_memory_audit.sh      # build/fuzz parallelism
+RUN_FULL_MIRI=0 scripts/overnight_memory_audit.sh  # fuzz + unsafe Miri only
 ```
 
-The dict decode test uses a pre-built fixture (`tests/fixtures/corpus_dict_roundtrip.bin`).
-Regenerate after corpus changes:
+The dict decode test uses a pre-built fixture
+(`tests/fixtures/corpus_dict_roundtrip.bin`). Regenerate after corpus changes:
 `cargo test --features dict_builder -- fuzz_corpus_dict_generate`
-
-### Fuzz all targets (3 hours each, ASAN)
-
-Run every fuzz target with AddressSanitizer for at least 3 hours. Each target
-gets 2 sequential workers (`-jobs=2`).
-
-```bash
-for target in $(ls fuzz/fuzz_targets/*.rs | xargs -I{} basename {} .rs); do
-  cargo +nightly fuzz run "fuzz_${target}" -- -max_total_time=10800 -jobs=2
-done
-```
 
 ### Adversarial corpus
 
