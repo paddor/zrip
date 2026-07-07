@@ -3,32 +3,32 @@
   <text x="350.0" y="22" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">zstd Pipeline @100 MB/s: Corpus geomean, Level 1 (lower is better)</text>
   <text x="350.0" y="38" text-anchor="middle" fill="#7d8590" font-size="10">Intel Core i7-8700B @ 3.20GHz, performance governor, turbo off</text>
   <text x="22" y="180.0" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600" transform="rotate(-90,22,180.0)">seconds / GB</text>
-  <line x1="70" y1="221.9" x2="680" y2="221.9" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="221.9" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">10.0</text>
-  <line x1="70" y1="138.8" x2="680" y2="138.8" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="138.8" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">20.0</text>
-  <line x1="70" y1="55.6" x2="680" y2="55.6" stroke="#21262d" stroke-width="1"/>
-  <text x="62" y="55.6" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">30.0</text>
+  <line x1="70" y1="222.3" x2="680" y2="222.3" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="222.3" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">10.0</text>
+  <line x1="70" y1="139.6" x2="680" y2="139.6" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="139.6" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">20.0</text>
+  <line x1="70" y1="56.9" x2="680" y2="56.9" stroke="#21262d" stroke-width="1"/>
+  <text x="62" y="56.9" text-anchor="end" dominant-baseline="middle" fill="#7d8590" font-size="10">30.0</text>
   <line x1="70" y1="305" x2="680" y2="305" stroke="#30363d" stroke-width="1.5"/>
   <rect x="111.0" y="281.3" width="80.0" height="23.7" fill="#60a5fa" rx="1"/>
-  <rect x="111.0" y="257.7" width="80.0" height="23.6" fill="#4680c4" rx="1"/>
-  <rect x="111.0" y="250.6" width="80.0" height="7.1" fill="#60a5fa" rx="1"/>
+  <rect x="111.0" y="257.9" width="80.0" height="23.4" fill="#4680c4" rx="1"/>
+  <rect x="111.0" y="250.8" width="80.0" height="7.1" fill="#60a5fa" rx="1"/>
   <text x="151.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">C zstd</text>
-  <rect x="223.0" y="273.9" width="80.0" height="31.1" fill="#f87171" rx="1"/>
-  <rect x="223.0" y="247.9" width="80.0" height="26.0" fill="#c45050" rx="1"/>
-  <rect x="223.0" y="235.5" width="80.0" height="12.4" fill="#f87171" rx="1"/>
+  <rect x="223.0" y="267.3" width="80.0" height="37.7" fill="#f87171" rx="1"/>
+  <rect x="223.0" y="241.4" width="80.0" height="25.9" fill="#c45050" rx="1"/>
+  <rect x="223.0" y="227.6" width="80.0" height="13.8" fill="#f87171" rx="1"/>
   <text x="263.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip</text>
-  <rect x="335.0" y="261.8" width="80.0" height="43.2" fill="#f59e0b" rx="1"/>
-  <rect x="335.0" y="238.2" width="80.0" height="23.6" fill="#c47d08" rx="1"/>
-  <rect x="335.0" y="227.5" width="80.0" height="10.8" fill="#f59e0b" rx="1"/>
+  <rect x="335.0" y="261.9" width="80.0" height="43.1" fill="#f59e0b" rx="1"/>
+  <rect x="335.0" y="238.4" width="80.0" height="23.4" fill="#c47d08" rx="1"/>
+  <rect x="335.0" y="227.7" width="80.0" height="10.7" fill="#f59e0b" rx="1"/>
   <text x="375.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">structured-zstd</text>
-  <rect x="447.0" y="252.2" width="80.0" height="52.8" fill="#f472b6" rx="1"/>
-  <rect x="447.0" y="226.2" width="80.0" height="26.0" fill="#c05a92" rx="1"/>
-  <rect x="447.0" y="209.8" width="80.0" height="16.4" fill="#f472b6" rx="1"/>
+  <rect x="447.0" y="251.0" width="80.0" height="54.0" fill="#f472b6" rx="1"/>
+  <rect x="447.0" y="225.1" width="80.0" height="25.9" fill="#c05a92" rx="1"/>
+  <rect x="447.0" y="207.1" width="80.0" height="18.0" fill="#f472b6" rx="1"/>
   <text x="487.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip paranoid</text>
-  <rect x="559.0" y="153.7" width="80.0" height="151.3" fill="#4ade80" rx="1"/>
-  <rect x="559.0" y="122.8" width="80.0" height="30.9" fill="#3aaf60" rx="1"/>
-  <rect x="559.0" y="87.6" width="80.0" height="35.2" fill="#4ade80" rx="1"/>
+  <rect x="559.0" y="153.5" width="80.0" height="151.5" fill="#4ade80" rx="1"/>
+  <rect x="559.0" y="122.8" width="80.0" height="30.7" fill="#3aaf60" rx="1"/>
+  <rect x="559.0" y="87.6" width="80.0" height="35.1" fill="#4ade80" rx="1"/>
   <text x="599.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">ruzstd</text>
   <rect x="130" y="335" width="12" height="12" fill="#60a5fa" rx="2"/>
   <text x="148" y="345" fill="#e6edf3" font-size="10" font-weight="500">libzstd v1.5.7 (C)</text>
