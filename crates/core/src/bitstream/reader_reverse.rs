@@ -116,13 +116,10 @@ impl<'a> ReverseBitReader<'a> {
     pub fn try_refill_fast(&mut self) -> bool {
         let byte_shift = (self.bits_consumed >> 3) as usize;
         if likely(byte_shift <= self.ptr && self.data.len() >= 8) {
-            let new_ptr = self.ptr - byte_shift;
-            if likely(new_ptr <= self.data.len() - 8) {
-                self.ptr = new_ptr;
-                self.bits_consumed -= (byte_shift as u32) * 8;
-                self.container = primitives::read_u64_le_unaligned(self.data, self.ptr);
-                return true;
-            }
+            self.ptr -= byte_shift;
+            self.bits_consumed -= (byte_shift as u32) * 8;
+            self.container = primitives::read_u64_le_unaligned(self.data, self.ptr);
+            return true;
         }
         false
     }

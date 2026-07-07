@@ -13,7 +13,7 @@ pub(crate) unsafe fn rd32(src: &[u8], pos: usize) -> u32 {
 #[cfg(feature = "paranoid")]
 #[inline(always)]
 pub(crate) fn rd32(src: &[u8], pos: usize) -> u32 {
-    u32::from_le_bytes(src[pos..pos + 4].try_into().unwrap())
+    u32::from_le_bytes(*src[pos..].first_chunk::<4>().unwrap())
 }
 
 #[cfg(not(feature = "paranoid"))]
@@ -28,7 +28,7 @@ pub(crate) unsafe fn rd64(src: &[u8], pos: usize) -> u64 {
 #[cfg(feature = "paranoid")]
 #[inline(always)]
 pub(crate) fn rd64(src: &[u8], pos: usize) -> u64 {
-    u64::from_le_bytes(src[pos..pos + 8].try_into().unwrap())
+    u64::from_le_bytes(*src[pos..].first_chunk::<8>().unwrap())
 }
 
 #[cfg(not(feature = "paranoid"))]
@@ -153,8 +153,8 @@ pub(crate) fn count_match(src: &[u8], p1: usize, p2: usize, limit: usize) -> usi
     let max_len = limit - p1;
     let mut i = 0;
     while i + 8 <= max_len {
-        let a = u64::from_le_bytes(src[p1 + i..p1 + i + 8].try_into().unwrap());
-        let b = u64::from_le_bytes(src[p2 + i..p2 + i + 8].try_into().unwrap());
+        let a = u64::from_le_bytes(*src[p1 + i..].first_chunk::<8>().unwrap());
+        let b = u64::from_le_bytes(*src[p2 + i..].first_chunk::<8>().unwrap());
         let diff = a ^ b;
         if diff != 0 {
             return i + (diff.trailing_zeros() >> 3) as usize;

@@ -11,7 +11,7 @@ pub(crate) fn read_u32_le(data: &[u8], offset: usize) -> u32 {
 #[cfg(feature = "paranoid")]
 #[inline(always)]
 pub(crate) fn read_u32_le(data: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+    u32::from_le_bytes(*data[offset..].first_chunk::<4>().unwrap())
 }
 
 #[cfg(not(feature = "paranoid"))]
@@ -27,7 +27,7 @@ pub(crate) fn read_u64_le(data: &[u8], offset: usize) -> u64 {
 #[cfg(feature = "paranoid")]
 #[inline(always)]
 pub(crate) fn read_u64_le(data: &[u8], offset: usize) -> u64 {
-    u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap())
+    u64::from_le_bytes(*data[offset..].first_chunk::<8>().unwrap())
 }
 
 #[cfg(not(feature = "paranoid"))]
@@ -86,7 +86,7 @@ pub(super) fn bulk_rounds(data: &[u8], v1: &mut u64, v2: &mut u64, v3: &mut u64,
 
     #[inline(always)]
     fn rd64(data: &[u8], offset: usize) -> u64 {
-        u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap())
+        u64::from_le_bytes(*data[offset..].first_chunk::<8>().unwrap())
     }
 
     let bulk_end = len & !31;
