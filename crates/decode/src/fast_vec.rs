@@ -3,15 +3,253 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-#[cfg(not(feature = "paranoid"))]
-#[inline(always)]
-fn assert_headroom(vec: &Vec<u8>, len: usize, headroom: usize) {
-    let needed = vec
-        .len()
-        .checked_add(len)
-        .and_then(|n| n.checked_add(headroom))
-        .expect("decode copy length overflow");
-    assert!(needed <= vec.capacity());
+use zrip_core::error::DecompressError;
+use zrip_core::hint::unlikely;
+
+const WILDCOPY_OVERLENGTH: usize = 64;
+
+pub(crate) struct BlockOutput<'a> {
+    vec: &'a mut Vec<u8>,
+    block_limit: usize,
+}
+
+pub(crate) struct SequenceOutput<'block, 'vec> {
+    output: &'block mut BlockOutput<'vec>,
+    literal_len: usize,
+    match_len: usize,
+}
+
+impl<'a> BlockOutput<'a> {
+    #[inline(always)]
+    pub(crate) fn new(vec: &'a mut Vec<u8>, max_block_size: usize) -> Self {
+        vec.reserve(max_block_size + WILDCOPY_OVERLENGTH);
+        let block_limit = vec.len() + max_block_size;
+        Self { vec, block_limit }
+    }
+
+    #[inline(always)]
+    pub(crate) fn len(&self) -> usize {
+        self.vec.len()
+    }
+
+    #[inline(always)]
+    pub(crate) fn begin_sequence(
+        &mut self,
+        literal_len: usize,
+        match_len: usize,
+    ) -> Result<SequenceOutput<'_, 'a>, DecompressError> {
+        debug_assert!(self.vec.len() <= self.block_limit);
+        let remaining = self.block_limit - self.vec.len();
+        if unlikely(literal_len > remaining || match_len > remaining - literal_len) {
+            return Err(DecompressError::CorruptSequences);
+        }
+        Ok(SequenceOutput {
+            output: self,
+            literal_len,
+            match_len,
+        })
+    }
+
+    #[inline(always)]
+    fn ensure_block_space(&self, len: usize) -> Result<(), DecompressError> {
+        debug_assert!(self.vec.len() <= self.block_limit);
+        if unlikely(len > self.block_limit - self.vec.len()) {
+            return Err(DecompressError::CorruptSequences);
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub(crate) fn extend_literals_range(
+        &mut self,
+        src: &[u8],
+        start: usize,
+        len: usize,
+    ) -> Result<(), DecompressError> {
+        self.extend_slice_range(src, start, len, DecompressError::CorruptLiterals)
+    }
+
+    #[inline(always)]
+    fn extend_slice_range(
+        &mut self,
+        src: &[u8],
+        start: usize,
+        len: usize,
+        bounds_error: DecompressError,
+    ) -> Result<(), DecompressError> {
+        if unlikely(start > src.len() || len > src.len() - start) {
+            return Err(bounds_error);
+        }
+        self.ensure_block_space(len)?;
+        self.extend_slice_range_in_block(src, start, len);
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn extend_slice_range_in_block(&mut self, src: &[u8], start: usize, len: usize) {
+        if len == 0 {
+            return;
+        }
+        #[cfg(not(feature = "paranoid"))]
+        unsafe {
+            debug_assert!(self.vec.len() + len + WILDCOPY_OVERLENGTH <= self.vec.capacity());
+            // SAFETY: The caller proves `src[start..start + len]` is readable
+            // and that this write stays in the reserved block output range.
+            fast_extend_from_ptr(self.vec, src.as_ptr().add(start), len);
+        }
+        #[cfg(feature = "paranoid")]
+        {
+            self.vec.extend_from_slice(&src[start..start + len]);
+        }
+    }
+}
+
+impl SequenceOutput<'_, '_> {
+    #[inline(always)]
+    pub(crate) fn len(&self) -> usize {
+        self.output.len()
+    }
+
+    #[inline(always)]
+    pub(crate) fn extend_literals_range(
+        &mut self,
+        src: &[u8],
+        start: usize,
+    ) -> Result<(), DecompressError> {
+        self.extend_slice_range(
+            src,
+            start,
+            self.literal_len,
+            DecompressError::CorruptLiterals,
+        )
+    }
+
+    #[inline(always)]
+    fn extend_slice_range(
+        &mut self,
+        src: &[u8],
+        start: usize,
+        len: usize,
+        bounds_error: DecompressError,
+    ) -> Result<(), DecompressError> {
+        if unlikely(start > src.len() || len > src.len() - start) {
+            return Err(bounds_error);
+        }
+        self.output.extend_slice_range_in_block(src, start, len);
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub(crate) fn copy_match(&mut self, offset: usize) -> Result<(), DecompressError> {
+        self.copy_match_len(offset, self.match_len)
+    }
+
+    #[inline(always)]
+    pub(crate) fn copy_match_16plus(&mut self, offset: usize) -> Result<(), DecompressError> {
+        if unlikely(offset < 16 || offset > self.output.vec.len()) {
+            return Err(DecompressError::InvalidOffset);
+        }
+        let len = self.match_len;
+        if len == 0 {
+            return Ok(());
+        }
+
+        #[cfg(not(feature = "paranoid"))]
+        unsafe {
+            debug_assert!(
+                self.output.vec.len() + len + WILDCOPY_OVERLENGTH <= self.output.vec.capacity()
+            );
+            // SAFETY: `begin_sequence` proves capacity for the whole sequence.
+            // The offset check proves an initialized source, and offset >= 16
+            // is the precondition for this wider wildcopy path.
+            wild_copy_match_16plus_unchecked(self.output.vec, offset, len);
+        }
+        #[cfg(feature = "paranoid")]
+        {
+            wild_copy_match_paranoid(self.output.vec, offset, len);
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub(crate) fn copy_match_single(&mut self, offset: usize) -> Result<(), DecompressError> {
+        if unlikely(offset == 0 || offset > self.output.vec.len()) {
+            return Err(DecompressError::InvalidOffset);
+        }
+        let len = self.match_len;
+        if len == 0 {
+            return Ok(());
+        }
+
+        #[cfg(not(feature = "paranoid"))]
+        unsafe {
+            debug_assert!(
+                self.output.vec.len() + len + WILDCOPY_OVERLENGTH <= self.output.vec.capacity()
+            );
+            // SAFETY: `begin_sequence` proves capacity for the whole sequence,
+            // and the offset check proves an initialized source.
+            wild_copy_match_single_unchecked(self.output.vec, offset, len);
+        }
+        #[cfg(feature = "paranoid")]
+        {
+            wild_copy_match_paranoid(self.output.vec, offset, len);
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub(crate) fn copy_match_from_history(
+        &mut self,
+        history: &[u8],
+        offset: usize,
+        out_pos: usize,
+    ) -> Result<(), DecompressError> {
+        if unlikely(offset <= out_pos || offset > out_pos + history.len()) {
+            return Err(DecompressError::InvalidOffset);
+        }
+
+        let history_reach = offset - out_pos;
+        let history_start = history.len() - history_reach;
+        let from_history = history_reach.min(self.match_len);
+        self.extend_slice_range(
+            history,
+            history_start,
+            from_history,
+            DecompressError::InvalidOffset,
+        )?;
+
+        let remaining = self.match_len - from_history;
+        if remaining > 0 {
+            self.copy_match_len(offset, remaining)?;
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn copy_match_len(&mut self, offset: usize, len: usize) -> Result<(), DecompressError> {
+        if unlikely(offset == 0 || offset > self.output.vec.len()) {
+            return Err(DecompressError::InvalidOffset);
+        }
+        if len == 0 {
+            return Ok(());
+        }
+
+        #[cfg(not(feature = "paranoid"))]
+        unsafe {
+            debug_assert!(
+                self.output.vec.len() + len + WILDCOPY_OVERLENGTH <= self.output.vec.capacity()
+            );
+            // SAFETY: `begin_sequence` proves capacity for the whole sequence.
+            // The offset check proves the match source starts in initialized
+            // output. Each copy arm handles its overlap pattern.
+            wild_copy_match_unchecked(self.output.vec, offset, len);
+        }
+        #[cfg(feature = "paranoid")]
+        {
+            wild_copy_match_paranoid(self.output.vec, offset, len);
+        }
+        Ok(())
+    }
 }
 
 /// 16-byte copy via two u64 load/stores.
@@ -133,61 +371,6 @@ unsafe fn fast_extend_from_ptr(vec: &mut Vec<u8>, sp: *const u8, len: usize) {
     }
 }
 
-#[cfg(not(feature = "paranoid"))]
-#[inline(always)]
-pub(crate) fn fast_extend_from_slice(vec: &mut Vec<u8>, src: &[u8]) {
-    assert_headroom(vec, src.len(), 16);
-    // SAFETY: src.as_ptr() is readable for src.len() bytes, and the assertion
-    // above proves the destination has the required headroom.
-    unsafe {
-        fast_extend_from_ptr(vec, src.as_ptr(), src.len());
-    }
-}
-
-#[cfg(feature = "paranoid")]
-#[inline(always)]
-pub(crate) fn fast_extend_from_slice(vec: &mut Vec<u8>, src: &[u8]) {
-    vec.extend_from_slice(src);
-}
-
-#[cfg(not(feature = "paranoid"))]
-#[inline(always)]
-pub(crate) fn fast_extend_from_slice_range(
-    vec: &mut Vec<u8>,
-    src: &[u8],
-    start: usize,
-    len: usize,
-) {
-    if len == 0 {
-        return;
-    }
-    let range = &src[start..start + len];
-    assert_headroom(vec, len, 16);
-    // SAFETY: range.as_ptr() is readable for len bytes, and the assertion above
-    // proves the destination has the required headroom.
-    unsafe {
-        fast_extend_from_ptr(vec, range.as_ptr(), len);
-    }
-}
-
-#[cfg(feature = "paranoid")]
-#[inline(always)]
-pub(crate) fn fast_extend_from_slice_range(
-    vec: &mut Vec<u8>,
-    src: &[u8],
-    start: usize,
-    len: usize,
-) {
-    if len == 0 {
-        return;
-    }
-    if len == 1 {
-        vec.push(src[start]);
-        return;
-    }
-    vec.extend_from_slice(&src[start..start + len]);
-}
-
 /// Build an 8-byte repeating pattern from `offset` bytes at `src`.
 /// Only reads the first `offset` bytes (no out-of-bounds access).
 ///
@@ -224,9 +407,9 @@ unsafe fn build_pattern_u64(src: *const u8, offset: usize) -> u64 {
 /// - `vec.len() + len + 16 <= vec.capacity()`
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn wild_copy_match(vec: &mut Vec<u8>, offset: usize, len: usize) {
-    assert!(offset > 0 && offset <= vec.len());
-    assert_headroom(vec, len, 16);
+unsafe fn wild_copy_match_unchecked(vec: &mut Vec<u8>, offset: usize, len: usize) {
+    debug_assert!(offset > 0 && offset <= vec.len());
+    debug_assert!(vec.len() + len + 16 <= vec.capacity());
     // SAFETY: offset is validated above, and reserve ensures enough output
     // headroom. Each copy arm handles its overlap pattern.
     unsafe {
@@ -327,9 +510,9 @@ unsafe fn wild_copy_match_16plus_from_ptr(src: *const u8, op: *mut u8, offset: u
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn wild_copy_match_16plus(vec: &mut Vec<u8>, offset: usize, len: usize) {
-    assert!(offset >= 16 && offset <= vec.len());
-    assert_headroom(vec, len, 64);
+unsafe fn wild_copy_match_16plus_unchecked(vec: &mut Vec<u8>, offset: usize, len: usize) {
+    debug_assert!(offset >= 16 && offset <= vec.len());
+    debug_assert!(vec.len() + len + 64 <= vec.capacity());
     // SAFETY: offset is validated above, and reserve ensures the 64 bytes of
     // wildcopy headroom required by this wider-copy variant.
     unsafe {
@@ -343,7 +526,7 @@ pub(crate) fn wild_copy_match_16plus(vec: &mut Vec<u8>, offset: usize, len: usiz
 
 #[cfg(feature = "paranoid")]
 #[inline(always)]
-pub(crate) fn wild_copy_match(vec: &mut Vec<u8>, offset: usize, len: usize) {
+fn wild_copy_match_paranoid(vec: &mut Vec<u8>, offset: usize, len: usize) {
     let start = vec.len() - offset;
     if offset >= len {
         vec.extend_from_within(start..start + len);
@@ -361,20 +544,14 @@ pub(crate) fn wild_copy_match(vec: &mut Vec<u8>, offset: usize, len: usize) {
     }
 }
 
-#[cfg(feature = "paranoid")]
-#[inline(always)]
-pub(crate) fn wild_copy_match_16plus(vec: &mut Vec<u8>, offset: usize, len: usize) {
-    wild_copy_match(vec, offset, len);
-}
-
 /// Variant for one-sequence tiny frames. The caller reserves 64 bytes of
 /// headroom, so non-overlapping copies can use wider chunks without changing
 /// the generic multi-sequence path.
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(crate) fn wild_copy_match_single(vec: &mut Vec<u8>, offset: usize, len: usize) {
-    assert!(offset > 0 && offset <= vec.len());
-    assert_headroom(vec, len, 64);
+unsafe fn wild_copy_match_single_unchecked(vec: &mut Vec<u8>, offset: usize, len: usize) {
+    debug_assert!(offset > 0 && offset <= vec.len());
+    debug_assert!(vec.len() + len + 64 <= vec.capacity());
     // SAFETY: offset is validated above, and reserve ensures the 64 bytes of
     // wildcopy headroom required by this single-sequence variant.
     unsafe {
@@ -403,17 +580,11 @@ pub(crate) fn wild_copy_match_single(vec: &mut Vec<u8>, offset: usize, len: usiz
                 }
             }
         } else {
-            wild_copy_match(vec, offset, len);
+            wild_copy_match_unchecked(vec, offset, len);
             return;
         }
         vec.set_len(vec.len() + len);
     }
-}
-
-#[cfg(feature = "paranoid")]
-#[inline(always)]
-pub(crate) fn wild_copy_match_single(vec: &mut Vec<u8>, offset: usize, len: usize) {
-    wild_copy_match(vec, offset, len);
 }
 
 #[cfg(test)]
@@ -436,11 +607,13 @@ mod tests {
     fn check_wild_copy_match_offsets(start_offset: usize, end_offset: usize) {
         for offset in start_offset..=end_offset {
             for len in test_lengths(128) {
-                let mut v = Vec::with_capacity(offset + len + 16);
+                let mut v = Vec::new();
                 let seed: Vec<u8> = (0..offset).map(|i| (i as u8).wrapping_mul(37)).collect();
                 v.extend_from_slice(&seed);
                 let expected = expected_match(&v, offset, len);
-                wild_copy_match(&mut v, offset, len);
+                let mut output = BlockOutput::new(&mut v, len);
+                let mut sequence = output.begin_sequence(0, len).unwrap();
+                sequence.copy_match(offset).unwrap();
                 assert_eq!(
                     &v[..offset + len],
                     &expected[..offset + len],
@@ -453,11 +626,13 @@ mod tests {
     fn check_wild_copy_match_single_offsets(start_offset: usize, end_offset: usize) {
         for offset in start_offset..=end_offset {
             for len in test_lengths(256) {
-                let mut v = Vec::with_capacity(offset + len + 64);
+                let mut v = Vec::new();
                 let seed: Vec<u8> = (0..offset).map(|i| (i as u8).wrapping_mul(37)).collect();
                 v.extend_from_slice(&seed);
                 let expected = expected_match(&v, offset, len);
-                wild_copy_match_single(&mut v, offset, len);
+                let mut output = BlockOutput::new(&mut v, len);
+                let mut sequence = output.begin_sequence(0, len).unwrap();
+                sequence.copy_match_single(offset).unwrap();
                 assert_eq!(
                     &v[..offset + len],
                     &expected[..offset + len],
@@ -471,10 +646,101 @@ mod tests {
     fn fast_extend_from_slice_all_sizes() {
         for len in 0..=64 {
             let src: Vec<u8> = (0..len as u8).collect();
-            let mut dst = Vec::with_capacity(len + 16);
-            fast_extend_from_slice(&mut dst, &src);
+            let mut dst = Vec::new();
+            let mut output = BlockOutput::new(&mut dst, len);
+            output.extend_literals_range(&src, 0, len).unwrap();
             assert_eq!(dst, src, "len={len}");
         }
+    }
+
+    #[test]
+    fn block_output_extends_literal_range() {
+        let mut dst = Vec::new();
+        {
+            let mut output = BlockOutput::new(&mut dst, 16);
+            output
+                .extend_literals_range(b"abcdefgh", 2, 4)
+                .expect("literal range should fit");
+        }
+        assert_eq!(dst, b"cdef");
+    }
+
+    #[test]
+    fn block_output_rejects_literal_range_oob() {
+        let mut dst = Vec::new();
+        let mut output = BlockOutput::new(&mut dst, 16);
+        let err = output
+            .extend_literals_range(b"abc", 2, 4)
+            .expect_err("literal range should be out of bounds");
+        assert_eq!(err, DecompressError::CorruptLiterals);
+    }
+
+    #[test]
+    fn block_output_rejects_block_overflow() {
+        let mut dst = Vec::new();
+        let mut output = BlockOutput::new(&mut dst, 4);
+        let err = output
+            .extend_literals_range(b"abcde", 0, 5)
+            .expect_err("literal range should exceed the block limit");
+        assert_eq!(err, DecompressError::CorruptSequences);
+    }
+
+    #[test]
+    fn block_output_rejects_bad_match_offset() {
+        let mut dst = b"abcd".to_vec();
+        let mut output = BlockOutput::new(&mut dst, 16);
+        let mut sequence = output
+            .begin_sequence(0, 4)
+            .expect("sequence should fit block");
+        let err = sequence
+            .copy_match(5)
+            .expect_err("match offset should exceed output length");
+        assert_eq!(err, DecompressError::InvalidOffset);
+    }
+
+    #[test]
+    fn block_output_copies_match() {
+        let mut dst = b"abcdefghijklmnop".to_vec();
+        {
+            let mut output = BlockOutput::new(&mut dst, 32);
+            let mut sequence = output
+                .begin_sequence(0, 20)
+                .expect("sequence should fit block");
+            sequence.copy_match_16plus(16).expect("match should fit");
+        }
+        assert_eq!(&dst[16..], b"abcdefghijklmnopabcd");
+    }
+
+    #[test]
+    fn block_output_copies_match_from_history() {
+        let history = b"abcdefghijklmnop";
+        let mut dst = b"qrst".to_vec();
+        let out_pos = dst.len();
+        let offset = 8;
+        let match_len = 20;
+
+        let mut expected = dst.clone();
+        for i in 0..match_len {
+            let src = history.len() + out_pos - offset + i;
+            let byte = if src < history.len() {
+                history[src]
+            } else {
+                expected[src - history.len()]
+            };
+            expected.push(byte);
+        }
+
+        {
+            let mut output = BlockOutput::new(&mut dst, 32);
+            let mut sequence = output
+                .begin_sequence(0, match_len)
+                .expect("sequence should fit block");
+            sequence
+                .copy_match_from_history(history, offset, out_pos)
+                .expect("history match should fit");
+        }
+
+        assert_eq!(dst, expected);
     }
 
     #[test]
