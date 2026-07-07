@@ -7,6 +7,7 @@ use crate::fast_vec::BlockOutput;
 use crate::sequences::{SequenceDecodeTables, compute_offset};
 use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
+use zrip_core::fse::FSE_SEQ_TABLE_MASK;
 use zrip_core::hint::{likely, unlikely};
 
 #[allow(unused_assignments)]
@@ -41,7 +42,10 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     let mut rep1 = offsets[1];
     let mut rep2 = offsets[2];
     macro_rules! table_entry {
-        ($table:expr, $state:expr) => {{ $table.get($state) }};
+        ($table:expr, $state:expr) => {{
+            let idx = ($state & FSE_SEQ_TABLE_MASK) as usize;
+            $table.get(idx)
+        }};
     }
     macro_rules! compute_offset_local {
         ($offset_value:expr, $literal_length:expr) => {{
@@ -257,7 +261,10 @@ pub(crate) fn decode_execute_single_sequence<const HAS_HISTORY: bool>(
     let mut output = BlockOutput::new(output, zrip_core::frame::MAX_BLOCK_SIZE);
 
     macro_rules! table_entry {
-        ($table:expr, $state:expr) => {{ $table.get($state) }};
+        ($table:expr, $state:expr) => {{
+            let idx = ($state & FSE_SEQ_TABLE_MASK) as usize;
+            $table.get(idx)
+        }};
     }
 
     rev_reader.refill();
