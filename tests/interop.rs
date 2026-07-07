@@ -1120,6 +1120,8 @@ fn compress_context_with_dict_c_cross_validate() {
         let mut decompressed = Vec::new();
         std::io::Read::read_to_end(&mut decoder, &mut decompressed).unwrap();
         assert_eq!(&decompressed, sample);
+        let zrip_dec = zrip::decompress_with_dict(&compressed, &dict).unwrap();
+        assert_eq!(&zrip_dec, sample);
     }
 }
 
