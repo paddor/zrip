@@ -15,9 +15,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - uses: denoland/setup-deno@v2
+      - uses: actions/setup-node@v4
         with:
-          deno-version: v2.x
+          node-version: lts/*
       - run: cargo install wasm-pack
       - run: cd jsr && bash build.sh
-      - run: cd jsr && deno publish
+      - run: cd jsr && npx --yes jsr publish
