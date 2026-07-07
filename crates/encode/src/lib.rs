@@ -139,44 +139,6 @@ pub fn compress_opts(
     compress_inner(input, &params)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn clamp_params_normalizes_public_log_values() {
-        let mut params = strategy::level_params(1).unwrap();
-        params.hash_log = 0;
-        params.chain_log = 40;
-        params.window_log = 40;
-
-        clamp_params_to_src_size(&mut params, usize::MAX);
-
-        assert_eq!(params.hash_log, strategy::HASH_LOG_MIN);
-        assert_eq!(params.chain_log, strategy::HASH_LOG_MAX);
-        assert_eq!(params.window_log, strategy::WINDOW_LOG_MAX);
-    }
-
-    #[test]
-    fn options_clamp_window_log_before_ldm_defaults() {
-        let mut params = strategy::level_params(1).unwrap();
-        let opts = strategy::Options::default().window_log(0);
-
-        strategy::apply_options(&mut params, &opts);
-
-        assert_eq!(params.window_log, strategy::WINDOW_LOG_MIN);
-        #[cfg(feature = "ldm")]
-        {
-            let mut params = strategy::level_params(1).unwrap();
-            let opts = strategy::Options::default().window_log(0).ldm(true);
-            strategy::apply_options(&mut params, &opts);
-
-            let ldm = params.ldm_params.unwrap();
-            assert!(ldm.hash_log >= ldm.bucket_size_log);
-        }
-    }
-}
-
 #[allow(clippy::unnecessary_wraps)]
 fn compress_inner(input: &[u8], params: &strategy::LevelParams) -> Result<Vec<u8>, CompressError> {
     let mut params = *params;
@@ -504,4 +466,42 @@ pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usiz
     }
     output[..buf.len()].copy_from_slice(&buf);
     Ok(buf.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamp_params_normalizes_public_log_values() {
+        let mut params = strategy::level_params(1).unwrap();
+        params.hash_log = 0;
+        params.chain_log = 40;
+        params.window_log = 40;
+
+        clamp_params_to_src_size(&mut params, usize::MAX);
+
+        assert_eq!(params.hash_log, strategy::HASH_LOG_MIN);
+        assert_eq!(params.chain_log, strategy::HASH_LOG_MAX);
+        assert_eq!(params.window_log, strategy::WINDOW_LOG_MAX);
+    }
+
+    #[test]
+    fn options_clamp_window_log_before_ldm_defaults() {
+        let mut params = strategy::level_params(1).unwrap();
+        let opts = strategy::Options::default().window_log(0);
+
+        strategy::apply_options(&mut params, &opts);
+
+        assert_eq!(params.window_log, strategy::WINDOW_LOG_MIN);
+        #[cfg(feature = "ldm")]
+        {
+            let mut params = strategy::level_params(1).unwrap();
+            let opts = strategy::Options::default().window_log(0).ldm(true);
+            strategy::apply_options(&mut params, &opts);
+
+            let ldm = params.ldm_params.unwrap();
+            assert!(ldm.hash_log >= ldm.bucket_size_log);
+        }
+    }
 }
