@@ -14,7 +14,7 @@ pub(crate) fn read_u64_le_unaligned(data: &[u8], offset: usize) -> u64 {
 #[cfg(feature = "paranoid")]
 #[inline(always)]
 pub(crate) fn read_u64_le_unaligned(data: &[u8], offset: usize) -> u64 {
-    u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap())
+    u64::from_le_bytes(*data[offset..].first_chunk::<8>().unwrap())
 }
 
 #[cfg(all(feature = "alloc", not(feature = "paranoid")))]
