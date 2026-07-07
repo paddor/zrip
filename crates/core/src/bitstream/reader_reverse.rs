@@ -118,6 +118,9 @@ impl<'a> ReverseBitReader<'a> {
         if likely(byte_shift <= self.ptr && self.data.len() >= 8) {
             self.ptr -= byte_shift;
             self.bits_consumed -= (byte_shift as u32) * 8;
+            // `ptr` starts at `len - 8` for long streams and only moves toward
+            // zero, so any successful fast refill can still load eight bytes.
+            debug_assert!(self.ptr + 8 <= self.data.len());
             self.container = primitives::read_u64_le_unaligned(self.data, self.ptr);
             return true;
         }
