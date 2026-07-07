@@ -550,7 +550,7 @@ fn write_cache_inner(results: &[BenchResult], small: bool, decode_only: bool) {
 fn parse_level_from_json(line: &str) -> Option<i32> {
     let idx = line.find("\"level\":")?;
     let rest = line[idx + 8..].trim_start();
-    let end = rest.find(|c: char| c == ',' || c == '}')?;
+    let end = rest.find([',', '}'])?;
     rest[..end].trim().parse().ok()
 }
 
@@ -632,9 +632,7 @@ fn levels_for_codec<'a>(codec: &str, level_filter: &'a [i32]) -> &'a [i32] {
 
 fn fmt_mbs(input_size: usize, ns: f64) -> String {
     let mbs = input_size as f64 / ns * 1000.0;
-    if mbs >= 1000.0 {
-        format!("{:.0}", mbs)
-    } else if mbs >= 100.0 {
+    if mbs >= 100.0 {
         format!("{:.0}", mbs)
     } else {
         format!("{:.1}", mbs)
@@ -846,9 +844,7 @@ fn main() {
     };
 
     if decode_only {
-        if !impl_specified {
-            only.clear();
-        } else if only.iter().any(|o| o == "all") {
+        if !impl_specified || only.iter().any(|o| o == "all") {
             only.clear();
         }
     } else if !impl_specified {

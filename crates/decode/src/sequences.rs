@@ -283,15 +283,12 @@ pub(crate) fn parse_sequence_tables_ws(
             if sym >= LL_BITS_TABLE.len() {
                 return Err(DecompressError::CorruptSequences);
             }
-            prev.ll_table.set(
-                0,
-                FseSeqDecodeEntry {
-                    base_line: 0,
-                    num_bits: 0,
-                    extra_bits: LL_BITS_TABLE[sym],
-                    baseline_value: LL_BASELINE_TABLE[sym],
-                },
-            );
+            prev.ll_table.set_single(FseSeqDecodeEntry {
+                base_line: 0,
+                num_bits: 0,
+                extra_bits: LL_BITS_TABLE[sym],
+                baseline_value: LL_BASELINE_TABLE[sym],
+            });
             prev.ll_accuracy = 0;
             prev.ll_kind = SequenceTableKind::Other;
             prev.ll_set = true;
@@ -343,15 +340,12 @@ pub(crate) fn parse_sequence_tables_ws(
             if sym > 31 {
                 return Err(DecompressError::CorruptSequences);
             }
-            prev.of_table.set(
-                0,
-                FseSeqDecodeEntry {
-                    base_line: 0,
-                    num_bits: 0,
-                    extra_bits: sym,
-                    baseline_value: 1u32 << sym,
-                },
-            );
+            prev.of_table.set_single(FseSeqDecodeEntry {
+                base_line: 0,
+                num_bits: 0,
+                extra_bits: sym,
+                baseline_value: 1u32 << sym,
+            });
             prev.of_accuracy = 0;
             prev.of_kind = SequenceTableKind::Other;
             prev.of_set = true;
@@ -403,15 +397,12 @@ pub(crate) fn parse_sequence_tables_ws(
             if sym >= ML_BITS_TABLE.len() {
                 return Err(DecompressError::CorruptSequences);
             }
-            prev.ml_table.set(
-                0,
-                FseSeqDecodeEntry {
-                    base_line: 0,
-                    num_bits: 0,
-                    extra_bits: ML_BITS_TABLE[sym],
-                    baseline_value: ML_BASELINE_TABLE[sym],
-                },
-            );
+            prev.ml_table.set_single(FseSeqDecodeEntry {
+                base_line: 0,
+                num_bits: 0,
+                extra_bits: ML_BITS_TABLE[sym],
+                baseline_value: ML_BASELINE_TABLE[sym],
+            });
             prev.ml_accuracy = 0;
             prev.ml_kind = SequenceTableKind::Other;
             prev.ml_set = true;

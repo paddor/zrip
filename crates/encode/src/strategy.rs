@@ -86,6 +86,7 @@ pub fn level_params_for_size(level: i32, src_len: usize) -> Option<LevelParams> 
     let mut params = level_params_inner(level)?;
     params.hash_log = params.hash_log.clamp(HASH_LOG_MIN, HASH_LOG_MAX);
     params.chain_log = params.chain_log.clamp(HASH_LOG_MIN, HASH_LOG_MAX);
+    params.window_log = params.window_log.clamp(WINDOW_LOG_MIN, WINDOW_LOG_MAX);
     if (2..usize::MAX).contains(&src_len) {
         let src_log = 32 - ((src_len as u32) - 1).leading_zeros();
         params.hash_log = params.hash_log.min(src_log).max(HASH_LOG_MIN);
@@ -106,6 +107,8 @@ pub fn level_params_for_size(level: i32, src_len: usize) -> Option<LevelParams> 
 
 pub const HASH_LOG_MIN: u32 = 6;
 pub const HASH_LOG_MAX: u32 = 30;
+pub const WINDOW_LOG_MIN: u32 = 10;
+pub const WINDOW_LOG_MAX: u32 = 27;
 
 pub fn apply_raw_literals_size_override(params: &mut LevelParams, input_len: usize) {
     if params.strategy != Strategy::Fast || params.force_raw_literals {
@@ -333,7 +336,7 @@ impl Options {
 
 pub fn apply_options(params: &mut LevelParams, opts: &Options) {
     if let Some(wl) = opts.window_log {
-        params.window_log = wl;
+        params.window_log = wl.clamp(WINDOW_LOG_MIN, WINDOW_LOG_MAX);
     }
     #[cfg(feature = "ldm")]
     if opts.ldm {

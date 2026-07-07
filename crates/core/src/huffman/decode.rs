@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use super::primitives;
 use crate::bitstream::reader_reverse::ReverseBitReader;
 use crate::error::DecompressError;
-use crate::huffman::HuffmanDecodeEntry;
+use crate::huffman::{HuffmanDecodeEntry, MAX_TABLE_LOG};
 
 pub fn decode_single_stream(
     table: &[HuffmanDecodeEntry],
@@ -16,9 +16,7 @@ pub fn decode_single_stream(
     data: &[u8],
     output_size: usize,
 ) -> Result<Vec<u8>, DecompressError> {
-    if table.len() < (1usize << table_log) {
-        return Err(DecompressError::BadHuffmanStream);
-    }
+    validate_decode_table(table, table_log)?;
     let mut reader = ReverseBitReader::new(data).map_err(|_| DecompressError::BadHuffmanStream)?;
 
     let mut output = Vec::with_capacity(output_size);
@@ -65,9 +63,7 @@ pub fn decode_single_stream_into(
     data: &[u8],
     output: &mut [u8],
 ) -> Result<(), DecompressError> {
-    if table.len() < (1usize << table_log) {
-        return Err(DecompressError::BadHuffmanStream);
-    }
+    validate_decode_table(table, table_log)?;
     let mut reader = ReverseBitReader::new(data).map_err(|_| DecompressError::BadHuffmanStream)?;
     decode_stream_tail(table, table_log, &mut reader, output)
 }
@@ -79,9 +75,7 @@ pub fn decode_single_stream_vec(
     output_size: usize,
     output: &mut Vec<u8>,
 ) -> Result<(), DecompressError> {
-    if table.len() < (1usize << table_log) {
-        return Err(DecompressError::BadHuffmanStream);
-    }
+    validate_decode_table(table, table_log)?;
     prepare_output(output, output_size);
     #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
@@ -108,9 +102,7 @@ pub fn decode_4_streams(
     data: &[u8],
     output_size: usize,
 ) -> Result<Vec<u8>, DecompressError> {
-    if table.len() < (1usize << table_log) {
-        return Err(DecompressError::BadHuffmanStream);
-    }
+    validate_decode_table(table, table_log)?;
     let mut output = vec![0u8; output_size];
     decode_4_streams_core_safe(table, table_log, data, output_size, &mut output)?;
     Ok(output)
@@ -123,9 +115,7 @@ pub fn decode_4_streams_into(
     output_size: usize,
     output: &mut Vec<u8>,
 ) -> Result<(), DecompressError> {
-    if table.len() < (1usize << table_log) {
-        return Err(DecompressError::BadHuffmanStream);
-    }
+    validate_decode_table(table, table_log)?;
     prepare_output(output, output_size);
     #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
@@ -150,6 +140,19 @@ pub fn decode_4_streams_into(
     result
 }
 
+fn validate_decode_table(
+    table: &[HuffmanDecodeEntry],
+    table_log: u8,
+) -> Result<(), DecompressError> {
+    if table_log == 0 || table_log > MAX_TABLE_LOG {
+        return Err(DecompressError::BadHuffmanStream);
+    }
+    if table.len() < (1usize << table_log) {
+        return Err(DecompressError::BadHuffmanStream);
+    }
+    Ok(())
+}
+
 fn decode_4_streams_core_safe(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -160,15 +163,6 @@ fn decode_4_streams_core_safe(
     super::decode_4stream::decode_4_streams_core(table, table_log, data, output_size, output)
 }
 
-#[cfg(not(feature = "paranoid"))]
-#[inline(always)]
-fn prepare_output(output: &mut Vec<u8>, output_size: usize) {
-    output.clear();
-    output.reserve(output_size);
-    primitives::set_vec_len(output, output_size);
-}
-
-#[cfg(feature = "paranoid")]
 #[inline(always)]
 fn prepare_output(output: &mut Vec<u8>, output_size: usize) {
     output.resize(output_size, 0);
@@ -230,17 +224,58 @@ pub(super) fn decode_stream_tail(
     Ok(())
 }
 
-#[cfg(all(test, miri, not(feature = "paranoid")))]
-mod ub_tests {
+#[cfg(test)]
+mod tests {
     use super::*;
     use crate::bitstream::writer::BitWriter;
 
     #[test]
-    fn public_decode_single_stream_trusts_huffman_table_len() {
-        // Issue: decode_single_stream is a safe public API, but huf_table_lookup
-        // uses get_unchecked and only debug-asserts that the caller supplied at
-        // least 1 << table_log entries. This one-bit stream decodes index 1 from
-        // a one-entry table, so miri reports an out-of-bounds read.
+    fn huffman_decode_rejects_zero_table_log_before_fast_tail_lookup() {
+        // Regression: a one-entry table satisfies `table.len() >= 1 <<
+        // table_log` when `table_log == 0`, but zero is not a valid Huffman
+        // table log. Reject it before `decode_stream_tail` can compute an
+        // unchecked table index from the fast path.
+        let table = [HuffmanDecodeEntry {
+            symbol: 0,
+            num_bits: 1,
+        }];
+        let data = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x80];
+        let mut output = [0u8; 5];
+
+        assert_eq!(
+            decode_single_stream_into(&table, 0, &data, &mut output),
+            Err(DecompressError::BadHuffmanStream)
+        );
+    }
+
+    #[test]
+    fn huffman_4stream_rejects_zero_table_log_before_tail_lookup() {
+        // Regression: the 4-stream decoder reaches the same tail helper after
+        // splitting the output. Reject a zero table log at the public boundary
+        // so it cannot reach `huf_table_lookup`'s unchecked read.
+        let table = [HuffmanDecodeEntry {
+            symbol: 0,
+            num_bits: 1,
+        }];
+        let stream = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x80];
+        let mut data = Vec::new();
+        data.extend_from_slice(&8u16.to_le_bytes());
+        data.extend_from_slice(&8u16.to_le_bytes());
+        data.extend_from_slice(&8u16.to_le_bytes());
+        data.extend_from_slice(&stream);
+        data.extend_from_slice(&stream);
+        data.extend_from_slice(&stream);
+        data.extend_from_slice(&stream);
+        let mut output = Vec::new();
+
+        assert_eq!(
+            decode_4_streams_into(&table, 0, &data, 24, &mut output),
+            Err(DecompressError::BadHuffmanStream)
+        );
+    }
+
+    #[test]
+    fn decode_single_stream_rejects_short_huffman_table() {
         let table = [HuffmanDecodeEntry {
             symbol: 0,
             num_bits: 1,
@@ -249,6 +284,9 @@ mod ub_tests {
         data.write_bits(1, 1);
         data.close_reverse_stream();
 
-        let _ = decode_single_stream(&table, 1, &data.into_bytes(), 1);
+        assert_eq!(
+            decode_single_stream(&table, 1, &data.into_bytes(), 1),
+            Err(DecompressError::BadHuffmanStream)
+        );
     }
 }

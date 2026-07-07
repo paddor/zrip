@@ -141,22 +141,17 @@ impl HuffmanEncodeTable {
     }
 
     pub fn encode_single_stream_into(&self, data: &[u8], buf: &mut Vec<u8>) {
-        buf.clear();
         let tl = self.table_log as usize;
         let unroll: usize = (32usize).checked_div(tl).unwrap_or(1).max(2);
 
-        buf.reserve(data.len() + 16);
+        let mut bitstream = primitives::BitstreamScratch::new(buf, data.len() + 16);
         let mut bits: u64 = 0;
         let mut bits_used: u8 = 0;
         let mut wpos: usize = 0;
 
         macro_rules! flush_bits {
             () => {
-                if wpos + 8 > buf.capacity() {
-                    primitives::set_vec_len(buf, wpos);
-                    buf.reserve(64);
-                }
-                primitives::bitstream_flush_vec(buf, wpos, bits);
+                bitstream.flush(wpos, bits);
                 let nb = (bits_used >> 3) as usize;
                 wpos += nb;
                 bits >>= nb << 3;
@@ -168,9 +163,9 @@ impl HuffmanEncodeTable {
         while pos >= unroll {
             pos -= unroll;
             for j in 0..unroll {
-                let b = primitives::get_unchecked_byte(data, pos + (unroll - 1 - j));
-                let c = primitives::get_unchecked_u16(&self.codes, b as usize) as u64;
-                let n = primitives::get_unchecked_u8_arr(&self.num_bits, b as usize);
+                let b = data[pos + (unroll - 1 - j)];
+                let c = self.codes[b as usize] as u64;
+                let n = self.num_bits[b as usize];
                 bits |= c << bits_used;
                 bits_used += n;
             }
@@ -180,9 +175,9 @@ impl HuffmanEncodeTable {
         }
         while pos > 0 {
             pos -= 1;
-            let b = primitives::get_unchecked_byte(data, pos);
-            let c = primitives::get_unchecked_u16(&self.codes, b as usize) as u64;
-            let n = primitives::get_unchecked_u8_arr(&self.num_bits, b as usize);
+            let b = data[pos];
+            let c = self.codes[b as usize] as u64;
+            let n = self.num_bits[b as usize];
             bits |= c << bits_used;
             bits_used += n;
             if bits_used >= 32 {
@@ -190,14 +185,15 @@ impl HuffmanEncodeTable {
             }
         }
 
-        primitives::set_vec_len(buf, wpos);
         bits |= 1u64 << bits_used;
         bits_used += 1;
         while bits_used > 0 {
-            buf.push(bits as u8);
+            bitstream.write_byte(wpos, bits as u8);
+            wpos += 1;
             bits >>= 8;
             bits_used = bits_used.saturating_sub(8);
         }
+        bitstream.finish(wpos);
     }
 
     pub fn encode_4_streams(&self, data: &[u8]) -> Vec<u8> {

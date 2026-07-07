@@ -1,6 +1,3 @@
-#[cfg(feature = "alloc")]
-use alloc::vec::Vec;
-
 pub mod decode;
 pub mod encode;
 pub mod table_builder;
@@ -19,56 +16,6 @@ pub struct FseSeqDecodeEntry {
     pub num_bits: u8,
     pub extra_bits: u8,
     pub baseline_value: u32,
-}
-
-impl FseSeqDecodeEntry {
-    #[inline(always)]
-    pub fn symbol_value(
-        &self,
-        reader: &mut crate::bitstream::reader_reverse::ReverseBitReader,
-    ) -> u32 {
-        let extra = reader.read_bits_branchless(self.extra_bits);
-        self.baseline_value + extra
-    }
-}
-
-pub fn promote_ll_table(table: &[FseDecodeEntry]) -> Vec<FseSeqDecodeEntry> {
-    table
-        .iter()
-        .map(|e| FseSeqDecodeEntry {
-            base_line: e.base_line,
-            num_bits: e.num_bits,
-            extra_bits: LL_BITS_TABLE[e.symbol as usize],
-            baseline_value: LL_BASELINE_TABLE[e.symbol as usize],
-        })
-        .collect()
-}
-
-pub fn promote_ml_table(table: &[FseDecodeEntry]) -> Vec<FseSeqDecodeEntry> {
-    table
-        .iter()
-        .map(|e| FseSeqDecodeEntry {
-            base_line: e.base_line,
-            num_bits: e.num_bits,
-            extra_bits: ML_BITS_TABLE[e.symbol as usize],
-            baseline_value: ML_BASELINE_TABLE[e.symbol as usize],
-        })
-        .collect()
-}
-
-pub fn promote_of_table(table: &[FseDecodeEntry]) -> Vec<FseSeqDecodeEntry> {
-    table
-        .iter()
-        .map(|e| {
-            let code = e.symbol;
-            FseSeqDecodeEntry {
-                base_line: e.base_line,
-                num_bits: e.num_bits,
-                extra_bits: code,
-                baseline_value: 1u32 << code,
-            }
-        })
-        .collect()
 }
 
 #[derive(Clone)]

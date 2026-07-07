@@ -9,7 +9,6 @@ pub struct FrameHeader {
     pub frame_content_size: Option<u64>,
     pub dict_id: Option<u32>,
     pub content_checksum: bool,
-    #[allow(dead_code)]
     pub single_segment: bool,
     pub header_size: usize,
 }

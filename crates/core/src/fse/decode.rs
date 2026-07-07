@@ -25,11 +25,6 @@ impl<'t> FseState<'t> {
     }
 
     #[inline]
-    pub fn baseline(&self) -> u16 {
-        self.table[self.state as usize].base_line
-    }
-
-    #[inline]
     pub fn num_bits(&self) -> u8 {
         self.table[self.state as usize].num_bits
     }
@@ -40,13 +35,6 @@ impl<'t> FseState<'t> {
         let bits = reader.read_bits(entry.num_bits)?;
         self.state = entry.base_line as u32 + bits;
         Ok(())
-    }
-
-    #[inline]
-    pub fn decode_symbol(&mut self, reader: &mut ReverseBitReader) -> Result<u8, DecompressError> {
-        let sym = self.symbol();
-        self.update_state(reader)?;
-        Ok(sym)
     }
 
     pub fn state(&self) -> u32 {

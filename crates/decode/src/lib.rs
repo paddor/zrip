@@ -630,8 +630,8 @@ mod tests {
     }
 }
 
-#[cfg(all(test, miri, not(feature = "paranoid")))]
-mod ub_tests {
+#[cfg(test)]
+mod safety_tests {
     use super::*;
     use alloc::vec::Vec;
     use zrip_core::bitstream::writer::BitWriter;
@@ -676,14 +676,8 @@ mod ub_tests {
     }
 
     #[test]
-    fn compressed_block_trailing_literals_overrun_wildcopy_headroom() {
-        // Issue: sequence execution reserves one block plus 64 bytes of wild-copy
-        // headroom and checks each sequence against that limit, but the final
-        // trailing literals are appended afterward without a matching capacity or
-        // block-size check. This safe frame seeds one prior byte, emits a 128 KiB
-        // match at offset 1, then appends 65 literals; miri reports the resulting
-        // out-of-bounds write in fast_extend_from_slice.
+    fn compressed_block_rejects_trailing_literals_over_block_limit() {
         let frame = frame_with_oversized_compressed_block_output();
-        let _ = decompress(&frame);
+        assert!(decompress(&frame).is_err());
     }
 }
