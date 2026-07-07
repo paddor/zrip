@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the JSR publish workflow to run `jsr publish` from GitHub Actions
+  for provenance-backed CI publishing.
+
 ## [0.8.3]
 
 ### Added
