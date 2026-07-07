@@ -6,6 +6,7 @@
 
 - Updated the JSR publish workflow to run `jsr publish` from GitHub Actions
   for provenance-backed CI publishing.
+- Bumped JSR package `@paddor/zrip` to 0.5.3.
 
 ## [0.8.3]
 
