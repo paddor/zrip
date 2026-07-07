@@ -1120,6 +1120,56 @@ fn compress_context_with_dict_c_cross_validate() {
         let mut decompressed = Vec::new();
         std::io::Read::read_to_end(&mut decoder, &mut decompressed).unwrap();
         assert_eq!(&decompressed, sample);
+        let zrip_dec = zrip::decompress_with_dict(&compressed, &dict).unwrap();
+        assert_eq!(&zrip_dec, sample);
+    }
+}
+
+#[test]
+fn compress_context_ad_hoc_dict_all_levels_c_cross_validate() {
+    use std::io::Read;
+
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let c_dict = zstd::dict::DecoderDictionary::copy(&dict_data);
+
+    for level in [-8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4] {
+        let mut ctx = zrip::CompressContext::new(level).unwrap();
+
+        for sample in &samples[..10] {
+            let compressed = ctx.compress_with_dict(sample, &dict).unwrap().to_vec();
+            let mut decoder =
+                zstd::Decoder::with_prepared_dictionary(compressed.as_slice(), &c_dict).unwrap();
+            let mut decompressed = Vec::new();
+            decoder.read_to_end(&mut decompressed).unwrap();
+            assert_eq!(&decompressed, sample, "L{level} C decode failed");
+
+            let zrip_dec = zrip::decompress_with_dict(&compressed, &dict).unwrap();
+            assert_eq!(&zrip_dec, sample, "L{level} zrip decode failed");
+        }
+    }
+}
+
+#[test]
+fn compress_context_plain_after_ad_hoc_dict_c_cross_validate() {
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+
+    for level in [-8, -3, 1, 4] {
+        let mut ctx = zrip::CompressContext::new(level).unwrap();
+
+        for (dict_sample, plain_sample) in samples[..10].iter().zip(samples[20..30].iter()) {
+            let compressed = ctx.compress_with_dict(dict_sample, &dict).unwrap().to_vec();
+            let zrip_dec = zrip::decompress_with_dict(&compressed, &dict).unwrap();
+            assert_eq!(&zrip_dec, dict_sample, "L{level} dict decode failed");
+
+            let plain = ctx.compress(plain_sample).unwrap().to_vec();
+            let c_dec = zstd::decode_all(&plain[..]).unwrap();
+            assert_eq!(&c_dec, plain_sample, "L{level} plain C decode failed");
+
+            let zrip_dec = zrip::decompress(&plain).unwrap();
+            assert_eq!(&zrip_dec, plain_sample, "L{level} plain zrip decode failed");
+        }
     }
 }
 

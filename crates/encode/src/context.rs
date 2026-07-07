@@ -223,8 +223,21 @@ impl CompressContext {
         input: &[u8],
         dict: &Dictionary,
     ) -> Result<Cow<'_, [u8]>, CompressError> {
-        let params = strategy::level_params_for_size(self.level, input.len())
+        let total_window = dict.content().len().saturating_add(input.len());
+        let params = strategy::level_params_for_size(self.level, total_window)
             .expect("level validated at construction");
+        self.workspace.prev_ll = dict
+            .ll_table()
+            .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 35));
+        self.workspace.prev_of = dict
+            .of_table()
+            .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 31));
+        self.workspace.prev_ml = dict
+            .ml_table()
+            .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 52));
+        self.workspace.prev_huffman = dict
+            .huf_table()
+            .and_then(|(dt, tl)| HuffmanEncodeTable::from_decode_table(dt, tl));
         compress_core(
             input,
             params,
@@ -473,8 +486,13 @@ impl CompressContext {
         let rep_offsets = prep.rep_offsets;
         let prefix = &prep.combined[..prefix_len];
 
-        let params = strategy::level_params_for_size(self.level, input.len())
+        let total_window = prefix_len.saturating_add(input.len());
+        let params = strategy::level_params_for_size(self.level, total_window)
             .expect("level validated at construction");
+        self.workspace.prev_huffman = prep.huf_table.clone();
+        self.workspace.prev_ll = prep.ll_table.clone();
+        self.workspace.prev_of = prep.of_table.clone();
+        self.workspace.prev_ml = prep.ml_table.clone();
         compress_core(
             input,
             params,
@@ -525,7 +543,12 @@ fn compress_core(
     };
     let long_size = 1usize << params.hash_log;
 
-    workspace.prev_huffman = None;
+    if prefix.is_empty() {
+        workspace.prev_huffman = None;
+        workspace.prev_ll = None;
+        workspace.prev_of = None;
+        workspace.prev_ml = None;
+    }
 
     output.clear();
     output.reserve(input.len() + 32);
