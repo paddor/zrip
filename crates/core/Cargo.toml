@@ -2,7 +2,7 @@
 name = "zrip-core"
 version = "0.9.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 description = "Shared types and codecs for zrip (internal crate)"
 license = "MIT"
 repository = "https://github.com/paddor/zrip"

@@ -2,7 +2,7 @@
 name = "zrip-encode"
 version = "0.8.3"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 description = "zstd encoder for zrip (internal crate)"
 license = "MIT"
 repository = "https://github.com/paddor/zrip"
