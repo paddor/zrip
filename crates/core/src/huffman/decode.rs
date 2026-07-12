@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(feature = "paranoid", forbid(unsafe_code))]
 
 #[cfg(feature = "alloc")]
 use alloc::vec;
@@ -80,9 +80,12 @@ pub fn decode_single_stream_vec(
     #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
         if crate::simd::cpu_tier() >= crate::simd::CpuTier::Bmi2 {
-            let result = super::decode_4stream::decode_single_stream_bmi2_safe(
-                table, table_log, data, output,
-            );
+            // SAFETY: cpu_tier() >= Bmi2 proves BMI2 is available.
+            let result = unsafe {
+                super::decode_4stream::decode_single_stream_bmi2_safe(
+                    table, table_log, data, output,
+                )
+            };
             if result.is_err() {
                 output.clear();
             }
@@ -120,13 +123,16 @@ pub fn decode_4_streams_into(
     #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
         if crate::simd::cpu_tier() >= crate::simd::CpuTier::Bmi2 {
-            let result = super::decode_4stream::decode_4_streams_core_bmi2_safe(
-                table,
-                table_log,
-                data,
-                output_size,
-                output,
-            );
+            // SAFETY: cpu_tier() >= Bmi2 proves BMI2 is available.
+            let result = unsafe {
+                super::decode_4stream::decode_4_streams_core_bmi2_safe(
+                    table,
+                    table_log,
+                    data,
+                    output_size,
+                    output,
+                )
+            };
             if result.is_err() {
                 output.clear();
             }

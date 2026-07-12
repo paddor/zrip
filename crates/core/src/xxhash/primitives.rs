@@ -32,7 +32,13 @@ pub(crate) fn read_u64_le(data: &[u8], offset: usize) -> u64 {
 
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-pub(super) fn bulk_rounds(data: &[u8], v1: &mut u64, v2: &mut u64, v3: &mut u64, v4: &mut u64) {
+pub(super) unsafe fn bulk_rounds(
+    data: &[u8],
+    v1: &mut u64,
+    v2: &mut u64,
+    v3: &mut u64,
+    v4: &mut u64,
+) {
     let len = data.len();
     debug_assert!(len >= 32);
 

@@ -45,7 +45,7 @@ impl SeqTable {
 
     #[cfg(not(feature = "paranoid"))]
     #[inline(always)]
-    pub(crate) fn get(&self, idx: usize) -> FseSeqDecodeEntry {
+    pub(crate) unsafe fn get(&self, idx: usize) -> FseSeqDecodeEntry {
         debug_assert!(idx < self.initialized);
         // SAFETY: The FSE state machine bounds idx to [0, 1 << accuracy_log).
         // promote_* initializes all entries in that range. set_single is used
@@ -189,7 +189,7 @@ mod tests {
         let mut table = SeqTable::promote_ll(&fse);
         table.set_single(seq_entry(17));
 
-        assert_eq!(table.get(0).baseline_value, 17);
+        assert_eq!(paranoid_unsafe_call!(table.get(0)).baseline_value, 17);
     }
 
     #[test]
@@ -218,7 +218,7 @@ mod tests {
         ];
         let table = SeqTable::promote_of(&fse);
 
-        assert_eq!(table.get(0).baseline_value, 1);
-        assert_eq!(table.get(1).baseline_value, 2);
+        assert_eq!(paranoid_unsafe_call!(table.get(0)).baseline_value, 1);
+        assert_eq!(paranoid_unsafe_call!(table.get(1)).baseline_value, 2);
     }
 }

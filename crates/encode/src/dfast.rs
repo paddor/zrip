@@ -10,81 +10,33 @@ use crate::strategy::LevelParams;
 use zrip_core::Sequence;
 use zrip_core::hash::{PRIME32_1, PRIME64_1};
 
-#[cfg(not(feature = "paranoid"))]
-macro_rules! rd32 {
-    ($src:expr, $pos:expr) => {{
-        // SAFETY: dfast.rs only calls rd32 at positions guarded by block limits
-        // or previously validated match positions.
-        unsafe { primitives::rd32($src, $pos) }
-    }};
-}
-
-#[cfg(feature = "paranoid")]
 macro_rules! rd32 {
     ($src:expr, $pos:expr) => {
-        primitives::rd32($src, $pos)
+        paranoid_unsafe_call!(primitives::rd32($src, $pos))
     };
 }
 
-#[cfg(not(feature = "paranoid"))]
-macro_rules! rd64 {
-    ($src:expr, $pos:expr) => {{
-        // SAFETY: dfast.rs only calls rd64 at positions guarded by block limits
-        // or previously validated match positions.
-        unsafe { primitives::rd64($src, $pos) }
-    }};
-}
-
-#[cfg(feature = "paranoid")]
 macro_rules! rd64 {
     ($src:expr, $pos:expr) => {
-        primitives::rd64($src, $pos)
+        paranoid_unsafe_call!(primitives::rd64($src, $pos))
     };
 }
 
-#[cfg(not(feature = "paranoid"))]
-macro_rules! hash_load {
-    ($table:expr, $idx:expr) => {{
-        // SAFETY: hash indexes are produced from table-sized hash logs.
-        unsafe { primitives::hash_load($table, $idx) }
-    }};
-}
-
-#[cfg(feature = "paranoid")]
 macro_rules! hash_load {
     ($table:expr, $idx:expr) => {
-        primitives::hash_load($table, $idx)
+        paranoid_unsafe_call!(primitives::hash_load($table, $idx))
     };
 }
 
-#[cfg(not(feature = "paranoid"))]
-macro_rules! hash_store {
-    ($table:expr, $idx:expr, $val:expr) => {{
-        // SAFETY: hash indexes are produced from table-sized hash logs.
-        unsafe { primitives::hash_store($table, $idx, $val) }
-    }};
-}
-
-#[cfg(feature = "paranoid")]
 macro_rules! hash_store {
     ($table:expr, $idx:expr, $val:expr) => {
-        primitives::hash_store($table, $idx, $val)
+        paranoid_unsafe_call!(primitives::hash_store($table, $idx, $val))
     };
 }
 
-#[cfg(not(feature = "paranoid"))]
-macro_rules! count_match {
-    ($src:expr, $p1:expr, $p2:expr, $limit:expr) => {{
-        // SAFETY: all call sites pass positions within the current block with
-        // p2 behind p1 and limit bounded by the block end.
-        unsafe { primitives::count_match($src, $p1, $p2, $limit) }
-    }};
-}
-
-#[cfg(feature = "paranoid")]
 macro_rules! count_match {
     ($src:expr, $p1:expr, $p2:expr, $limit:expr) => {
-        primitives::count_match($src, $p1, $p2, $limit)
+        paranoid_unsafe_call!(primitives::count_match($src, $p1, $p2, $limit))
     };
 }
 

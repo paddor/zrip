@@ -16,7 +16,7 @@ fn decode_single_stream_bmi2(
 }
 
 #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
-pub(super) fn decode_single_stream_bmi2_safe(
+pub(super) unsafe fn decode_single_stream_bmi2_safe(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
     data: &[u8],
@@ -39,7 +39,7 @@ fn decode_4_streams_core_bmi2(
 }
 
 #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
-pub(super) fn decode_4_streams_core_bmi2_safe(
+pub(super) unsafe fn decode_4_streams_core_bmi2_safe(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
     data: &[u8],
