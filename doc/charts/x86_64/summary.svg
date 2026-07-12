@@ -14,17 +14,17 @@
   <rect x="111.0" y="257.9" width="80.0" height="23.4" fill="#4680c4" rx="1"/>
   <rect x="111.0" y="250.8" width="80.0" height="7.1" fill="#60a5fa" rx="1"/>
   <text x="151.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">C zstd</text>
-  <rect x="223.0" y="267.4" width="80.0" height="37.6" fill="#f87171" rx="1"/>
-  <rect x="223.0" y="241.5" width="80.0" height="25.9" fill="#c45050" rx="1"/>
-  <rect x="223.0" y="227.6" width="80.0" height="13.9" fill="#f87171" rx="1"/>
+  <rect x="223.0" y="266.7" width="80.0" height="38.3" fill="#f87171" rx="1"/>
+  <rect x="223.0" y="240.8" width="80.0" height="25.9" fill="#c45050" rx="1"/>
+  <rect x="223.0" y="226.6" width="80.0" height="14.2" fill="#f87171" rx="1"/>
   <text x="263.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip</text>
   <rect x="335.0" y="261.9" width="80.0" height="43.1" fill="#f59e0b" rx="1"/>
   <rect x="335.0" y="238.4" width="80.0" height="23.4" fill="#c47d08" rx="1"/>
   <rect x="335.0" y="227.7" width="80.0" height="10.7" fill="#f59e0b" rx="1"/>
   <text x="375.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">structured-zstd</text>
-  <rect x="447.0" y="253.5" width="80.0" height="51.5" fill="#f472b6" rx="1"/>
-  <rect x="447.0" y="227.6" width="80.0" height="25.9" fill="#c05a92" rx="1"/>
-  <rect x="447.0" y="209.9" width="80.0" height="17.7" fill="#f472b6" rx="1"/>
+  <rect x="447.0" y="252.3" width="80.0" height="52.7" fill="#f472b6" rx="1"/>
+  <rect x="447.0" y="226.4" width="80.0" height="25.9" fill="#c05a92" rx="1"/>
+  <rect x="447.0" y="208.6" width="80.0" height="17.8" fill="#f472b6" rx="1"/>
   <text x="487.0" y="321" text-anchor="middle" fill="#e6edf3" font-size="10" font-weight="600">zrip paranoid</text>
   <rect x="559.0" y="153.5" width="80.0" height="151.5" fill="#4ade80" rx="1"/>
   <rect x="559.0" y="122.8" width="80.0" height="30.7" fill="#3aaf60" rx="1"/>
