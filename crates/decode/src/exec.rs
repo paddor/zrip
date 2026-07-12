@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(feature = "paranoid", forbid(unsafe_code))]
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -44,7 +44,7 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     macro_rules! table_entry {
         ($table:expr, $state:expr) => {{
             let idx = ($state & FSE_SEQ_TABLE_MASK) as usize;
-            $table.get(idx)
+            paranoid_unsafe_call!($table.get(idx))
         }};
     }
     macro_rules! compute_offset_local {
@@ -263,7 +263,7 @@ pub(crate) fn decode_execute_single_sequence<const HAS_HISTORY: bool>(
     macro_rules! table_entry {
         ($table:expr, $state:expr) => {{
             let idx = ($state & FSE_SEQ_TABLE_MASK) as usize;
-            $table.get(idx)
+            paranoid_unsafe_call!($table.get(idx))
         }};
     }
 

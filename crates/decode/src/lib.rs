@@ -1,9 +1,24 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![deny(unsafe_op_in_unsafe_fn)]
 #![cfg_attr(feature = "nightly", feature(optimize_attribute))]
 #![cfg_attr(feature = "paranoid", forbid(unsafe_code))]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
+
+#[cfg(not(feature = "paranoid"))]
+macro_rules! paranoid_unsafe_call {
+    ($e:expr) => {
+        unsafe { $e }
+    };
+}
+
+#[cfg(feature = "paranoid")]
+macro_rules! paranoid_unsafe_call {
+    ($e:expr) => {
+        $e
+    };
+}
 
 pub(crate) mod block_decoder;
 #[cfg(feature = "std")]
