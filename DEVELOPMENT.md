@@ -39,6 +39,42 @@ GitHub releases. Configuration lives in `release-plz.toml`.
 5. **Merge the release PR.** release-plz tags and publishes to crates.io
    automatically.
 
+## Kani
+
+Proves decoder and encoder bounds safety via bounded model checking.
+Requires [Kani](https://model-checking.github.io/kani/)
+(`cargo install --locked kani-verifier && cargo kani setup`).
+
+Eighteen proof harnesses across two crates:
+
+- **Decoder** (`crates/decode/src/fast_vec.rs`, 11 harnesses): one arithmetic
+  proof that `BlockOutput::new` reserves sufficient capacity for all wildcopy
+  variants, plus per-primitive proofs for `build_pattern_u64`,
+  `fast_extend_from_ptr`, `wild_copy_match_unchecked` (four offset tiers),
+  `wild_copy_match_16plus_unchecked`, and `wild_copy_match_single_unchecked`
+  (three dispatch paths).
+
+- **Encoder** (`crates/encode/src/primitives.rs`, 7 harnesses): `rd32`,
+  `rd64`, `hash_load`, `hash_store`, `count_match` (8-byte fast loop + byte
+  tail), and two `BitstreamScratch` proofs (`flush`/`write_byte` + `finish`
+  never exposes uninitialized bytes via `set_len`).
+
+```sh
+# decoder (~2 min)
+cargo kani -p zrip-decode --output-format terse
+
+# encoder (~7 sec)
+cargo kani -p zrip-encode --output-format terse
+```
+
+The proofs are per-primitive with targeted preconditions, not end-to-end.
+Each harness isolates one unsafe function, constrains symbolic parameters to
+the documented safety contract, and proves every code path stays in bounds.
+The `block_output_capacity_sufficient` arithmetic proof separately verifies
+that the safe API establishes those preconditions. This layered approach
+keeps individual proofs fast (small SAT problems) but does not exercise the
+full decompressor the way an exhaustive all-inputs proof would.
+
 ## Fuzz
 
 Fuzz targets live in `fuzz/fuzz_targets/`. Round-trip targets cross-validate
