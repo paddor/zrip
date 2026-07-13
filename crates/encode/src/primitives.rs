@@ -352,3 +352,115 @@ mod tests {
         assert_eq!(test_count_match(src, 8, 0, 17), 8);
     }
 }
+
+// Run with: cargo kani -p zrip-encode -j4 --output-format terse
+#[cfg(all(kani, not(feature = "paranoid")))]
+mod kani_proofs {
+    use super::*;
+
+    // -- Unaligned reads --
+
+    /// read_unaligned at pos..pos+4 stays within src.
+    #[kani::proof]
+    fn rd32_no_oob() {
+        let src = [0u8; 8];
+        let pos: usize = kani::any();
+        kani::assume(pos <= 4);
+        unsafe {
+            rd32(&src, pos);
+        }
+    }
+
+    /// read_unaligned at pos..pos+8 stays within src.
+    #[kani::proof]
+    fn rd64_no_oob() {
+        let src = [0u8; 16];
+        let pos: usize = kani::any();
+        kani::assume(pos <= 8);
+        unsafe {
+            rd64(&src, pos);
+        }
+    }
+
+    // -- Hash table unchecked access --
+
+    /// get_unchecked in hash_load stays within table.
+    #[kani::proof]
+    fn hash_load_no_oob() {
+        let table = [0u32; 16];
+        let idx: usize = kani::any();
+        kani::assume(idx < 16);
+        unsafe {
+            hash_load(&table, idx);
+        }
+    }
+
+    /// get_unchecked_mut in hash_store stays within table.
+    #[kani::proof]
+    fn hash_store_no_oob() {
+        let mut table = [0u32; 16];
+        let idx: usize = kani::any();
+        kani::assume(idx < 16);
+        unsafe {
+            hash_store(&mut table, idx, kani::any());
+        }
+    }
+
+    // -- Match counting --
+
+    /// 8-byte fast loop and byte tail in count_match_raw never read
+    /// past the limit or outside the source allocation.
+    #[kani::proof]
+    #[kani::unwind(9)] // fast loop: 32/8 = 4 max; byte tail: 7 max
+    fn count_match_no_oob() {
+        let src = [0u8; 32];
+        let p1: usize = kani::any();
+        let p2: usize = kani::any();
+        let limit: usize = kani::any();
+        kani::assume(limit <= 32);
+        kani::assume(p1 <= limit);
+        kani::assume(p2 < p1);
+        unsafe {
+            count_match(&src, p1, p2, limit);
+        }
+    }
+
+    // -- BitstreamScratch --
+    //
+    // The BitstreamScratch in core/src/huffman/primitives.rs is
+    // structurally identical; these proofs apply to both.
+
+    /// flush writes 8 bytes via write_unaligned into spare capacity,
+    /// then finish exposes only the initialized range via set_len.
+    #[kani::proof]
+    fn bitstream_scratch_flush_finish_safe() {
+        let mut buf = Vec::new();
+        let mut scratch = BitstreamScratch::new(&mut buf, 64);
+
+        let pos: usize = kani::any();
+        kani::assume(pos <= 56); // pos + 8 <= 64
+        scratch.flush(pos, kani::any());
+
+        let len: usize = kani::any();
+        kani::assume(len <= pos + 8);
+        scratch.finish(len);
+        assert_eq!(buf.len(), len);
+    }
+
+    /// write_byte writes 1 byte into spare capacity, then finish
+    /// exposes only the initialized range.
+    #[kani::proof]
+    fn bitstream_scratch_write_byte_finish_safe() {
+        let mut buf = Vec::new();
+        let mut scratch = BitstreamScratch::new(&mut buf, 64);
+
+        let pos: usize = kani::any();
+        kani::assume(pos < 64);
+        scratch.write_byte(pos, kani::any());
+
+        let len: usize = kani::any();
+        kani::assume(len <= pos + 1);
+        scratch.finish(len);
+        assert_eq!(buf.len(), len);
+    }
+}

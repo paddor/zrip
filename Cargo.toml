@@ -75,6 +75,9 @@ required-features = ["std"]
 name = "profile_xray"
 required-features = ["std"]
 
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 # Casts are pervasive and intentional in a codec operating on fixed-width fields.

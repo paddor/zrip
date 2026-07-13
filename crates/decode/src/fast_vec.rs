@@ -793,3 +793,229 @@ mod tests {
         check_wild_copy_match_single_offsets(97, 128);
     }
 }
+
+// Run with: cargo kani -p zrip-decode -j4 --output-format terse
+#[cfg(all(kani, not(feature = "paranoid")))]
+mod kani_proofs {
+    use super::*;
+
+    // -- Arithmetic proof: BlockOutput capacity invariant --
+
+    /// BlockOutput::new reserves block_size + WILDCOPY_OVERLENGTH spare
+    /// capacity. Prove this is sufficient for any valid sequence's
+    /// literal copy (needing 16 bytes headroom) and match copy (needing
+    /// up to WILDCOPY_OVERLENGTH = 64 bytes headroom).
+    #[kani::proof]
+    fn block_output_capacity_sufficient() {
+        let initial_len: usize = kani::any();
+        let block_size: usize = kani::any();
+        kani::assume(initial_len <= 64);
+        kani::assume(block_size >= 1 && block_size <= 64);
+
+        let capacity = initial_len + block_size + WILDCOPY_OVERLENGTH;
+        let literal_len: usize = kani::any();
+        let match_len: usize = kani::any();
+        kani::assume(literal_len <= block_size);
+        kani::assume(match_len <= block_size - literal_len);
+
+        let vec_len_after_literals = initial_len + literal_len;
+
+        // wild_copy_match_unchecked: 16-byte headroom
+        assert!(vec_len_after_literals + match_len + 16 <= capacity);
+        // wild_copy_match_{16plus,single}_unchecked: 64-byte headroom
+        assert!(vec_len_after_literals + match_len + WILDCOPY_OVERLENGTH <= capacity);
+    }
+
+    // -- Primitive: build_pattern_u64 --
+
+    /// The inner doubling loop fills exactly 8 bytes from `offset`
+    /// source bytes (offset in 2..=7) without OOB reads or writes.
+    #[kani::proof]
+    #[kani::unwind(3)] // at most 2 doubling iterations
+    fn build_pattern_u64_no_oob() {
+        let src = [0u8; 7];
+        let offset: usize = kani::any();
+        kani::assume(offset >= 2 && offset <= 7);
+        unsafe {
+            build_pattern_u64(src.as_ptr(), offset);
+        }
+    }
+
+    // -- Primitive: fast_extend_from_ptr --
+
+    /// All copy tiers (1, 2, 3, 4..7, 8..15, 16+) stay within source
+    /// and destination bounds given the documented precondition
+    /// (len + 16 bytes of spare capacity).
+    #[kani::proof]
+    #[kani::unwind(5)] // 64/16 = 4 iterations max in the 16-byte loop
+    fn fast_extend_from_ptr_no_oob() {
+        let src = [0u8; 64];
+        let len: usize = kani::any();
+        kani::assume(len >= 1 && len <= 64);
+
+        let mut vec = Vec::with_capacity(len + 16);
+        unsafe {
+            fast_extend_from_ptr(&mut vec, src.as_ptr(), len);
+        }
+        assert_eq!(vec.len(), len);
+    }
+
+    // -- wild_copy_match_unchecked --
+    //
+    // Split by offset tier to control loop-unwind bounds. Each harness
+    // establishes the documented precondition (offset > 0, offset <=
+    // vec.len(), capacity >= vec.len() + len + 16) and proves the
+    // corresponding code path stays in-bounds.
+    //
+    // Pre-fill uses extend_from_slice (memcpy, no loop) to avoid
+    // triggering unwind limits in Vec::resize's internal loop.
+
+    /// offset >= 16: copy_16 loop
+    #[kani::proof]
+    #[kani::unwind(4)] // 48/16 = 3 iterations max
+    fn wild_copy_match_offset_ge16_no_oob() {
+        let offset: usize = kani::any();
+        let len: usize = kani::any();
+        kani::assume(offset >= 16 && offset <= 48);
+        kani::assume(len >= 1 && len <= 48);
+
+        let mut vec = Vec::with_capacity(48 + len + 16);
+        vec.extend_from_slice(&[0u8; 48]);
+        unsafe {
+            wild_copy_match_unchecked(&mut vec, offset, len);
+        }
+        assert_eq!(vec.len(), 48 + len);
+    }
+
+    /// offset == 1: RLE via write_bytes (no loop in this path, but
+    /// Kani still needs an unwind bound for loops in sibling branches)
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn wild_copy_match_offset_1_no_oob() {
+        let len: usize = kani::any();
+        kani::assume(len >= 1 && len <= 64);
+
+        let mut vec = Vec::with_capacity(4 + len + 16);
+        vec.extend_from_slice(&[0xAAu8; 4]);
+        unsafe {
+            wild_copy_match_unchecked(&mut vec, 1, len);
+        }
+        assert_eq!(vec.len(), 4 + len);
+    }
+
+    /// offset 8..15: copy_8 pairs loop
+    #[kani::proof]
+    #[kani::unwind(4)] // (48-16)/16 = 2 iterations max in inner loop
+    fn wild_copy_match_offset_8to15_no_oob() {
+        let offset: usize = kani::any();
+        let len: usize = kani::any();
+        kani::assume(offset >= 8 && offset <= 15);
+        kani::assume(len >= 1 && len <= 48);
+
+        let mut vec = Vec::with_capacity(16 + len + 16);
+        vec.extend_from_slice(&[0u8; 16]);
+        unsafe {
+            wild_copy_match_unchecked(&mut vec, offset, len);
+        }
+        assert_eq!(vec.len(), 16 + len);
+    }
+
+    /// offset 2..7: build_pattern_u64 + u64 stamp loop
+    #[kani::proof]
+    #[kani::unwind(13)] // 24/2 = 12 iterations max (offset=2, len=24)
+    fn wild_copy_match_offset_2to7_no_oob() {
+        let offset: usize = kani::any();
+        let len: usize = kani::any();
+        kani::assume(offset >= 2 && offset <= 7);
+        kani::assume(len >= 1 && len <= 24);
+
+        let mut vec = Vec::with_capacity(8 + len + 16);
+        vec.extend_from_slice(&[0u8; 8]);
+        unsafe {
+            wild_copy_match_unchecked(&mut vec, offset, len);
+        }
+        assert_eq!(vec.len(), 8 + len);
+    }
+
+    // -- wild_copy_match_16plus_unchecked --
+
+    /// offset >= 16 wide-copy path: copy_16/32/64 loops depending
+    /// on offset magnitude.
+    #[kani::proof]
+    #[kani::unwind(5)] // 64/16 = 4 iterations max in narrowest loop
+    fn wild_copy_match_16plus_no_oob() {
+        let offset: usize = kani::any();
+        let len: usize = kani::any();
+        kani::assume(offset >= 16 && offset <= 48);
+        kani::assume(len >= 1 && len <= 64);
+
+        let mut vec = Vec::with_capacity(48 + len + WILDCOPY_OVERLENGTH);
+        vec.extend_from_slice(&[0u8; 48]);
+        unsafe {
+            wild_copy_match_16plus_unchecked(&mut vec, offset, len);
+        }
+        assert_eq!(vec.len(), 48 + len);
+    }
+
+    // -- wild_copy_match_single_unchecked --
+    //
+    // Split into three harnesses matching the dispatch:
+    //   len <= 16 && offset >= 16 → single copy_16
+    //   offset >= 32             → copy_32 or copy_64 loop
+    //   else                     → fallthrough to wild_copy_match_unchecked
+
+    /// Short match with wide offset: single copy_16 (no loop in this
+    /// path, but Kani needs an unwind bound for loops in sibling
+    /// branches).
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn wild_copy_match_single_short_no_oob() {
+        let offset: usize = kani::any();
+        let len: usize = kani::any();
+        kani::assume(offset >= 16 && offset <= 48);
+        kani::assume(len >= 1 && len <= 16);
+
+        let mut vec = Vec::with_capacity(48 + len + WILDCOPY_OVERLENGTH);
+        vec.extend_from_slice(&[0u8; 48]);
+        unsafe {
+            wild_copy_match_single_unchecked(&mut vec, offset, len);
+        }
+        assert_eq!(vec.len(), 48 + len);
+    }
+
+    /// Wide offset: copy_32 or copy_64 loops.
+    #[kani::proof]
+    #[kani::unwind(3)] // 64/32 = 2 iterations max
+    fn wild_copy_match_single_wide_no_oob() {
+        let offset: usize = kani::any();
+        let len: usize = kani::any();
+        kani::assume(offset >= 32 && offset <= 64);
+        kani::assume(len >= 1 && len <= 64);
+
+        let mut vec = Vec::with_capacity(64 + len + WILDCOPY_OVERLENGTH);
+        vec.extend_from_slice(&[0u8; 64]);
+        unsafe {
+            wild_copy_match_single_unchecked(&mut vec, offset, len);
+        }
+        assert_eq!(vec.len(), 64 + len);
+    }
+
+    /// Fallthrough to wild_copy_match_unchecked (offset < 32,
+    /// excluding the short + offset >= 16 fast path).
+    #[kani::proof]
+    #[kani::unwind(13)] // pattern stamp loop: 24/2 = 12 max
+    fn wild_copy_match_single_fallthrough_no_oob() {
+        let offset: usize = kani::any();
+        let len: usize = kani::any();
+        kani::assume(offset >= 1 && offset <= 31);
+        kani::assume(len >= 1 && len <= 24);
+        kani::assume(!(len <= 16 && offset >= 16));
+
+        let mut vec = Vec::with_capacity(32 + len + WILDCOPY_OVERLENGTH);
+        vec.extend_from_slice(&[0u8; 32]);
+        unsafe {
+            wild_copy_match_single_unchecked(&mut vec, offset, len);
+        }
+        assert_eq!(vec.len(), 32 + len);
+    }
+}

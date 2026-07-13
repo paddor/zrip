@@ -31,7 +31,7 @@ LABELS = {
     "C zstd":          "C zstd (libzstd)",
     "zrip":            "zrip (Rust)",
     "zrip paranoid":   "zrip paranoid (safe SIMD, no unsafe)",
-    "structured-zstd": "structured-zstd 0.0.48 (Rust)",
+    "structured-zstd": "structured-zstd 0.0.49 (Rust)",
 }
 
 SMALL_PREFIXES = ["dickens", "hdfs", "xml_collection", "x-ray"]
