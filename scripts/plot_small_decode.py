@@ -30,7 +30,7 @@ LABELS = {
     "C zstd":          "libzstd v1.5.7 (C)",
     "zrip":            "zrip (safe SIMD + encapsulated unsafe)",
     "zrip paranoid":   "zrip paranoid (safe SIMD, no unsafe)",
-    "structured-zstd": "structured-zstd v0.0.48 (unsafe)",
+    "structured-zstd": "structured-zstd v0.0.49 (unsafe)",
     "ruzstd":          "ruzstd v0.8.3 (safe)",
 }
 
@@ -137,7 +137,7 @@ def generate_svg(data, common_bitstream=False):
     top_margin = 55 if hw_label else 45
     left_margin = 90
     row_gap = 50
-    bottom_margin = 50
+    bottom_margin = 65
     svg_w = left_margin + panel_w + 40
     svg_h = top_margin + n_panels * panel_h + (n_panels - 1) * row_gap + bottom_margin
 
@@ -276,21 +276,44 @@ def generate_svg(data, common_bitstream=False):
     legend_items = []
     for codec in CODEC_ORDER:
         if codec in data:
-            legend_items.append(("codec", codec, LABELS[codec]))
+            legend_items.append((codec, LABELS[codec]))
 
-    rw = sum(len(lb) * 6.2 + 24 for _, _, lb in legend_items)
-    rw += 12 * (len(legend_items) - 1)
-    lx = mid_x - rw / 2
-    for kind, key, label in legend_items:
-        color = COLORS[key]
-        L.append(
-            f'  <circle cx="{lx + 5:.0f}" cy="{leg_y}" r="4" fill="{color}"/>'
-        )
-        L.append(
-            f'  <text x="{lx + 13:.0f}" y="{leg_y + 3.5}" fill="#e6edf3"'
-            f' font-size="10" font-weight="500">{label}</text>'
-        )
-        lx += len(label) * 6.2 + 24 + 12
+    leg_gap = 12
+    leg_pad = 24
+    char_w = 6.2
+    max_row_w = svg_w - 40
+
+    rows = []
+    cur_row = []
+    cur_w = 0
+    for key, label in legend_items:
+        item_w = len(label) * char_w + leg_pad
+        if cur_row and cur_w + leg_gap + item_w > max_row_w:
+            rows.append(cur_row)
+            cur_row = []
+            cur_w = 0
+        if cur_row:
+            cur_w += leg_gap
+        cur_row.append((key, label))
+        cur_w += item_w
+    if cur_row:
+        rows.append(cur_row)
+
+    for ri, row in enumerate(rows):
+        ry = leg_y + ri * 18
+        rw = sum(len(lb) * char_w + leg_pad for _, lb in row)
+        rw += leg_gap * (len(row) - 1)
+        lx = mid_x - rw / 2
+        for key, label in row:
+            color = COLORS[key]
+            L.append(
+                f'  <circle cx="{lx + 5:.0f}" cy="{ry}" r="4" fill="{color}"/>'
+            )
+            L.append(
+                f'  <text x="{lx + 13:.0f}" y="{ry + 3.5}" fill="#e6edf3"'
+                f' font-size="10" font-weight="500">{label}</text>'
+            )
+            lx += len(label) * char_w + leg_pad + leg_gap
 
     L.append("</svg>")
     return "\n".join(L) + "\n"
