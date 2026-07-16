@@ -131,12 +131,6 @@ cargo +nightly fuzz run fuzz_corrupt_decompress /path/to/adversarial/corpus \
 
 ## Benchmarks
 
-### Quick (synthetic data)
-
-```bash
-cargo bench                                            # binggan, in benches/
-```
-
 ### Corpus benchmarks
 
 ```bash
