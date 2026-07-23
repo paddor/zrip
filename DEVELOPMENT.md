@@ -139,7 +139,11 @@ cargo run --example zrip_bench --release -- --impl all
 ```
 
 Options: `--impl zrip|"C zstd"|all`, `--levels -8,1,3`,
-`--files dickens.txt,mozilla`, `--extra /path/to/file`.
+`--files dickens,mozilla`, `--extra /path/to/file`.
+
+The benchmark harness prepares its own ignored corpus under `bench/corpus/`.
+It downloads the pinned Silesia inputs. `--small-only` slices the first bytes
+from the base corpus in memory; no small corpus files need to be generated.
 
 Results cache under `~/.cache/zrip/` is append-only benchmark history. Do not
 delete, truncate, or rewrite cache files when re-benchmarking after code

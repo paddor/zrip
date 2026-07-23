@@ -3,18 +3,18 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const DEFAULT_FILES: &[&str] = &[
-    "bench/corpus/dickens.txt",
-    "bench/corpus/hdfs.json",
-    "bench/corpus/reymont.pdf",
-    "bench/corpus/xml_collection.xml",
-    "bench/corpus/silesia/mr",
+    "bench/corpus/silesia/dickens",
     "bench/corpus/silesia/mozilla",
+    "bench/corpus/silesia/mr",
     "bench/corpus/silesia/nci",
+    "bench/corpus/silesia/ooffice",
     "bench/corpus/silesia/osdb",
+    "bench/corpus/silesia/reymont",
     "bench/corpus/silesia/samba",
     "bench/corpus/silesia/sao",
     "bench/corpus/silesia/webster",
     "bench/corpus/silesia/x-ray",
+    "bench/corpus/silesia/xml",
 ];
 
 fn measure(path: &Path) {

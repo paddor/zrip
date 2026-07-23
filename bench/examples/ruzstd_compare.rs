@@ -7,22 +7,18 @@ use std::path::PathBuf;
 const LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 
 const FILES: &[&str] = &[
-    "corpus/compression_1k.txt",
-    "corpus/compression_34k.txt",
-    "corpus/compression_65k.txt",
-    "corpus/compression_66k_JSON.txt",
-    "corpus/dickens.txt",
-    "corpus/hdfs.json",
-    "corpus/reymont.pdf",
-    "corpus/xml_collection.xml",
-    "corpus/silesia/mr",
+    "corpus/silesia/dickens",
     "corpus/silesia/mozilla",
+    "corpus/silesia/mr",
     "corpus/silesia/nci",
+    "corpus/silesia/ooffice",
     "corpus/silesia/osdb",
+    "corpus/silesia/reymont",
     "corpus/silesia/samba",
     "corpus/silesia/sao",
     "corpus/silesia/webster",
     "corpus/silesia/x-ray",
+    "corpus/silesia/xml",
 ];
 
 fn cpu_nanos() -> u64 {

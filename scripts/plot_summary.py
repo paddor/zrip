@@ -37,6 +37,20 @@ LABELS = {
 LEVEL = 1
 MIN_FILE_SIZE = 10_000
 TRANSFER_RATE = 100e6  # 100 MB/s
+MAIN_CORPUS = {
+    "dickens",
+    "mr",
+    "mozilla",
+    "nci",
+    "ooffice",
+    "osdb",
+    "reymont",
+    "samba",
+    "sao",
+    "webster",
+    "x-ray",
+    "xml",
+}
 
 
 def _apply_profile():
@@ -87,6 +101,8 @@ def load_all_data():
                     if not line:
                         continue
                     r = json.loads(line)
+                    if r["input"] not in MAIN_CORPUS:
+                        continue
                     if r.get("input_size", 0) < MIN_FILE_SIZE:
                         continue
                     data[codec][(r["input"], r["level"])] = r

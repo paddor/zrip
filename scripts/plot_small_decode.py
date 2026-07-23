@@ -34,7 +34,7 @@ LABELS = {
     "ruzstd":          "ruzstd v0.8.3 (safe)",
 }
 
-SMALL_PREFIXES = ["dickens", "hdfs", "xml_collection", "x-ray"]
+SMALL_PREFIXES = ["dickens", "nci", "xml", "x-ray"]
 SMALL_SUFFIXES = ["_512", "_1k", "_2k", "_4k", "_8k", "_16k", "_32k", "_64k", "_128k"]
 SMALL_SIZES = [512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072]
 SIZE_LABELS = ["512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K"]

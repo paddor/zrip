@@ -1,119 +1,199 @@
 extern crate libc;
 
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const ZRIP_LEVELS: &[i32] = &[-8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 const C_ZSTD_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 
-const SILESIA_DOWNLOADS: &[(&str, &str)] = &[
-    (
-        "corpus/dickens.txt",
-        "https://sun.aei.polsl.pl/~sdeor/corpus/dickens.bz2",
-    ),
-    (
-        "corpus/silesia/mr",
-        "https://sun.aei.polsl.pl/~sdeor/corpus/mr.bz2",
-    ),
-    (
-        "corpus/silesia/mozilla",
-        "https://sun.aei.polsl.pl/~sdeor/corpus/mozilla.bz2",
-    ),
-    (
-        "corpus/silesia/nci",
-        "https://sun.aei.polsl.pl/~sdeor/corpus/nci.bz2",
-    ),
-    (
-        "corpus/silesia/osdb",
-        "https://sun.aei.polsl.pl/~sdeor/corpus/osdb.bz2",
-    ),
-    (
-        "corpus/silesia/samba",
-        "https://sun.aei.polsl.pl/~sdeor/corpus/samba.bz2",
-    ),
-    (
-        "corpus/silesia/sao",
-        "https://sun.aei.polsl.pl/~sdeor/corpus/sao.bz2",
-    ),
-    (
-        "corpus/silesia/webster",
-        "https://sun.aei.polsl.pl/~sdeor/corpus/webster.bz2",
-    ),
-    (
-        "corpus/silesia/x-ray",
-        "https://sun.aei.polsl.pl/~sdeor/corpus/x-ray.bz2",
-    ),
+#[derive(Clone, Copy)]
+struct CorpusEntry {
+    rel: &'static str,
+    label: &'static str,
+    url: &'static str,
+    size: usize,
+    sha256: &'static str,
+}
+
+#[derive(Clone, Copy)]
+struct SmallSource {
+    prefix: &'static str,
+    base_label: &'static str,
+}
+
+#[derive(Clone, Copy)]
+struct SmallSize {
+    label: &'static str,
+    bytes: usize,
+}
+
+struct BenchInput {
+    name: String,
+    data: Vec<u8>,
+    sha256: String,
+    is_small: bool,
+    dict_source: String,
+    dict_entry: Option<&'static CorpusEntry>,
+}
+
+const BASE_CORPUS: &[CorpusEntry] = &[
+    CorpusEntry {
+        rel: "corpus/silesia/dickens",
+        label: "dickens",
+        url: "https://sun.aei.polsl.pl/~sdeor/corpus/dickens.bz2",
+        size: 10_192_446,
+        sha256: "b24c37886142e11d0ee687db6ab06f936207aa7f2ea1fd1d9a36763c7a507e6a",
+    },
+    CorpusEntry {
+        rel: "corpus/silesia/reymont",
+        label: "reymont",
+        url: "https://sun.aei.polsl.pl/~sdeor/corpus/reymont.bz2",
+        size: 6_627_202,
+        sha256: "0eac0114a3dfe6e2ee1f345a0f79d653cb26c3bc9f0ed79238af4933422b7578",
+    },
+    CorpusEntry {
+        rel: "corpus/silesia/xml",
+        label: "xml",
+        url: "https://sun.aei.polsl.pl/~sdeor/corpus/xml.bz2",
+        size: 5_345_280,
+        sha256: "0e82e54e695c1938e4193448022543845b33020c8be6bf3bf3ead2224903e08c",
+    },
+    CorpusEntry {
+        rel: "corpus/silesia/mr",
+        label: "mr",
+        url: "https://sun.aei.polsl.pl/~sdeor/corpus/mr.bz2",
+        size: 9_970_564,
+        sha256: "68637ed52e3e4860174ed2dc0840ac77d5f1a60abbcb13770d5754e3774d53e6",
+    },
+    CorpusEntry {
+        rel: "corpus/silesia/mozilla",
+        label: "mozilla",
+        url: "https://sun.aei.polsl.pl/~sdeor/corpus/mozilla.bz2",
+        size: 51_220_480,
+        sha256: "657fc3764b0c75ac9de9623125705831ebbfbe08fed248df73bc2dc66e2a963b",
+    },
+    CorpusEntry {
+        rel: "corpus/silesia/nci",
+        label: "nci",
+        url: "https://sun.aei.polsl.pl/~sdeor/corpus/nci.bz2",
+        size: 33_553_445,
+        sha256: "fc63a31770947b8c2062d3b19ca94c00485a232bb91b502021948fee983e1635",
+    },
+    CorpusEntry {
+        rel: "corpus/silesia/ooffice",
+        label: "ooffice",
+        url: "https://sun.aei.polsl.pl/~sdeor/corpus/ooffice.bz2",
+        size: 6_152_192,
+        sha256: "e7ee013880d34dd5208283d0d3d91b07f442e067454276095ded14f322a656eb",
+    },
+    CorpusEntry {
+        rel: "corpus/silesia/osdb",
+        label: "osdb",
+        url: "https://sun.aei.polsl.pl/~sdeor/corpus/osdb.bz2",
+        size: 10_085_684,
+        sha256: "60f027179302ca3ad87c58ac90b6be72ec23588aaa7a3b7fe8ecc0f11def3fa3",
+    },
+    CorpusEntry {
+        rel: "corpus/silesia/samba",
+        label: "samba",
+        url: "https://sun.aei.polsl.pl/~sdeor/corpus/samba.bz2",
+        size: 21_606_400,
+        sha256: "93ba07bc44d8267789c1d911992f40b089ffa2140b4a160fac11ccae9a40e7b2",
+    },
+    CorpusEntry {
+        rel: "corpus/silesia/sao",
+        label: "sao",
+        url: "https://sun.aei.polsl.pl/~sdeor/corpus/sao.bz2",
+        size: 7_251_944,
+        sha256: "c2d0ea2cc59d4c21b7fe43a71499342a00cbe530a1d5548770e91ecd6214adcc",
+    },
+    CorpusEntry {
+        rel: "corpus/silesia/webster",
+        label: "webster",
+        url: "https://sun.aei.polsl.pl/~sdeor/corpus/webster.bz2",
+        size: 41_458_703,
+        sha256: "6a68f69b26daf09f9dd84f7470368553194a0b294fcfa80f1604efb11143a383",
+    },
+    CorpusEntry {
+        rel: "corpus/silesia/x-ray",
+        label: "x-ray",
+        url: "https://sun.aei.polsl.pl/~sdeor/corpus/x-ray.bz2",
+        size: 8_474_240,
+        sha256: "7de9fce1405dc44ae5e6813ed21cd5751e761bd4265655a005d39b9685d1c9ad",
+    },
 ];
 
-const ALL_FILES: &[&str] = &[
-    "corpus/compression_1k.txt",
-    "corpus/compression_34k.txt",
-    "corpus/compression_65k.txt",
-    "corpus/compression_66k_JSON.txt",
-    "corpus/dickens.txt",
-    "corpus/hdfs.json",
-    "corpus/reymont.pdf",
-    "corpus/xml_collection.xml",
-    "corpus/silesia/mr",
-    "corpus/silesia/mozilla",
-    "corpus/silesia/nci",
-    "corpus/silesia/osdb",
-    "corpus/silesia/samba",
-    "corpus/silesia/sao",
-    "corpus/silesia/webster",
-    "corpus/silesia/x-ray",
+const SMALL_SOURCES: &[SmallSource] = &[
+    SmallSource {
+        prefix: "dickens",
+        base_label: "dickens",
+    },
+    SmallSource {
+        prefix: "nci",
+        base_label: "nci",
+    },
+    SmallSource {
+        prefix: "xml",
+        base_label: "xml",
+    },
+    SmallSource {
+        prefix: "x-ray",
+        base_label: "x-ray",
+    },
 ];
 
-const SMALL_FILES: &[&str] = &[
-    "corpus/small/dickens_512",
-    "corpus/small/dickens_1k",
-    "corpus/small/dickens_2k",
-    "corpus/small/dickens_4k",
-    "corpus/small/dickens_8k",
-    "corpus/small/dickens_16k",
-    "corpus/small/dickens_32k",
-    "corpus/small/dickens_64k",
-    "corpus/small/dickens_128k",
-    "corpus/small/dickens_256k",
-    "corpus/small/dickens_512k",
-    "corpus/small/dickens_1m",
-    "corpus/small/hdfs_512",
-    "corpus/small/hdfs_1k",
-    "corpus/small/hdfs_2k",
-    "corpus/small/hdfs_4k",
-    "corpus/small/hdfs_8k",
-    "corpus/small/hdfs_16k",
-    "corpus/small/hdfs_32k",
-    "corpus/small/hdfs_64k",
-    "corpus/small/hdfs_128k",
-    "corpus/small/hdfs_256k",
-    "corpus/small/hdfs_512k",
-    "corpus/small/hdfs_1m",
-    "corpus/small/xml_collection_512",
-    "corpus/small/xml_collection_1k",
-    "corpus/small/xml_collection_2k",
-    "corpus/small/xml_collection_4k",
-    "corpus/small/xml_collection_8k",
-    "corpus/small/xml_collection_16k",
-    "corpus/small/xml_collection_32k",
-    "corpus/small/xml_collection_64k",
-    "corpus/small/xml_collection_128k",
-    "corpus/small/xml_collection_256k",
-    "corpus/small/xml_collection_512k",
-    "corpus/small/xml_collection_1m",
-    "corpus/small/x-ray_512",
-    "corpus/small/x-ray_1k",
-    "corpus/small/x-ray_2k",
-    "corpus/small/x-ray_4k",
-    "corpus/small/x-ray_8k",
-    "corpus/small/x-ray_16k",
-    "corpus/small/x-ray_32k",
-    "corpus/small/x-ray_64k",
-    "corpus/small/x-ray_128k",
-    "corpus/small/x-ray_256k",
-    "corpus/small/x-ray_512k",
-    "corpus/small/x-ray_1m",
+const SMALL_SIZES: &[SmallSize] = &[
+    SmallSize {
+        label: "512",
+        bytes: 512,
+    },
+    SmallSize {
+        label: "1k",
+        bytes: 1024,
+    },
+    SmallSize {
+        label: "2k",
+        bytes: 2048,
+    },
+    SmallSize {
+        label: "4k",
+        bytes: 4096,
+    },
+    SmallSize {
+        label: "8k",
+        bytes: 8192,
+    },
+    SmallSize {
+        label: "16k",
+        bytes: 16_384,
+    },
+    SmallSize {
+        label: "32k",
+        bytes: 32_768,
+    },
+    SmallSize {
+        label: "64k",
+        bytes: 65_536,
+    },
+    SmallSize {
+        label: "128k",
+        bytes: 131_072,
+    },
+    SmallSize {
+        label: "256k",
+        bytes: 262_144,
+    },
+    SmallSize {
+        label: "512k",
+        bytes: 524_288,
+    },
+    SmallSize {
+        label: "1m",
+        bytes: 1_048_576,
+    },
 ];
 
 fn cpu_nanos() -> u64 {
@@ -158,6 +238,7 @@ struct BenchResult {
     compressed_size: usize,
     compress_ns: f64,
     decompress_ns: f64,
+    input_sha256: String,
 }
 
 impl BenchResult {
@@ -166,7 +247,8 @@ impl BenchResult {
             concat!(
                 r#"{{"codec": "{}", "input": "{}", "level": {}, "#,
                 r#""input_size": {}, "compressed_size": {}, "#,
-                r#""compress_ns": {:.1}, "decompress_ns": {:.1}}}"#,
+                r#""compress_ns": {:.1}, "decompress_ns": {:.1}, "#,
+                r#""input_sha256": "{}"}}"#,
             ),
             self.codec,
             self.input_name,
@@ -175,6 +257,7 @@ impl BenchResult {
             self.compressed_size,
             self.compress_ns,
             self.decompress_ns,
+            self.input_sha256,
         )
     }
 }
@@ -201,6 +284,7 @@ fn bench_zrip(data: &[u8], name: &str, level: i32, target_ns: u64) -> BenchResul
         compressed_size: compressed.len(),
         compress_ns,
         decompress_ns,
+        input_sha256: String::new(),
     }
 }
 
@@ -222,6 +306,7 @@ fn bench_lz4rip(data: &[u8], name: &str, level: i32, target_ns: u64) -> BenchRes
         compressed_size: compressed.len(),
         compress_ns,
         decompress_ns,
+        input_sha256: String::new(),
     }
 }
 
@@ -253,6 +338,7 @@ fn bench_ruzstd(data: &[u8], name: &str, level: i32, target_ns: u64) -> BenchRes
         compressed_size: compressed.len(),
         compress_ns,
         decompress_ns,
+        input_sha256: String::new(),
     }
 }
 
@@ -281,6 +367,7 @@ fn bench_structured_zstd(data: &[u8], name: &str, level: i32, target_ns: u64) ->
         compressed_size: compressed.len(),
         compress_ns,
         decompress_ns,
+        input_sha256: String::new(),
     }
 }
 
@@ -308,6 +395,7 @@ fn bench_c_zstd(data: &[u8], name: &str, level: i32, target_ns: u64) -> BenchRes
         compressed_size: compressed.len(),
         compress_ns,
         decompress_ns,
+        input_sha256: String::new(),
     }
 }
 
@@ -352,6 +440,7 @@ fn bench_zrip_dict(
         compressed_size: compressed.len(),
         compress_ns,
         decompress_ns,
+        input_sha256: String::new(),
     }
 }
 
@@ -385,6 +474,7 @@ fn bench_c_zstd_dict(
         compressed_size: compressed.len(),
         compress_ns,
         decompress_ns,
+        input_sha256: String::new(),
     }
 }
 
@@ -441,6 +531,7 @@ fn bench_decode_only(
         compressed_size,
         compress_ns: 0.0,
         decompress_ns,
+        input_sha256: String::new(),
     }
 }
 
@@ -452,31 +543,200 @@ fn corpus_path(relative: &str) -> PathBuf {
     bench_dir().join(relative)
 }
 
-fn ensure_corpus() {
-    for &(rel, url) in SILESIA_DOWNLOADS {
-        let path = corpus_path(rel);
-        if path.exists() {
-            continue;
-        }
-        eprintln!("downloading {url} ...");
-        let dir = path.parent().unwrap();
-        std::fs::create_dir_all(dir).ok();
-        let path_str = path.display();
-        let status = Command::new("sh")
-            .arg("-c")
-            .arg(format!("curl -fSL '{url}' | bzip2 -d > '{path_str}'"))
-            .status();
-        match status {
-            Ok(s) if s.success() => {
-                let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                eprintln!("  saved {path_str} ({size} bytes)");
-            }
-            _ => {
-                eprintln!("  failed to download {path_str}, skipping");
-                std::fs::remove_file(&path).ok();
-            }
+fn sha256_hex(data: &[u8]) -> String {
+    let digest = Sha256::digest(data);
+    let mut out = String::with_capacity(64);
+    for byte in digest {
+        use std::fmt::Write as _;
+        write!(out, "{byte:02x}").unwrap();
+    }
+    out
+}
+
+fn verify_corpus_bytes(entry: &CorpusEntry, data: &[u8]) -> Result<String, String> {
+    if data.len() != entry.size {
+        return Err(format!(
+            "{} has {} bytes, expected {}",
+            entry.rel,
+            data.len(),
+            entry.size
+        ));
+    }
+    let actual = sha256_hex(data);
+    if actual != entry.sha256 {
+        return Err(format!(
+            "{} sha256 mismatch: got {actual}, expected {}",
+            entry.rel, entry.sha256
+        ));
+    }
+    Ok(actual)
+}
+
+fn download_bzip2(url: &str, tmp: &Path) -> Result<(), String> {
+    let status = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "curl -fSL '{url}' | bzip2 -d > '{}'",
+            tmp.display()
+        ))
+        .status()
+        .map_err(|e| format!("failed to start curl/bzip2 for {url}: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("curl/bzip2 failed for {url}: {status}"))
+    }
+}
+
+fn ensure_corpus_entry(entry: &CorpusEntry) -> Result<(), String> {
+    let path = corpus_path(entry.rel);
+    if path.exists() {
+        let data = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        match verify_corpus_bytes(entry, &data) {
+            Ok(_) => return Ok(()),
+            Err(e) => eprintln!("corpus mismatch, refreshing {}: {e}", path.display()),
         }
     }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("invalid corpus path {}", path.display()))?;
+    let tmp = path.with_file_name(format!("{file_name}.part.{}", std::process::id()));
+    std::fs::remove_file(&tmp).ok();
+    eprintln!("downloading {} ...", entry.url);
+    download_bzip2(entry.url, &tmp)?;
+
+    let data = std::fs::read(&tmp).map_err(|e| format!("read {}: {e}", tmp.display()))?;
+    let hash = match verify_corpus_bytes(entry, &data) {
+        Ok(hash) => hash,
+        Err(e) => {
+            std::fs::remove_file(&tmp).ok();
+            return Err(e);
+        }
+    };
+    std::fs::rename(&tmp, &path)
+        .map_err(|e| format!("rename {} -> {}: {e}", tmp.display(), path.display()))?;
+    eprintln!("  saved {} ({} bytes, {hash})", path.display(), data.len());
+    Ok(())
+}
+
+fn load_corpus_entry(entry: &'static CorpusEntry) -> Result<(Vec<u8>, String), String> {
+    ensure_corpus_entry(entry)?;
+    let path = corpus_path(entry.rel);
+    let data = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let hash = verify_corpus_bytes(entry, &data)?;
+    Ok((data, hash))
+}
+
+fn corpus_entry_by_label(label: &str) -> Option<&'static CorpusEntry> {
+    BASE_CORPUS.iter().find(|entry| entry.label == label)
+}
+
+fn name_matches_filter(name: &str, file_filter: &[String]) -> bool {
+    file_filter.is_empty() || file_filter.iter().any(|f| f == name)
+}
+
+fn small_source_matches_filter(prefix: &str, file_filter: &[String]) -> bool {
+    file_filter.is_empty()
+        || file_filter
+            .iter()
+            .any(|f| f == prefix || f.starts_with(&format!("{prefix}_")))
+}
+
+fn small_input_matches_filter(prefix: &str, size_label: &str, file_filter: &[String]) -> bool {
+    file_filter.is_empty()
+        || file_filter
+            .iter()
+            .any(|f| f == prefix || f == &format!("{prefix}_{size_label}"))
+}
+
+fn load_benchmark_inputs(
+    small_only: bool,
+    file_filter: &[String],
+    extra_files: &[String],
+) -> Result<Vec<BenchInput>, String> {
+    let mut inputs = Vec::new();
+
+    if small_only {
+        for source in SMALL_SOURCES {
+            if !small_source_matches_filter(source.prefix, file_filter) {
+                continue;
+            }
+            let entry = corpus_entry_by_label(source.base_label)
+                .unwrap_or_else(|| panic!("missing corpus entry {}", source.base_label));
+            let (base, _) = load_corpus_entry(entry)?;
+            for size in SMALL_SIZES {
+                if !small_input_matches_filter(source.prefix, size.label, file_filter) {
+                    continue;
+                }
+                if base.len() < size.bytes {
+                    return Err(format!(
+                        "{} has {} bytes, cannot create {}_{}",
+                        entry.label,
+                        base.len(),
+                        source.prefix,
+                        size.label
+                    ));
+                }
+                let name = format!("{}_{}", source.prefix, size.label);
+                let data = base[..size.bytes].to_vec();
+                let sha256 = sha256_hex(&data);
+                inputs.push(BenchInput {
+                    name,
+                    data,
+                    sha256,
+                    is_small: true,
+                    dict_source: source.prefix.to_string(),
+                    dict_entry: Some(entry),
+                });
+            }
+        }
+    } else {
+        for entry in BASE_CORPUS {
+            if !name_matches_filter(entry.label, file_filter) {
+                continue;
+            }
+            let (data, sha256) = load_corpus_entry(entry)?;
+            inputs.push(BenchInput {
+                name: entry.label.to_string(),
+                data,
+                sha256,
+                is_small: false,
+                dict_source: dict_source_name(entry.label),
+                dict_entry: Some(entry),
+            });
+        }
+    }
+
+    for extra in extra_files {
+        let path = PathBuf::from(extra);
+        let data = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(extra)
+            .to_string();
+        let sha256 = sha256_hex(&data);
+        inputs.push(BenchInput {
+            dict_source: dict_source_name(&name),
+            name,
+            data,
+            sha256,
+            is_small: false,
+            dict_entry: None,
+        });
+    }
+
+    if inputs.is_empty() {
+        return Err("no corpus inputs selected".into());
+    }
+
+    Ok(inputs)
 }
 
 fn cache_dir() -> PathBuf {
@@ -675,8 +935,8 @@ fn print_live_line(file: &str, level: i32, results: &[&BenchResult]) {
 fn load_cached_keys(
     small: bool,
     decode_only: bool,
-) -> std::collections::HashSet<(String, i32, String)> {
-    let mut keys = std::collections::HashSet::new();
+) -> HashSet<(String, i32, String, Option<String>)> {
+    let mut keys = HashSet::new();
     let mut base = if small {
         cache_dir().join("small")
     } else {
@@ -724,7 +984,8 @@ fn load_cached_keys(
                     parse_level_from_json(line),
                     parse_str_field(line, "input"),
                 ) {
-                    keys.insert((codec, level, input));
+                    let input_sha256 = parse_str_field(line, "input_sha256");
+                    keys.insert((codec, level, input, input_sha256));
                 }
             }
         }
@@ -754,7 +1015,10 @@ Options:
   --dict              Run dictionary benchmarks
   --decode-only       Run decode-only benchmark set
   --reuse             Reuse cached results when available
-  -h, --help          Print this help"
+  -h, --help          Print this help
+
+Missing base corpus files are downloaded or generated under bench/corpus.
+Small inputs are sliced in memory from base corpus files."
     );
 }
 
@@ -827,7 +1091,14 @@ fn main() {
         i += 1;
     }
 
-    ensure_corpus();
+    let all_inputs = match load_benchmark_inputs(small_only, &file_filter, &extra_files) {
+        Ok(inputs) => inputs,
+        Err(e) => {
+            eprintln!("corpus setup failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
     migrate_flat_cache();
 
     let cached_keys = if reuse_cached {
@@ -892,66 +1163,42 @@ fn main() {
     let mut results: Vec<BenchResult> = Vec::new();
     let mut results_small: Vec<BenchResult> = Vec::new();
 
-    let base_files: &[&str] = if small_only { SMALL_FILES } else { ALL_FILES };
-    let all_paths: Vec<&str> = base_files
-        .iter()
-        .copied()
-        .chain(extra_files.iter().map(|s| s.as_str()))
-        .collect();
-
     // Pre-train dicts per source file (keyed by base name before _4k/_16k/etc.)
-    let mut dicts: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
+    let mut dicts: HashMap<String, Vec<u8>> = HashMap::new();
     if dict_mode {
-        for path in &all_paths {
-            let name = path.rsplit('/').next().unwrap();
-            if !file_filter.is_empty() && !file_filter.iter().any(|f| f == name) {
+        for input in &all_inputs {
+            if dicts.contains_key(&input.dict_source) {
                 continue;
             }
-            let source_name = dict_source_name(name);
-            if dicts.contains_key(&source_name) {
-                continue;
-            }
-            let source_path = dict_source_path(&source_name);
-            let source_data = match std::fs::read(&source_path) {
-                Ok(d) => d,
-                Err(_) => {
-                    eprintln!(
-                        "dict: skipping {source_name} (source {} not found)",
-                        source_path.display()
-                    );
-                    continue;
+            let source_data = if let Some(entry) = input.dict_entry {
+                match load_corpus_entry(entry) {
+                    Ok((data, _)) => data,
+                    Err(e) => {
+                        eprintln!("dict: skipping {} ({e})", input.dict_source);
+                        continue;
+                    }
                 }
+            } else {
+                input.data.clone()
             };
             eprintln!(
-                "training dict for {source_name} from {} bytes...",
+                "training dict for {} from {} bytes...",
+                input.dict_source,
                 source_data.len()
             );
             let dict_bytes = train_dict_for_file(&source_data, 16384);
             eprintln!("  dict size: {} bytes", dict_bytes.len());
-            dicts.insert(source_name, dict_bytes);
+            dicts.insert(input.dict_source.clone(), dict_bytes);
         }
     }
 
-    for rel in &all_paths {
-        let name = rel.rsplit('/').next().unwrap();
-        if !file_filter.is_empty() && !file_filter.iter().any(|f| f == name) {
-            continue;
-        }
-
-        let path = corpus_path(rel);
-        let data = match std::fs::read(&path) {
-            Ok(d) => d,
-            Err(_) => {
-                eprintln!("skipping {}: not found", path.display());
-                continue;
-            }
-        };
-
+    for input in &all_inputs {
+        let name = input.name.as_str();
+        let data = input.data.as_slice();
         eprintln!("{name} ({} bytes)", data.len());
 
         let dict_bytes = if dict_mode {
-            let source_name = dict_source_name(name);
-            dicts.get(&source_name)
+            dicts.get(&input.dict_source)
         } else {
             None
         };
@@ -961,13 +1208,19 @@ fn main() {
 
             if decode_only {
                 let mut compressor = zstd::bulk::Compressor::new(level).unwrap();
-                let compressed = compressor.compress(&data).unwrap();
+                let compressed = compressor.compress(data).unwrap();
                 for &codec in &active_codecs {
-                    if cached_keys.contains(&(codec.to_string(), level, name.to_string())) {
+                    let cache_key = (
+                        codec.to_string(),
+                        level,
+                        name.to_string(),
+                        Some(input.sha256.clone()),
+                    );
+                    if cached_keys.contains(&cache_key) {
                         continue;
                     }
 
-                    let r = bench_decode_only(
+                    let mut r = bench_decode_only(
                         codec,
                         &compressed,
                         data.len(),
@@ -976,6 +1229,7 @@ fn main() {
                         level,
                         target_ns,
                     );
+                    r.input_sha256.clone_from(&input.sha256);
                     level_batch.push(r);
                 }
             } else {
@@ -985,32 +1239,39 @@ fn main() {
                         continue;
                     }
 
-                    if cached_keys.contains(&(codec.to_string(), level, name.to_string())) {
+                    let cache_key = (
+                        codec.to_string(),
+                        level,
+                        name.to_string(),
+                        Some(input.sha256.clone()),
+                    );
+                    if cached_keys.contains(&cache_key) {
                         continue;
                     }
 
-                    let r = match codec {
-                        "C zstd" => bench_c_zstd(&data, name, level, target_ns),
-                        "zrip" | "zrip paranoid" => bench_zrip(&data, name, level, target_ns),
-                        "ruzstd" => bench_ruzstd(&data, name, level, target_ns),
-                        "structured-zstd" => bench_structured_zstd(&data, name, level, target_ns),
-                        "lz4rip" => bench_lz4rip(&data, name, level, target_ns),
+                    let mut r = match codec {
+                        "C zstd" => bench_c_zstd(data, name, level, target_ns),
+                        "zrip" | "zrip paranoid" => bench_zrip(data, name, level, target_ns),
+                        "ruzstd" => bench_ruzstd(data, name, level, target_ns),
+                        "structured-zstd" => bench_structured_zstd(data, name, level, target_ns),
+                        "lz4rip" => bench_lz4rip(data, name, level, target_ns),
                         "zrip+dict" => {
                             if let Some(db) = dict_bytes {
-                                bench_zrip_dict(&data, name, level, target_ns, db)
+                                bench_zrip_dict(data, name, level, target_ns, db)
                             } else {
                                 continue;
                             }
                         }
                         "C zstd+dict" => {
                             if let Some(db) = dict_bytes {
-                                bench_c_zstd_dict(&data, name, level, target_ns, db)
+                                bench_c_zstd_dict(data, name, level, target_ns, db)
                             } else {
                                 continue;
                             }
                         }
                         _ => unreachable!(),
                     };
+                    r.input_sha256.clone_from(&input.sha256);
                     level_batch.push(r);
                 }
             }
@@ -1018,7 +1279,7 @@ fn main() {
             if !level_batch.is_empty() {
                 let refs: Vec<&BenchResult> = level_batch.iter().collect();
                 print_live_line(name, level, &refs);
-                if rel.starts_with("corpus/small/") {
+                if input.is_small {
                     results_small.extend(level_batch);
                 } else {
                     results.extend(level_batch);
@@ -1037,36 +1298,18 @@ fn main() {
 }
 
 fn dict_source_name(file_name: &str) -> String {
-    let base = file_name
-        .trim_end_matches("_2k")
-        .trim_end_matches("_4k")
-        .trim_end_matches("_8k")
-        .trim_end_matches("_16k")
-        .trim_end_matches("_32k")
-        .trim_end_matches("_64k")
-        .trim_end_matches("_128k")
-        .trim_end_matches("_256k")
-        .trim_end_matches("_512k")
-        .trim_end_matches("_1m");
+    let mut base = file_name;
+    for size in SMALL_SIZES {
+        let suffix = format!("_{}", size.label);
+        if let Some(stripped) = base.strip_suffix(&suffix) {
+            base = stripped;
+            break;
+        }
+    }
     let base = base
         .trim_end_matches(".txt")
         .trim_end_matches(".json")
         .trim_end_matches(".xml")
         .trim_end_matches(".pdf");
     base.to_string()
-}
-
-fn dict_source_path(source_name: &str) -> PathBuf {
-    let rel = match source_name {
-        "hdfs" => "corpus/hdfs.json",
-        "dickens" => "corpus/dickens.txt",
-        "xml_collection" => "corpus/xml_collection.xml",
-        "reymont" => "corpus/reymont.pdf",
-        "compression_1k" => "corpus/compression_1k.txt",
-        "compression_34k" => "corpus/compression_34k.txt",
-        "compression_65k" => "corpus/compression_65k.txt",
-        "compression_66k_JSON" => "corpus/compression_66k_JSON.txt",
-        _ => return corpus_path(&format!("corpus/silesia/{source_name}")),
-    };
-    corpus_path(rel)
 }

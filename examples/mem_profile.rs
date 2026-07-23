@@ -53,7 +53,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let path = args
         .get(1)
-        .map_or("corpus/dickens.txt", std::string::String::as_str);
+        .map_or("corpus/silesia/dickens", std::string::String::as_str);
     let level: i32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1);
 
     let data = std::fs::read(path).unwrap();

@@ -42,12 +42,10 @@ LEVEL_FILTER = {
 }
 
 HIGH_COMPRESSIBILITY = {
-    "hdfs.json", "nci", "xml_collection.xml", "compression_66k_JSON.txt",
-    "samba",
+    "nci", "xml", "samba",
 }
 MEDIUM_COMPRESSIBILITY = {
-    "reymont.pdf", "webster", "osdb", "mr", "mozilla", "dickens.txt",
-    "compression_34k.txt", "compression_65k.txt",
+    "dickens", "mozilla", "mr", "ooffice", "osdb", "reymont", "webster",
 }
 LOW_COMPRESSIBILITY = {"sao", "x-ray"}
 

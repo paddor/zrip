@@ -29,18 +29,18 @@ async function initCZstd(): Promise<CZstd> {
 const CORPUS_DIR = "../bench/corpus";
 
 const FILES = [
-  "dickens.txt",
-  "hdfs.json",
-  "reymont.pdf",
-  "xml_collection.xml",
-  "silesia/mr",
+  "silesia/dickens",
   "silesia/mozilla",
+  "silesia/mr",
   "silesia/nci",
+  "silesia/ooffice",
   "silesia/osdb",
+  "silesia/reymont",
   "silesia/samba",
   "silesia/sao",
   "silesia/webster",
   "silesia/x-ray",
+  "silesia/xml",
 ];
 
 function fmtSize(bytes: number): string {

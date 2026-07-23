@@ -2,7 +2,7 @@
 """Generate encode speed vs compression ratio chart for small inputs (<= 1 MiB).
 
 Reads ~/.cache/zrip/L*/{codec}.jsonl, filters to small corpus files,
-writes small_encode.svg. One panel per source (dickens, hdfs, xml_collection),
+writes small_encode.svg. One panel per source (dickens, nci, xml, x-ray),
 X-axis: input size (log), Y-axis: encode MB/s (log).
 
 Two shaded bands per codec: Fast (L-8..L2) and DFast (L3..L4).
@@ -34,7 +34,7 @@ LABELS = {
     "structured-zstd": "structured-zstd 0.0.49 (Rust)",
 }
 
-SMALL_PREFIXES = ["dickens", "hdfs", "xml_collection", "x-ray"]
+SMALL_PREFIXES = ["dickens", "nci", "xml", "x-ray"]
 SMALL_SUFFIXES = [
     "_512",
     "_1k",

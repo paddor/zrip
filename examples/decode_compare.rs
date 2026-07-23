@@ -3,7 +3,7 @@ use std::time::Instant;
 fn main() {
     let path = std::env::args()
         .nth(1)
-        .unwrap_or("corpus/dickens.txt".into());
+        .unwrap_or("corpus/silesia/dickens".into());
     let data = std::fs::read(&path).expect("file not found");
     let name = path.rsplit('/').next().unwrap();
 
