@@ -27,6 +27,7 @@ pub(crate) mod dfast;
 pub(crate) mod fast;
 #[cfg(feature = "ldm")]
 pub(crate) mod ldm;
+mod output;
 pub(crate) mod primitives;
 pub mod strategy;
 #[cfg(feature = "std")]
@@ -37,13 +38,18 @@ use alloc::vec;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
+use crate::output::{OutputSink, SliceSink};
 use crate::strategy::Strategy;
 use zrip_core::error::CompressError;
 use zrip_core::frame::{MAX_BLOCK_SIZE, ZSTD_MAGIC};
 use zrip_core::xxhash::xxh64;
 
-pub(crate) fn write_frame_header(output: &mut Vec<u8>, content_size: usize, dict_id: Option<u32>) {
-    output.extend_from_slice(&ZSTD_MAGIC.to_le_bytes());
+pub(crate) fn write_frame_header(
+    output: &mut impl OutputSink,
+    content_size: usize,
+    dict_id: Option<u32>,
+) -> Result<(), CompressError> {
+    output.extend_from_slice(&ZSTD_MAGIC.to_le_bytes())?;
 
     let fcs_size = if content_size <= 255 {
         1
@@ -69,24 +75,25 @@ pub(crate) fn write_frame_header(output: &mut Vec<u8>, content_size: usize, dict
     };
 
     let descriptor = 0x20 | 0x04 | (fcs_flag << 6) | dict_id_flag;
-    output.push(descriptor);
+    output.push(descriptor)?;
 
     match dict_id {
-        Some(id) if id <= 0xFF => output.push(id as u8),
-        Some(id) if id <= 0xFFFF => output.extend_from_slice(&(id as u16).to_le_bytes()),
-        Some(id) => output.extend_from_slice(&id.to_le_bytes()),
+        Some(id) if id <= 0xFF => output.push(id as u8)?,
+        Some(id) if id <= 0xFFFF => output.extend_from_slice(&(id as u16).to_le_bytes())?,
+        Some(id) => output.extend_from_slice(&id.to_le_bytes())?,
         None => {}
     }
 
     match fcs_size {
-        1 => output.push(content_size as u8),
+        1 => output.push(content_size as u8)?,
         2 => {
             let v = (content_size - 256) as u16;
-            output.extend_from_slice(&v.to_le_bytes());
+            output.extend_from_slice(&v.to_le_bytes())?;
         }
-        4 => output.extend_from_slice(&(content_size as u32).to_le_bytes()),
-        _ => output.extend_from_slice(&(content_size as u64).to_le_bytes()),
+        4 => output.extend_from_slice(&(content_size as u32).to_le_bytes())?,
+        _ => output.extend_from_slice(&(content_size as u64).to_le_bytes())?,
     }
+    Ok(())
 }
 
 pub(crate) fn block_looks_incompressible(data: &[u8]) -> bool {
@@ -159,15 +166,19 @@ fn compress_inner(input: &[u8], params: &strategy::LevelParams) -> Result<Vec<u8
     let mut params = *params;
     strategy::apply_raw_literals_size_override(&mut params, input.len());
     let mut output = Vec::with_capacity(input.len() + 32);
-    compress_frame(input, &params, &mut output);
+    compress_frame(input, &params, &mut output)?;
     Ok(output)
 }
 
-fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec<u8>) {
-    write_frame_header(output, input.len(), None);
+fn compress_frame(
+    input: &[u8],
+    params: &strategy::LevelParams,
+    output: &mut impl OutputSink,
+) -> Result<(), CompressError> {
+    write_frame_header(output, input.len(), None)?;
 
     if input.is_empty() {
-        block_encoder::encode_raw_block(&[], true, output);
+        block_encoder::encode_raw_block(&[], true, output)?;
     } else {
         let mut rep_offsets = [1u32, 4, 8];
         let mut offset = 0;
@@ -187,7 +198,11 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
                     let is_last = block_end >= input.len();
 
                     if block_looks_incompressible(&input[offset..block_end]) {
-                        block_encoder::encode_raw_block(&input[offset..block_end], is_last, output);
+                        block_encoder::encode_raw_block(
+                            &input[offset..block_end],
+                            is_last,
+                            output,
+                        )?;
                     } else {
                         #[cfg(feature = "ldm")]
                         let used_ldm = if let Some(ref mut ldm) = ldm_state {
@@ -228,7 +243,7 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
                                 is_last,
                                 output,
                                 &mut workspace,
-                            );
+                            )?;
                         } else {
                             block_encoder::encode_compressed_block(
                                 &input[offset..block_end],
@@ -238,7 +253,7 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
                                 output,
                                 &mut workspace,
                                 strategy::use_custom_sequence_tables(params, input.len()),
-                            );
+                            )?;
                         }
                     }
                     offset = block_end;
@@ -255,7 +270,11 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
                     let is_last = block_end >= input.len();
 
                     if block_looks_incompressible(&input[offset..block_end]) {
-                        block_encoder::encode_raw_block(&input[offset..block_end], is_last, output);
+                        block_encoder::encode_raw_block(
+                            &input[offset..block_end],
+                            is_last,
+                            output,
+                        )?;
                     } else {
                         #[cfg(feature = "ldm")]
                         let used_ldm = if let Some(ref mut ldm) = ldm_state {
@@ -296,7 +315,7 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
                             output,
                             &mut workspace,
                             strategy::use_custom_sequence_tables(params, input.len()),
-                        );
+                        )?;
                     }
                     offset = block_end;
                 }
@@ -306,7 +325,8 @@ fn compress_frame(input: &[u8], params: &strategy::LevelParams, output: &mut Vec
 
     let hash = xxh64(input, 0);
     let checksum = (hash & 0xFFFF_FFFF) as u32;
-    output.extend_from_slice(&checksum.to_le_bytes());
+    output.extend_from_slice(&checksum.to_le_bytes())?;
+    Ok(())
 }
 
 pub fn compress_with_dict(
@@ -320,10 +340,10 @@ pub fn compress_with_dict(
     strategy::apply_raw_literals_size_override(&mut params, input.len());
 
     let mut output = Vec::with_capacity(input.len() + 32);
-    write_frame_header(&mut output, input.len(), Some(dict.id()));
+    write_frame_header(&mut output, input.len(), Some(dict.id()))?;
 
     if input.is_empty() {
-        block_encoder::encode_raw_block(&[], true, &mut output);
+        block_encoder::encode_raw_block(&[], true, &mut output)?;
     } else {
         let prefix = dict.content();
         let mut rep_offsets = *dict.rep_offsets();
@@ -359,7 +379,7 @@ pub fn compress_with_dict(
                     true,
                     &mut output,
                     &mut workspace,
-                );
+                )?;
             } else {
                 block_encoder::encode_compressed_block(
                     input,
@@ -369,7 +389,7 @@ pub fn compress_with_dict(
                     &mut output,
                     &mut workspace,
                     strategy::use_custom_sequence_tables(&params, input.len()),
-                );
+                )?;
             }
         } else {
             let mut combined = Vec::with_capacity(prefix.len() + input.len());
@@ -404,7 +424,7 @@ pub fn compress_with_dict(
                                 is_last,
                                 &mut output,
                                 &mut workspace,
-                            );
+                            )?;
                         } else {
                             block_encoder::encode_compressed_block(
                                 &input[offset..offset + chunk_size],
@@ -414,7 +434,7 @@ pub fn compress_with_dict(
                                 &mut output,
                                 &mut workspace,
                                 strategy::use_custom_sequence_tables(&params, input.len()),
-                            );
+                            )?;
                         }
                         offset += chunk_size;
                     }
@@ -455,7 +475,7 @@ pub fn compress_with_dict(
                             &mut output,
                             &mut workspace,
                             strategy::use_custom_sequence_tables(&params, input.len()),
-                        );
+                        )?;
                         offset += chunk_size;
                     }
                 }
@@ -474,13 +494,9 @@ pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usiz
     let mut params = strategy::level_params_for_size(level, input.len())
         .ok_or(CompressError::InvalidLevel(level))?;
     strategy::apply_raw_literals_size_override(&mut params, input.len());
-    let mut buf = Vec::with_capacity(output.len());
-    compress_frame(input, &params, &mut buf);
-    if buf.len() > output.len() {
-        return Err(CompressError::OutputTooSmall);
-    }
-    output[..buf.len()].copy_from_slice(&buf);
-    Ok(buf.len())
+    let mut sink = SliceSink::new(output);
+    compress_frame(input, &params, &mut sink)?;
+    Ok(sink.pos())
 }
 
 #[cfg(test)]

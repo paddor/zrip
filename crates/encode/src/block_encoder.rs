@@ -3,9 +3,11 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
+use crate::output::OutputSink;
 use crate::primitives;
 use zrip_core::Sequence;
 use zrip_core::bitstream::writer::BitWriter;
+use zrip_core::error::CompressError;
 use zrip_core::fse::{
     FseDecodeEntry, LL_BASELINE_TABLE, LL_BITS_TABLE, LL_DEFAULT_ACCURACY, LL_DEFAULT_DIST,
     ML_BASELINE_TABLE, ML_BITS_TABLE, ML_DEFAULT_ACCURACY, ML_DEFAULT_DIST, OF_DEFAULT_ACCURACY,
@@ -375,13 +377,17 @@ impl PredefinedEncodeTables {
     }
 }
 
-pub fn encode_raw_block(data: &[u8], last: bool, output: &mut Vec<u8>) {
+pub fn encode_raw_block(
+    data: &[u8],
+    last: bool,
+    output: &mut impl OutputSink,
+) -> Result<(), CompressError> {
     let block_size = data.len() as u32;
     let header = (block_size << 3) | if last { 1 } else { 0 };
-    output.push(header as u8);
-    output.push((header >> 8) as u8);
-    output.push((header >> 16) as u8);
-    output.extend_from_slice(data);
+    output.push(header as u8)?;
+    output.push((header >> 8) as u8)?;
+    output.push((header >> 16) as u8)?;
+    output.extend_from_slice(data)
 }
 
 pub(crate) fn encode_compressed_block(
@@ -389,20 +395,18 @@ pub(crate) fn encode_compressed_block(
     sequences: &[Sequence],
     rep_offsets: &mut [u32; 3],
     last: bool,
-    output: &mut Vec<u8>,
+    output: &mut impl OutputSink,
     workspace: &mut BlockEncodeWorkspace,
     use_custom_sequence_tables: bool,
-) {
+) -> Result<(), CompressError> {
     if sequences.is_empty() {
-        encode_raw_block(src, last, output);
-        return;
+        return encode_raw_block(src, last, output);
     }
 
     let n = sequences.len();
     let total_match: usize = sequences.iter().map(|s| s.match_length as usize).sum();
     if total_match <= n * 3 {
-        encode_raw_block(src, last, output);
-        return;
+        return encode_raw_block(src, last, output);
     }
 
     let saved_rep = *rep_offsets;
@@ -491,20 +495,19 @@ pub(crate) fn encode_compressed_block(
     let block_len = literal_section_len + seq_data.len();
     if block_len >= src.len() {
         *rep_offsets = saved_rep;
-        encode_raw_block(src, last, output);
-        return;
+        return encode_raw_block(src, last, output);
     }
 
     let block_size = block_len as u32;
     let header = (block_size << 3) | 0x04 | if last { 1 } else { 0 };
-    output.push(header as u8);
-    output.push((header >> 8) as u8);
-    output.push((header >> 16) as u8);
-    output.extend_from_slice(&workspace.lit_section);
+    output.push(header as u8)?;
+    output.push((header >> 8) as u8)?;
+    output.push((header >> 16) as u8)?;
+    output.extend_from_slice(&workspace.lit_section)?;
     if raw_literals {
-        output.extend_from_slice(&workspace.lit_buf);
+        output.extend_from_slice(&workspace.lit_buf)?;
     }
-    output.extend_from_slice(seq_data);
+    output.extend_from_slice(seq_data)
 }
 
 pub(crate) fn encode_compressed_block_raw(
@@ -512,19 +515,17 @@ pub(crate) fn encode_compressed_block_raw(
     sequences: &[Sequence],
     rep_offsets: &mut [u32; 3],
     last: bool,
-    output: &mut Vec<u8>,
+    output: &mut impl OutputSink,
     workspace: &mut BlockEncodeWorkspace,
-) {
+) -> Result<(), CompressError> {
     if sequences.is_empty() {
-        encode_raw_block(src, last, output);
-        return;
+        return encode_raw_block(src, last, output);
     }
 
     let n = sequences.len();
     let total_match: usize = sequences.iter().map(|s| s.match_length as usize).sum();
     if total_match <= n * 3 {
-        encode_raw_block(src, last, output);
-        return;
+        return encode_raw_block(src, last, output);
     }
 
     let saved_rep = *rep_offsets;
@@ -544,18 +545,17 @@ pub(crate) fn encode_compressed_block_raw(
         workspace.lit_section.len() + workspace.lit_buf.len() + workspace.pred_seq.len();
     if block_len >= src.len() {
         *rep_offsets = saved_rep;
-        encode_raw_block(src, last, output);
-        return;
+        return encode_raw_block(src, last, output);
     }
 
     let block_size = block_len as u32;
     let header = (block_size << 3) | 0x04 | if last { 1 } else { 0 };
-    output.push(header as u8);
-    output.push((header >> 8) as u8);
-    output.push((header >> 16) as u8);
-    output.extend_from_slice(&workspace.lit_section);
-    output.extend_from_slice(&workspace.lit_buf);
-    output.extend_from_slice(&workspace.pred_seq);
+    output.push(header as u8)?;
+    output.push((header >> 8) as u8)?;
+    output.push((header >> 16) as u8)?;
+    output.extend_from_slice(&workspace.lit_section)?;
+    output.extend_from_slice(&workspace.lit_buf)?;
+    output.extend_from_slice(&workspace.pred_seq)
 }
 
 fn pack_sequences_and_literals(
