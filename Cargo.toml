@@ -4,7 +4,7 @@ exclude = ["fuzz", "bench", "jsr"]
 
 [package]
 name = "zrip"
-version = "0.8.3"
+version = "0.8.4"
 edition = "2024"
 rust-version = "1.89"
 description = "Fast, memory-safe Rust implementation of Zstandard compression (levels -8..4)"
@@ -26,9 +26,9 @@ nightly = ["zrip-core/nightly", "zrip-encode/nightly", "zrip-decode/nightly"]
 paranoid = ["zrip-core/paranoid", "zrip-encode/paranoid", "zrip-decode/paranoid"]
 
 [dependencies]
-zrip-core = { version = "0.9.0", path = "crates/core", default-features = false }
-zrip-encode = { version = "0.8.3", path = "crates/encode", default-features = false }
-zrip-decode = { version = "0.8.3", path = "crates/decode", default-features = false }
+zrip-core = { version = "0.9.1", path = "crates/core", default-features = false }
+zrip-encode = { version = "0.8.4", path = "crates/encode", default-features = false }
+zrip-decode = { version = "0.8.4", path = "crates/decode", default-features = false }
 
 [lints]
 workspace = true
