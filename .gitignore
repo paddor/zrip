@@ -4,6 +4,7 @@ __pycache__/
 /tmp/
 target/
 corpus/
+.chart_hw
 /fuzz/artifacts/
 Cargo.lock
 /jsr/src/pkg/
