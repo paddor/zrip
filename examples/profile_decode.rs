@@ -2,7 +2,7 @@ use std::hint::black_box;
 fn main() {
     let path = std::env::args()
         .nth(1)
-        .unwrap_or("corpus/dickens.txt".into());
+        .unwrap_or("corpus/silesia/dickens".into());
     let data = std::fs::read(&path).unwrap();
     let compressed = zrip::compress(&data, 1).unwrap();
     let mut ctx = zrip::DecompressContext::new();

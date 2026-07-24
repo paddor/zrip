@@ -1,7 +1,7 @@
 use std::hint::black_box;
 fn main() {
     let mut args = std::env::args().skip(1);
-    let path = args.next().unwrap_or("corpus/dickens.txt".into());
+    let path = args.next().unwrap_or("corpus/silesia/dickens".into());
     let level = args.next().map_or(1, |s| s.parse().unwrap());
     let iters = args.next().map_or(50, |s| s.parse().unwrap());
     let data = std::fs::read(&path).unwrap();

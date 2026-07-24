@@ -133,13 +133,22 @@ cargo +nightly fuzz run fuzz_corrupt_decompress /path/to/adversarial/corpus \
 
 ### Corpus benchmarks
 
+All benchmark and chart commands below run from the repository root. The
+`bench/` crate is excluded from the workspace, so use
+`--manifest-path bench/Cargo.toml`.
+
 ```bash
-cargo run --example zrip_bench --release        # zrip-only corpus bench
-cargo run --example zrip_bench --release -- --impl all
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --impl all
 ```
 
 Options: `--impl zrip|"C zstd"|all`, `--levels -8,1,3`,
-`--files dickens.txt,mozilla`, `--extra /path/to/file`.
+`--files dickens,mozilla`, `--extra /path/to/file`.
+
+The benchmark harness prepares its own ignored corpus under `bench/corpus/`.
+It downloads the 12 pinned Silesia inputs. `--small-only` slices the first bytes
+from the base corpus in memory; no small corpus files need to be generated.
 
 Results cache under `~/.cache/zrip/` is append-only benchmark history. Do not
 delete, truncate, or rewrite cache files when re-benchmarking after code
@@ -159,7 +168,8 @@ still works via `fearless_simd` (safe `#[target_feature]` wrappers). It must
 be benchmarked as a separate build:
 
 ```bash
-cargo run --example zrip_bench --release --features paranoid
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release \
+  --features paranoid
 ```
 
 This produces `zrip_paranoid.jsonl` cache entries. Always run this after the
@@ -171,63 +181,73 @@ zrip supports levels -8 through 4. The default bench runs all zrip levels.
 To bench a subset of levels:
 
 ```bash
-cargo run --example zrip_bench --release
-cargo run --example zrip_bench --release -- --levels -1,1,3
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --levels -1,1,3
 ```
 
 ## Charts
 
-Plotting scripts in `scripts/`, all reading from `~/.cache/zrip/*.jsonl`:
+Rust chart generation lives in the `bench` crate and reads
+`~/.cache/zrip/*.jsonl`:
 
-| Script | Output | Description |
-|--------|--------|-------------|
-| `plot_scatter.py` | `scatter.svg` | Encode speed vs ratio geomean |
-| `plot_summary.py` | `summary.svg` | Summary comparison table |
-| `plot_matrix.py` | `matrix.svg` | Per-file/level heatmap matrix |
-| `plot_pipeline.py` | `pipeline.svg` | Encode+decode pipeline throughput |
-| `plot_small.py` | `small_encode.svg` | Encode speed vs input size |
-| `plot_small_decode.py` | `small_decode.svg` | Small decode comparison |
+| Command | Output | Description |
+|---------|--------|-------------|
+| `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- scatter` | `scatter.svg` | Encode speed vs ratio geomean |
+| `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- summary` | `summary.svg` | Summary comparison table |
+| `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- matrix` | `matrix.svg` | Per-file/level heatmap matrix |
+| `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- pipeline` | `pipeline.svg` | Encode+decode pipeline throughput |
+| `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- small-encode` | `small_encode.svg` | Encode speed vs input size |
+| `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- small-decode` | `small_decode.svg` | Small decode comparison |
 
 Chart refresh means benchmark first, appending new rows to the cache, then run
-the plotting scripts. Re-running plot scripts against old cache data only
-replots; it does not refresh the charts.
+the chart tool. Re-running the chart tool against old cache data only replots;
+it does not refresh the charts.
 
 For normal zrip code changes, refresh only the changed implementations:
 
 ```bash
-cd bench
-cargo run --example zrip_bench --release
-cargo run --example zrip_bench --release --features paranoid
-cargo run --example zrip_bench --release -- --small-only
-cargo run --example zrip_bench --release -- \
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release \
+  --features paranoid
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --small-only
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
   --small-only --decode-only --levels 3 --impl zrip
-cargo run --example zrip_bench --release --features paranoid -- \
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release \
+  --features paranoid -- \
   --small-only --decode-only --levels 3 --impl zrip
-cd ..
 ```
 
 That updates the `zrip` and `zrip paranoid` rows used by the charts without
 rerunning stable external implementations.
 
-### Regenerating all charts
+### Regenerating charts
 
-After any full-corpus benchmark run, including paranoid, regenerate all
-charts:
+After a full-corpus benchmark run, including paranoid, regenerate only the
+full-corpus charts:
 
 ```bash
-export ZRIP_HW_EXTRAS="performance governor,turbo off"
-python3 scripts/plot_scatter.py doc/charts/x86_64/
-python3 scripts/plot_summary.py doc/charts/x86_64/
-python3 scripts/plot_matrix.py doc/charts/x86_64/
-python3 scripts/plot_pipeline.py doc/charts/x86_64/
-python3 scripts/plot_small.py doc/charts/x86_64/
-python3 scripts/plot_small_decode.py doc/charts/x86_64/
+cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- scatter
+cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- summary
+cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- matrix
+cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- pipeline
 ```
 
-The `ZRIP_HW_EXTRAS` env var is required when the CPU governor and turbo state
-cannot be auto-detected (e.g. in a VM or container). It appends the given
-labels to the hardware subtitle in the chart. On bare metal with sysfs access,
-the script detects these automatically.
+The `all` chart command also renders small-input charts, so it needs
+small-input encode and decode caches too. With no output dir, charts go under
+`doc/charts/<arch>/`.
+
+Optional local hardware labels can live in ignored `.chart_hw`:
+
+```text
+prefix=Linux VM on a 2018 Mac Mini
+postfix=performance governor, turbo off
+```
+
+The chart tool reads `.chart_hw` from the current dir or parent dir. Env vars
+`ZRIP_HW_PREFIX`, `ZRIP_HW_POSTFIX`, and `ZRIP_HW_EXTRAS` override or extend
+local detection.
 
 ### Small-input benchmark + chart workflow
 
@@ -235,11 +255,10 @@ the script detects these automatically.
 paranoid). Default `--small-only` benchmarks zrip only:
 
 ```bash
-cd bench
-cargo run --example zrip_bench --release -- --small-only
-cd ..
-export ZRIP_HW_EXTRAS="performance governor,turbo off"
-python3 scripts/plot_small.py doc/charts/x86_64/
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --small-only
+cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- small-encode \
+  doc/charts/x86_64/
 ```
 
 ### All-implementation benchmark + chart workflow
@@ -248,15 +267,17 @@ Use this only when refreshing all baselines, validating a benchmark harness
 change, or when explicitly asked to re-run every implementation.
 
 ```bash
-cd bench
-cargo run --example zrip_bench --release -- --impl all
-cargo run --example zrip_bench --release --features paranoid
-cd ..
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --impl all
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release \
+  --features paranoid
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --small-only --impl all
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --small-only --decode-only --levels 3
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release \
+  --features paranoid -- \
+  --small-only --decode-only --levels 3 --impl zrip
 export ZRIP_HW_EXTRAS="performance governor,turbo off"
-python3 scripts/plot_scatter.py doc/charts/x86_64/
-python3 scripts/plot_summary.py doc/charts/x86_64/
-python3 scripts/plot_matrix.py doc/charts/x86_64/
-python3 scripts/plot_pipeline.py doc/charts/x86_64/
-python3 scripts/plot_small.py doc/charts/x86_64/
-python3 scripts/plot_small_decode.py doc/charts/x86_64/
+cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- all
 ```

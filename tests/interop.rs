@@ -358,17 +358,10 @@ fn roundtrip_negative_levels_cross_validate() {
 #[test]
 fn roundtrip_corpus_l3_cross_validate() {
     for name in &[
-        "dickens",
-        "hdfs.json",
-        "mr",
-        "mozilla",
-        "nci",
-        "osdb",
-        "samba",
-        "webster",
-        "x-ray",
+        "dickens", "mr", "mozilla", "nci", "ooffice", "osdb", "reymont", "samba", "sao", "webster",
+        "x-ray", "xml",
     ] {
-        let path = format!("corpus/{name}");
+        let path = format!("corpus/silesia/{name}");
         let Ok(data) = std::fs::read(&path) else {
             continue;
         };
@@ -382,17 +375,10 @@ fn roundtrip_corpus_l3_cross_validate() {
 #[test]
 fn roundtrip_corpus_l4_cross_validate() {
     for name in &[
-        "dickens",
-        "hdfs.json",
-        "mr",
-        "mozilla",
-        "nci",
-        "osdb",
-        "samba",
-        "webster",
-        "x-ray",
+        "dickens", "mr", "mozilla", "nci", "ooffice", "osdb", "reymont", "samba", "sao", "webster",
+        "x-ray", "xml",
     ] {
-        let path = format!("corpus/{name}");
+        let path = format!("corpus/silesia/{name}");
         let Ok(data) = std::fs::read(&path) else {
             continue;
         };
