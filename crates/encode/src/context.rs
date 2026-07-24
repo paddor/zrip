@@ -314,10 +314,10 @@ impl CompressContext {
 
         self.output.clear();
         self.output.reserve(input.len() + 32);
-        write_frame_header(&mut self.output, input.len(), Some(dict_id));
+        write_frame_header(&mut self.output, input.len(), Some(dict_id))?;
 
         if input.is_empty() {
-            block_encoder::encode_raw_block(&[], true, &mut self.output);
+            block_encoder::encode_raw_block(&[], true, &mut self.output)?;
         } else if use_attached {
             let input_hash_log = if input.len() >= 2 {
                 let src_log = 32 - ((input.len() as u32) - 1).leading_zeros();
@@ -352,7 +352,7 @@ impl CompressContext {
                     true,
                     &mut self.output,
                     &mut self.workspace,
-                );
+                )?;
             } else {
                 block_encoder::encode_compressed_block(
                     input,
@@ -362,7 +362,7 @@ impl CompressContext {
                     &mut self.output,
                     &mut self.workspace,
                     strategy::use_custom_sequence_tables(&params, input.len()),
-                );
+                )?;
             }
         } else {
             let combined = &prep.combined;
@@ -402,7 +402,7 @@ impl CompressContext {
                         true,
                         &mut self.output,
                         &mut self.workspace,
-                    );
+                    )?;
                 } else {
                     block_encoder::encode_compressed_block(
                         input,
@@ -412,7 +412,7 @@ impl CompressContext {
                         &mut self.output,
                         &mut self.workspace,
                         strategy::use_custom_sequence_tables(&params, input.len()),
-                    );
+                    )?;
                 }
             } else {
                 let mut offset = 0;
@@ -452,7 +452,7 @@ impl CompressContext {
                             is_last,
                             &mut self.output,
                             &mut self.workspace,
-                        );
+                        )?;
                     } else {
                         block_encoder::encode_compressed_block(
                             &input[offset..offset + chunk_size],
@@ -462,7 +462,7 @@ impl CompressContext {
                             &mut self.output,
                             &mut self.workspace,
                             strategy::use_custom_sequence_tables(&params, input.len()),
-                        );
+                        )?;
                     }
                     offset += chunk_size;
                 }
@@ -552,10 +552,10 @@ fn compress_core(
 
     output.clear();
     output.reserve(input.len() + 32);
-    write_frame_header(output, input.len(), dict_id);
+    write_frame_header(output, input.len(), dict_id)?;
 
     if input.is_empty() {
-        block_encoder::encode_raw_block(&[], true, output);
+        block_encoder::encode_raw_block(&[], true, output)?;
     } else {
         let has_prefix = !prefix.is_empty();
         let mut rep_offsets = init_rep_offsets;
@@ -589,7 +589,7 @@ fn compress_core(
                             true,
                             output,
                             workspace,
-                        );
+                        )?;
                     } else {
                         block_encoder::encode_compressed_block(
                             input,
@@ -599,7 +599,7 @@ fn compress_core(
                             output,
                             workspace,
                             strategy::use_custom_sequence_tables(&params, input.len()),
-                        );
+                        )?;
                     }
                 } else if has_prefix {
                     combined.clear();
@@ -629,7 +629,7 @@ fn compress_core(
                                 is_last,
                                 output,
                                 workspace,
-                            );
+                            )?;
                         } else {
                             block_encoder::encode_compressed_block(
                                 &input[offset..offset + chunk_size],
@@ -639,7 +639,7 @@ fn compress_core(
                                 output,
                                 workspace,
                                 strategy::use_custom_sequence_tables(&params, input.len()),
-                            );
+                            )?;
                         }
                         offset += chunk_size;
                     }
@@ -655,7 +655,7 @@ fn compress_core(
                                 &input[offset..block_end],
                                 is_last,
                                 output,
-                            );
+                            )?;
                         } else {
                             fast::compress_fast_block(
                                 input,
@@ -674,7 +674,7 @@ fn compress_core(
                                     is_last,
                                     output,
                                     workspace,
-                                );
+                                )?;
                             } else {
                                 block_encoder::encode_compressed_block(
                                     &input[offset..block_end],
@@ -684,7 +684,7 @@ fn compress_core(
                                     output,
                                     workspace,
                                     strategy::use_custom_sequence_tables(&params, input.len()),
-                                );
+                                )?;
                             }
                         }
                         offset = block_end;
@@ -714,7 +714,7 @@ fn compress_core(
                         output,
                         workspace,
                         strategy::use_custom_sequence_tables(&params, input.len()),
-                    );
+                    )?;
                 } else if has_prefix {
                     combined.clear();
                     combined.reserve(prefix.len() + input.len());
@@ -752,7 +752,7 @@ fn compress_core(
                             output,
                             workspace,
                             strategy::use_custom_sequence_tables(&params, input.len()),
-                        );
+                        )?;
                         offset += chunk_size;
                     }
                 } else {
@@ -768,7 +768,7 @@ fn compress_core(
                                 &input[offset..block_end],
                                 is_last,
                                 output,
-                            );
+                            )?;
                         } else {
                             dfast::compress_dfast_block(
                                 input,
@@ -788,7 +788,7 @@ fn compress_core(
                                 output,
                                 workspace,
                                 strategy::use_custom_sequence_tables(&params, input.len()),
-                            );
+                            )?;
                         }
                         offset = block_end;
                     }

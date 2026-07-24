@@ -213,7 +213,8 @@ impl<W: Write> FrameEncoder<W> {
     fn flush_block(&mut self, last: bool) -> io::Result<()> {
         if self.buffer.is_empty() && last {
             self.block_out.clear();
-            block_encoder::encode_raw_block(&[], true, &mut self.block_out);
+            block_encoder::encode_raw_block(&[], true, &mut self.block_out)
+                .map_err(io::Error::other)?;
             self.inner.write_all(&self.block_out)?;
             return Ok(());
         }
@@ -231,7 +232,8 @@ impl<W: Write> FrameEncoder<W> {
         self.block_out.clear();
         self.block_out.reserve(chunk.len() + 32);
         if crate::block_looks_incompressible(&chunk) {
-            block_encoder::encode_raw_block(&chunk, last, &mut self.block_out);
+            block_encoder::encode_raw_block(&chunk, last, &mut self.block_out)
+                .map_err(io::Error::other)?;
         } else {
             if seed_dict {
                 match self.params.strategy {
@@ -317,7 +319,8 @@ impl<W: Write> FrameEncoder<W> {
                     last,
                     &mut self.block_out,
                     &mut self.workspace,
-                );
+                )
+                .map_err(io::Error::other)?;
             } else {
                 block_encoder::encode_compressed_block(
                     &chunk,
@@ -327,7 +330,8 @@ impl<W: Write> FrameEncoder<W> {
                     &mut self.block_out,
                     &mut self.workspace,
                     true,
-                );
+                )
+                .map_err(io::Error::other)?;
             }
         }
 
