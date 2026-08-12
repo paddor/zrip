@@ -314,7 +314,12 @@ impl CompressContext {
 
         self.output.clear();
         self.output.reserve(input.len() + 32);
-        write_frame_header(&mut self.output, input.len(), Some(dict_id))?;
+        write_frame_header(
+            &mut self.output,
+            input.len(),
+            Some(dict_id),
+            params.window_log,
+        )?;
 
         if input.is_empty() {
             block_encoder::encode_raw_block(&[], true, &mut self.output)?;
@@ -552,7 +557,7 @@ fn compress_core(
 
     output.clear();
     output.reserve(input.len() + 32);
-    write_frame_header(output, input.len(), dict_id)?;
+    write_frame_header(output, input.len(), dict_id, params.window_log)?;
 
     if input.is_empty() {
         block_encoder::encode_raw_block(&[], true, output)?;

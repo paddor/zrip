@@ -264,6 +264,41 @@ fn roundtrip_block_boundary_sizes_c_cross_validate() {
 }
 
 #[test]
+#[ignore = "allocates more than 128 MiB to exercise the large-frame header path"]
+fn large_plain_frame_header_has_bounded_window_and_c_decompresses() {
+    struct ZeroSink {
+        len: usize,
+    }
+
+    impl std::io::Write for ZeroSink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            assert!(buf.iter().all(|&b| b == 0));
+            self.len += buf.len();
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let size = zrip::frame::MAX_WINDOW_SIZE as usize + 1;
+    let original = vec![0u8; size];
+    let compressed = zrip::compress(&original, 1).unwrap();
+
+    let header = zrip::frame::header::parse_frame_header(&compressed).unwrap();
+    assert!(!header.single_segment);
+    assert_eq!(header.frame_content_size, Some(size as u64));
+    assert_eq!(header.window_size, 1 << 19);
+    assert!(header.content_checksum);
+
+    let mut decoder = zstd::Decoder::new(compressed.as_slice()).unwrap();
+    let mut sink = ZeroSink { len: 0 };
+    std::io::copy(&mut decoder, &mut sink).unwrap();
+    assert_eq!(sink.len, size);
+}
+
+#[test]
 fn roundtrip_single_bytes_c_cross_validate() {
     for b in 0u8..=255 {
         let original = vec![b];
@@ -959,6 +994,23 @@ fn streaming_encoder_all_levels_c_decompress() {
 }
 
 #[test]
+fn streaming_encoder_header_has_bounded_no_fcs_window() {
+    let original: Vec<u8> = b"ABCDEFGH".iter().cycle().take(10000).copied().collect();
+    let mut encoder = zrip::FrameEncoder::new(Vec::new(), 1).unwrap();
+    std::io::Write::write_all(&mut encoder, &original).unwrap();
+    let compressed = encoder.finish().unwrap();
+
+    let header = zrip::frame::header::parse_frame_header(&compressed).unwrap();
+    assert!(!header.single_segment);
+    assert_eq!(header.frame_content_size, None);
+    assert_eq!(header.window_size, 1 << 19);
+    assert!(header.content_checksum);
+
+    let decompressed = zstd::decode_all(&compressed[..]).unwrap();
+    assert_eq!(decompressed, original);
+}
+
+#[test]
 fn frame_decoder_c_zstd_data() {
     use std::io::Read;
     let data: Vec<u8> = (0..50_000).map(|i| (i % 251) as u8).collect();
@@ -1095,6 +1147,28 @@ fn roundtrip_dict_compress_c_decompress() {
         let zrip_dec = zrip::decompress_with_dict(&compressed, &dict).unwrap();
         assert_eq!(&zrip_dec, sample);
     }
+}
+
+#[test]
+fn dict_frame_header_has_bounded_window_and_c_decompresses() {
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let c_dict = zstd::dict::DecoderDictionary::copy(&dict_data);
+    let sample = &samples[0];
+
+    let compressed = zrip::compress_with_dict(sample, 1, &dict).unwrap();
+    let header = zrip::frame::header::parse_frame_header(&compressed).unwrap();
+    assert!(!header.single_segment);
+    assert_eq!(header.frame_content_size, Some(sample.len() as u64));
+    assert_eq!(header.dict_id, Some(dict.id()));
+    assert!(header.window_size <= zrip::frame::MAX_WINDOW_SIZE);
+    assert!(header.content_checksum);
+
+    let mut decoder =
+        zstd::Decoder::with_prepared_dictionary(compressed.as_slice(), &c_dict).unwrap();
+    let mut decompressed = Vec::new();
+    std::io::Read::read_to_end(&mut decoder, &mut decompressed).unwrap();
+    assert_eq!(&decompressed, sample);
 }
 
 #[test]

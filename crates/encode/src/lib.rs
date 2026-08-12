@@ -41,26 +41,42 @@ use alloc::vec::Vec;
 use crate::output::{OutputSink, SliceSink};
 use crate::strategy::Strategy;
 use zrip_core::error::CompressError;
-use zrip_core::frame::{MAX_BLOCK_SIZE, ZSTD_MAGIC};
+use zrip_core::frame::{MAX_BLOCK_SIZE, MAX_WINDOW_SIZE, ZSTD_MAGIC};
 use zrip_core::xxhash::xxh64;
 
 pub(crate) fn write_frame_header(
     output: &mut impl OutputSink,
     content_size: usize,
     dict_id: Option<u32>,
+    window_log: u32,
+) -> Result<(), CompressError> {
+    write_frame_header_inner(output, Some(content_size), dict_id, window_log)
+}
+
+#[cfg_attr(not(feature = "std"), allow(dead_code))]
+pub(crate) fn write_frame_header_without_content_size(
+    output: &mut impl OutputSink,
+    dict_id: Option<u32>,
+    window_log: u32,
+) -> Result<(), CompressError> {
+    write_frame_header_inner(output, None, dict_id, window_log)
+}
+
+fn write_frame_header_inner(
+    output: &mut impl OutputSink,
+    content_size: Option<usize>,
+    dict_id: Option<u32>,
+    window_log: u32,
 ) -> Result<(), CompressError> {
     output.extend_from_slice(&ZSTD_MAGIC.to_le_bytes())?;
 
-    let fcs_size = if content_size <= 255 {
-        1
-    } else if content_size <= 0xFFFF + 256 {
-        2
-    } else if content_size <= 0xFFFF_FFFF {
-        4
-    } else {
-        8
-    };
+    let single_segment =
+        dict_id.is_none() && content_size.is_some_and(|size| size as u64 <= MAX_WINDOW_SIZE);
+    let fcs_size = content_size.map_or(0, |size| {
+        frame_content_size_field_size(size, single_segment)
+    });
     let fcs_flag: u8 = match fcs_size {
+        0 => 0,
         1 => 0,
         2 => 1,
         4 => 2,
@@ -74,8 +90,12 @@ pub(crate) fn write_frame_header(
         Some(_) => 3,
     };
 
-    let descriptor = 0x20 | 0x04 | (fcs_flag << 6) | dict_id_flag;
+    let descriptor = if single_segment { 0x20 } else { 0 } | 0x04 | (fcs_flag << 6) | dict_id_flag;
     output.push(descriptor)?;
+
+    if !single_segment {
+        output.push(window_descriptor_for_log(window_log))?;
+    }
 
     match dict_id {
         Some(id) if id <= 0xFF => output.push(id as u8)?,
@@ -84,7 +104,11 @@ pub(crate) fn write_frame_header(
         None => {}
     }
 
+    let Some(content_size) = content_size else {
+        return Ok(());
+    };
     match fcs_size {
+        0 => {}
         1 => output.push(content_size as u8)?,
         2 => {
             let v = (content_size - 256) as u16;
@@ -94,6 +118,23 @@ pub(crate) fn write_frame_header(
         _ => output.extend_from_slice(&(content_size as u64).to_le_bytes())?,
     }
     Ok(())
+}
+
+fn frame_content_size_field_size(content_size: usize, single_segment: bool) -> usize {
+    if single_segment && content_size <= 255 {
+        1
+    } else if (256..=0xFFFF + 256).contains(&content_size) {
+        2
+    } else if content_size <= 0xFFFF_FFFF {
+        4
+    } else {
+        8
+    }
+}
+
+fn window_descriptor_for_log(window_log: u32) -> u8 {
+    let window_log = window_log.clamp(strategy::WINDOW_LOG_MIN, strategy::WINDOW_LOG_MAX);
+    ((window_log - 10) as u8) << 3
 }
 
 pub(crate) fn block_looks_incompressible(data: &[u8]) -> bool {
@@ -175,7 +216,7 @@ fn compress_frame(
     params: &strategy::LevelParams,
     output: &mut impl OutputSink,
 ) -> Result<(), CompressError> {
-    write_frame_header(output, input.len(), None)?;
+    write_frame_header(output, input.len(), None, params.window_log)?;
 
     if input.is_empty() {
         block_encoder::encode_raw_block(&[], true, output)?;
@@ -340,7 +381,7 @@ pub fn compress_with_dict(
     strategy::apply_raw_literals_size_override(&mut params, input.len());
 
     let mut output = Vec::with_capacity(input.len() + 32);
-    write_frame_header(&mut output, input.len(), Some(dict.id()))?;
+    write_frame_header(&mut output, input.len(), Some(dict.id()), params.window_log)?;
 
     if input.is_empty() {
         block_encoder::encode_raw_block(&[], true, &mut output)?;
@@ -502,6 +543,7 @@ pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usiz
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zrip_core::frame::header::parse_frame_header;
 
     #[test]
     fn clamp_params_normalizes_public_log_values() {
@@ -534,5 +576,66 @@ mod tests {
             let ldm = params.ldm_params.unwrap();
             assert!(ldm.hash_log >= ldm.bucket_size_log);
         }
+    }
+
+    #[test]
+    fn small_plain_frame_uses_single_segment_header() {
+        let mut output = Vec::new();
+
+        write_frame_header(&mut output, 12, None, 19).unwrap();
+        let header = parse_frame_header(&output).unwrap();
+
+        assert!(header.single_segment);
+        assert_eq!(header.frame_content_size, Some(12));
+        assert_eq!(header.window_size, 12);
+        assert_eq!(header.dict_id, None);
+        assert!(header.content_checksum);
+        assert_eq!(header.header_size, 6);
+    }
+
+    #[test]
+    fn large_plain_frame_uses_bounded_window_descriptor() {
+        let mut output = Vec::new();
+        let content_size = MAX_WINDOW_SIZE as usize + 1;
+
+        write_frame_header(&mut output, content_size, None, 19).unwrap();
+        let header = parse_frame_header(&output).unwrap();
+
+        assert!(!header.single_segment);
+        assert_eq!(header.frame_content_size, Some(content_size as u64));
+        assert_eq!(header.window_size, 1 << 19);
+        assert_eq!(header.dict_id, None);
+        assert!(header.content_checksum);
+        assert_eq!(header.header_size, 10);
+    }
+
+    #[test]
+    fn dict_frame_uses_window_descriptor_even_when_small() {
+        let mut output = Vec::new();
+
+        write_frame_header(&mut output, 12, Some(0x1234), 10).unwrap();
+        let header = parse_frame_header(&output).unwrap();
+
+        assert!(!header.single_segment);
+        assert_eq!(header.frame_content_size, Some(12));
+        assert_eq!(header.window_size, 1 << 10);
+        assert_eq!(header.dict_id, Some(0x1234));
+        assert!(header.content_checksum);
+        assert_eq!(header.header_size, 12);
+    }
+
+    #[test]
+    fn no_fcs_frame_uses_window_descriptor() {
+        let mut output = Vec::new();
+
+        write_frame_header_without_content_size(&mut output, None, 19).unwrap();
+        let header = parse_frame_header(&output).unwrap();
+
+        assert!(!header.single_segment);
+        assert_eq!(header.frame_content_size, None);
+        assert_eq!(header.window_size, 1 << 19);
+        assert_eq!(header.dict_id, None);
+        assert!(header.content_checksum);
+        assert_eq!(header.header_size, 6);
     }
 }
