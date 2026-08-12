@@ -570,9 +570,7 @@ pub(crate) fn decode_sequences_dispatch(
 
     #[cfg(all(feature = "std", feature = "simd"))]
     {
-        use std::sync::OnceLock;
-        static LEVEL: OnceLock<fearless_simd::Level> = OnceLock::new();
-        let level = *LEVEL.get_or_init(fearless_simd::Level::new);
+        let level = fearless_simd::Level::new();
         return fearless_simd::dispatch!(level, _simd => {
             if scope.history.is_empty() {
                 decode_execute_sequences::<false>(
