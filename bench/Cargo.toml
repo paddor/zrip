@@ -11,8 +11,8 @@ paranoid = ["zrip/paranoid"]
 zrip = { path = "..", features = ["dict_builder", "ldm"] }
 zstd = "0.13"
 zstd-safe = "7"
-lz4rip = "0.10.1"
-ruzstd = "0.8"
+lz4rip = "0.11.3"
+ruzstd = "0.9"
 structured-zstd = "0.0.49"
 libc = "0.2"
 plotters = { version = "0.3", default-features = false, features = ["svg_backend", "line_series"] }
