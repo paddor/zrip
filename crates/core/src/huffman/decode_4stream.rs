@@ -22,7 +22,7 @@ pub(super) unsafe fn decode_single_stream_bmi2_safe(
     data: &[u8],
     output: &mut [u8],
 ) -> Result<(), DecompressError> {
-    // SAFETY: The caller verifies BMI2 availability via cpu_tier() >= CpuTier::Bmi2.
+    // SAFETY: The caller verifies BMI2 availability via has_bmi2().
     unsafe { decode_single_stream_bmi2(table, table_log, data, output) }
 }
 
@@ -46,7 +46,7 @@ pub(super) unsafe fn decode_4_streams_core_bmi2_safe(
     output_size: usize,
     output: &mut [u8],
 ) -> Result<(), DecompressError> {
-    // SAFETY: The caller verifies BMI2 availability via cpu_tier() >= CpuTier::Bmi2.
+    // SAFETY: The caller verifies BMI2 availability via has_bmi2().
     unsafe { decode_4_streams_core_bmi2(table, table_log, data, output_size, output) }
 }
 

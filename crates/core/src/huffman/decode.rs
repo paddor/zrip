@@ -79,8 +79,8 @@ pub fn decode_single_stream_vec(
     prepare_output(output, output_size);
     #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
-        if crate::simd::cpu_tier() >= crate::simd::CpuTier::Bmi2 {
-            // SAFETY: cpu_tier() >= Bmi2 proves BMI2 is available.
+        if crate::simd::has_bmi2() {
+            // SAFETY: has_bmi2() proves BMI2 is available.
             let result = unsafe {
                 super::decode_4stream::decode_single_stream_bmi2_safe(
                     table, table_log, data, output,
@@ -122,8 +122,8 @@ pub fn decode_4_streams_into(
     prepare_output(output, output_size);
     #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
     {
-        if crate::simd::cpu_tier() >= crate::simd::CpuTier::Bmi2 {
-            // SAFETY: cpu_tier() >= Bmi2 proves BMI2 is available.
+        if crate::simd::has_bmi2() {
+            // SAFETY: has_bmi2() proves BMI2 is available.
             let result = unsafe {
                 super::decode_4stream::decode_4_streams_core_bmi2_safe(
                     table,
