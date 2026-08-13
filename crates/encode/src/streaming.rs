@@ -8,10 +8,11 @@ use crate::fast;
 #[cfg(feature = "ldm")]
 use crate::ldm::LdmState;
 use crate::strategy::{self, LevelParams, Strategy};
+use crate::write_frame_header_without_content_size;
 use zrip_core::Sequence;
 use zrip_core::dict::Dictionary;
 use zrip_core::error::CompressError;
-use zrip_core::frame::{MAX_BLOCK_SIZE, ZSTD_MAGIC};
+use zrip_core::frame::MAX_BLOCK_SIZE;
 use zrip_core::xxhash::Xxh64State;
 
 /// Streaming zstd compressor implementing [`Write`].
@@ -172,41 +173,14 @@ impl<W: Write> FrameEncoder<W> {
     fn write_header(&mut self) -> io::Result<()> {
         self.header_written = true;
 
-        self.inner.write_all(&ZSTD_MAGIC.to_le_bytes())?;
-
-        let window_log = self.params.window_log;
-
-        let dict_id_flag = if let Some(ref dict) = self.dict {
-            let id = dict.id();
-            if id <= 0xFF {
-                1u8
-            } else if id <= 0xFFFF {
-                2
-            } else {
-                3
-            }
-        } else {
-            0
-        };
-
-        let descriptor = 0x04u8 | dict_id_flag;
-        self.inner.write_all(&[descriptor])?;
-
-        let mantissa = 0u8;
-        let exponent = (window_log - 10) as u8;
-        let window_descriptor = (exponent << 3) | mantissa;
-        self.inner.write_all(&[window_descriptor])?;
-
-        if let Some(ref dict) = self.dict {
-            let id = dict.id();
-            match dict_id_flag {
-                1 => self.inner.write_all(&[id as u8])?,
-                2 => self.inner.write_all(&(id as u16).to_le_bytes())?,
-                3 => self.inner.write_all(&id.to_le_bytes())?,
-                _ => unreachable!(),
-            }
-        }
-
+        self.block_out.clear();
+        write_frame_header_without_content_size(
+            &mut self.block_out,
+            self.dict.as_ref().map(Dictionary::id),
+            self.params.window_log,
+        )
+        .map_err(io::Error::other)?;
+        self.inner.write_all(&self.block_out)?;
         Ok(())
     }
 

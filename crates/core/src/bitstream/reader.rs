@@ -119,7 +119,7 @@ mod tests {
         assert_eq!(r.read_bits(1).unwrap(), 1);
         assert_eq!(r.read_bits(1).unwrap(), 0);
         assert_eq!(r.read_bits(1).unwrap(), 1);
-        assert!(r.is_empty());
+        assert_eq!(r.bits_remaining(), 0);
     }
 
     #[test]
