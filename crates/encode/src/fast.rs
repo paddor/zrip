@@ -1264,6 +1264,6 @@ mod tests {
             &mut sequences,
         );
 
-        assert!(!sequences.is_empty());
+        assert_ne!(sequences.len(), 0);
     }
 }
