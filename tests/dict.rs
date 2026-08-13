@@ -18,7 +18,7 @@ fn zrip_trained_dict_roundtrip() {
     );
 
     assert_ne!(dict.id(), 0);
-    assert!(!dict.content().is_empty());
+    assert_ne!(dict.content(), []);
 
     for sample in &samples[..20] {
         let compressed = zrip::compress_with_dict(sample, 1, &dict).unwrap();
@@ -297,7 +297,7 @@ fn streaming_dict_empty_input() {
     let mut decoder = zrip::FrameDecoder::with_dict(compressed.as_slice(), dict.clone());
     let mut decompressed = Vec::new();
     decoder.read_to_end(&mut decompressed).unwrap();
-    assert!(decompressed.is_empty());
+    assert_eq!(decompressed, Vec::<u8>::new());
 }
 
 #[cfg(feature = "dict_builder")]

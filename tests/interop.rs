@@ -1091,7 +1091,7 @@ fn parse_c_trained_dictionary() {
     let (_, dict_data) = make_dict_samples();
     let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
     assert_ne!(dict.id(), 0);
-    assert!(!dict.content().is_empty());
+    assert_ne!(dict.content(), []);
     assert!(dict.rep_offsets()[0] > 0);
     assert!(dict.rep_offsets()[1] > 0);
     assert!(dict.rep_offsets()[2] > 0);
