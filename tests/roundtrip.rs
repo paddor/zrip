@@ -348,7 +348,7 @@ fn decompress_bad_magic() {
 #[test]
 fn decompress_empty_input() {
     let result = zrip::decompress(&[]).unwrap();
-    assert!(result.is_empty());
+    assert_eq!(result, Vec::<u8>::new());
 }
 
 #[cfg(not(miri))]
