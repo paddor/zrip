@@ -22,7 +22,7 @@ paranoid = ["zrip-core/paranoid"]
 
 [dependencies]
 zrip-core = { version = "0.9.1", path = "../core", default-features = false }
-fearless_simd = { version = "0.6", optional = true }
+fearless_simd = { version = "0.7.0", optional = true }
 
 [dev-dependencies]
 zrip = { path = "../.." }
