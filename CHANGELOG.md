@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.8.6]
+
+### Changed
+
+- Bumped JSR package `@paddor/zrip` to 0.5.6.
+- Bumped `fearless_simd` to 0.7.0 and simplified runtime SIMD dispatch to use
+  the upstream cached level detection.
+- Replaced the published `zrip-core` CPU tier helper with a narrower BMI2
+  feature predicate.
+
+### Fixed
+
+- Emit explicit bounded window descriptors for large, dictionary, and
+  no-content-size zstd frames instead of deriving unbounded decode windows from
+  content size.
+
 ## [0.8.5]
 
 ### Added
