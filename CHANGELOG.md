@@ -11,6 +11,7 @@
   the upstream cached level detection.
 - Replaced the published `zrip-core` CPU tier helper with a narrower BMI2
   feature predicate.
+- Refreshed x86_64 benchmark charts.
 
 ### Fixed
 
