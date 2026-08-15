@@ -402,16 +402,6 @@ fn detect_hardware() -> Option<String> {
     let prefix = std::env::var("ZRIP_HW_PREFIX")
         .ok()
         .or_else(|| hw_conf.get("prefix").cloned());
-    let cores = std::thread::available_parallelism()
-        .ok()
-        .map(std::num::NonZero::get);
-
-    if let Some(cpu) = &mut cpu
-        && let Some(cores) = cores
-    {
-        cpu.push_str(&format!(", {cores} cores"));
-    }
-
     let mut parts = Vec::new();
     if let Some(prefix) = prefix.filter(|s| !s.trim().is_empty()) {
         parts.push(prefix);
