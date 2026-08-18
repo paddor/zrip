@@ -25,6 +25,7 @@ const LEVEL: i32 = 1;
 const DECODE_LEVEL: i32 = 3;
 const LEVELS: &[i32] = &[3, 1, -1];
 const COLUMN_LEVELS: &[i32] = &[-1, 1, 3];
+const SUMMARY_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 const BAND_LEVELS: &[i32] = &[-8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 const C_ZSTD_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 const INTERIOR_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3];
@@ -230,9 +231,9 @@ impl Config {
                 ),
             ];
             cfg.scatter_codecs = vec!["C zstd", "zrip", "structured-zstd", "zrip paranoid"];
-            cfg.summary_codecs = cfg.scatter_codecs.clone();
-            cfg.matrix_codecs = cfg.scatter_codecs.clone();
-            cfg.pipeline_codecs = cfg.scatter_codecs.clone();
+            cfg.summary_codecs = vec!["C zstd", "zrip", "zrip paranoid", "structured-zstd"];
+            cfg.matrix_codecs = cfg.summary_codecs.clone();
+            cfg.pipeline_codecs = cfg.summary_codecs.clone();
             cfg.small_codecs = vec!["C zstd", "zrip", "structured-zstd"];
             cfg.small_decode_codecs = cfg.scatter_codecs.clone();
         } else if profile.is_some() {
@@ -284,16 +285,22 @@ impl Config {
             summary_codecs: vec![
                 "C zstd",
                 "zrip",
-                "structured-zstd",
                 "zrip paranoid",
+                "structured-zstd",
                 "ruzstd",
             ],
-            matrix_codecs: vec!["C zstd", "zrip", "structured-zstd", "zrip paranoid"],
+            matrix_codecs: vec![
+                "C zstd",
+                "zrip",
+                "zrip paranoid",
+                "structured-zstd",
+                "ruzstd",
+            ],
             pipeline_codecs: vec![
                 "C zstd",
                 "zrip",
-                "structured-zstd",
                 "zrip paranoid",
+                "structured-zstd",
                 "ruzstd",
             ],
             small_codecs: vec!["C zstd", "zrip", "structured-zstd"],
@@ -1213,13 +1220,13 @@ fn compute_pipeline(row: &BenchRow) -> (f64, f64, f64) {
 }
 
 fn draw_summary(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
-    let data = load_level_data(cfg, &cfg.summary_codecs, LEVEL, 10_000, Some(MAIN_CORPUS));
+    let data = load_all_data(cfg, &cfg.summary_codecs, 10_000, Some(MAIN_CORPUS));
     let main_inputs = input_names(MAIN_CORPUS);
     require_named_rows(
         &data,
         &cfg.summary_codecs,
         &main_inputs,
-        |_| vec![LEVEL],
+        |codec| supported_chart_levels(codec, SUMMARY_LEVELS),
         "summary",
     )?;
     let mut stacks: BTreeMap<String, (f64, f64, f64)> = BTreeMap::new();
@@ -1228,8 +1235,9 @@ fn draw_summary(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
         let mut comp = Vec::new();
         let mut xfer = Vec::new();
         let mut decomp = Vec::new();
+        let levels = supported_chart_levels(key, SUMMARY_LEVELS);
         for row in rows {
-            if row.compress_ns <= 0.0 {
+            if row.compress_ns <= 0.0 || !levels.contains(&row.level) {
                 continue;
             }
             let (c, t, d) = compute_pipeline(&row);
@@ -1268,7 +1276,7 @@ fn draw_summary(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
     chart_header(
         &area,
         width,
-        "12-file Silesia: Pipeline @100 MB/s geomean, Level 1 (lower is better)",
+        "12-file Silesia: Pipeline @100 MB/s geomean, L-7..L4 (ruzstd L1)",
         cfg.hw_label.as_deref(),
         22,
     )?;
