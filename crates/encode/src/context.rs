@@ -654,13 +654,10 @@ fn compress_core(
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let block_end = offset + chunk_size;
                         let is_last = block_end >= input.len();
+                        let block = &input[offset..block_end];
 
-                        if block_looks_incompressible(&input[offset..block_end]) {
-                            block_encoder::encode_raw_block(
-                                &input[offset..block_end],
-                                is_last,
-                                output,
-                            )?;
+                        if block_looks_incompressible(block) {
+                            block_encoder::encode_raw_block(block, is_last, output)?;
                         } else {
                             fast::compress_fast_block(
                                 input,
@@ -673,7 +670,7 @@ fn compress_core(
                             );
                             if params.force_raw_literals {
                                 block_encoder::encode_compressed_block_raw(
-                                    &input[offset..block_end],
+                                    block,
                                     sequences,
                                     &mut rep_offsets,
                                     is_last,
@@ -682,7 +679,7 @@ fn compress_core(
                                 )?;
                             } else {
                                 block_encoder::encode_compressed_block(
-                                    &input[offset..block_end],
+                                    block,
                                     sequences,
                                     &mut rep_offsets,
                                     is_last,
@@ -767,13 +764,10 @@ fn compress_core(
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let block_end = offset + chunk_size;
                         let is_last = block_end >= input.len();
+                        let block = &input[offset..block_end];
 
-                        if block_looks_incompressible(&input[offset..block_end]) {
-                            block_encoder::encode_raw_block(
-                                &input[offset..block_end],
-                                is_last,
-                                output,
-                            )?;
+                        if block_looks_incompressible(block) {
+                            block_encoder::encode_raw_block(block, is_last, output)?;
                         } else {
                             dfast::compress_dfast_block(
                                 input,
@@ -786,7 +780,7 @@ fn compress_core(
                                 sequences,
                             );
                             block_encoder::encode_compressed_block(
-                                &input[offset..block_end],
+                                block,
                                 sequences,
                                 &mut rep_offsets,
                                 is_last,

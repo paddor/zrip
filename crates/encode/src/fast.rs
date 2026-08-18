@@ -380,6 +380,13 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
             params.search_strength as usize,
         )
     };
+    let skip_shift = if HASH_LOG == 14 && MLS == 4 {
+        5
+    } else if params.min_match == 4 && params.target_length == 1 {
+        search_strength.min(3)
+    } else {
+        search_strength
+    };
     let ilimit = (block_end - MLS).min(src.len() - 8);
     let max_distance = if HASH_LOG == 14 && MLS == 4 {
         1usize << 19
@@ -586,7 +593,7 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
             let h_next = hash_pos::<HASH_LOG, MLS>(src, ip2, hash_log);
             ip0 = ip1;
             ip1 = ip2;
-            let step = step_size + ((ip0 - anchor) >> search_strength);
+            let step = step_size + ((ip0 - anchor) >> skip_shift);
             ip2 = ip0 + step;
 
             #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
