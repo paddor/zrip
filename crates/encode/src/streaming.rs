@@ -303,7 +303,7 @@ impl<W: Write> FrameEncoder<W> {
                     last,
                     &mut self.block_out,
                     &mut self.workspace,
-                    true,
+                    strategy::use_custom_sequence_tables(&self.params, chunk.len()),
                 )
                 .map_err(io::Error::other)?;
             }

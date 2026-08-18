@@ -283,6 +283,9 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
     let acceleration = params.target_length.max(1) as usize;
     let step_size = acceleration + 1;
     let search_strength = params.search_strength as usize;
+    // Grow skips quickly across literal runs. Matches reset `anchor`, so this
+    // only accelerates after repeated misses.
+    let skip_shift = search_strength.min(3);
     let search_log = if HASH_LOG == 18 && SHORT_LOG == 18 && MLS == 4 {
         1
     } else {
@@ -712,7 +715,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
             hl1 = h8(rd64!(src, ip2), hash_log);
             ip0 = ip1;
             ip1 = ip2;
-            let step = step_size + ((ip0 - anchor) >> search_strength);
+            let step = step_size + ((ip0 - anchor) >> skip_shift);
             ip2 = ip0 + step;
             ip3 = ip1 + step;
 
