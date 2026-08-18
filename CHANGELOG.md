@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.8.7]
+
+### Changed
+
+- Accelerated repeated no-match scanning in the fast and dfast encoders.
+- Refreshed benchmark charts and updated their codec ordering and summary
+  geomean calculation.
+- Bumped JSR package `@paddor/zrip` to 0.5.7.
+
 ## [0.8.6]
 
 ### Changed
