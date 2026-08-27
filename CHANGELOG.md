@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added npm package metadata, Node-compatible WASM initialization, and a dry
+  pack/test path for `@paddor/zrip`.
+- Added an npm release workflow that builds, smokes, and publishes
+  `@paddor/zrip` from GitHub Actions with OIDC provenance.
+
 ## [0.8.7]
 
 ### Changed

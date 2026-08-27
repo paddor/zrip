@@ -9,3 +9,5 @@ corpus/
 Cargo.lock
 /jsr/src/pkg/
 /jsr/deno.lock
+/npm/src/pkg/
+/npm/*.tgz
