@@ -30,8 +30,8 @@ small-message workloads (log lines, JSON records, RPC payloads).
 feature; `frame` requires `std`.
 
 **WebAssembly.** Available as [`@paddor/zrip`](https://jsr.io/@paddor/zrip)
-on JSR. Auto-detects WASM SIMD support. 15% faster encode than C zstd compiled
-to WASM.
+on JSR and npm. Auto-detects WASM SIMD support. 15% faster encode than C zstd
+compiled to WASM.
 
 ## Performance
 

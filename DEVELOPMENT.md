@@ -29,8 +29,8 @@ GitHub releases. Configuration lives in `release-plz.toml`.
    `## [x.y.z]` section below `## [Unreleased]`. Never modify existing
    versioned sections.
 
-3. **Bump the JSR package when publishing WASM.** Update
-   `jsr/deno.json`, rebuild the package with `cd jsr && bash build.sh`, and
+3. **Bump the WASM package when publishing WASM.** Update `jsr/deno.json` and
+   `npm/package.json`, rebuild the package with `cd jsr && bash build.sh`, and
    refresh wasm32 charts if Rust codec performance changed.
 
 4. **Run any needed release audit.** Use the Miri and fuzz commands below
@@ -38,6 +38,36 @@ GitHub releases. Configuration lives in `release-plz.toml`.
 
 5. **Merge the release PR.** release-plz tags and publishes to crates.io
    automatically.
+
+### npm
+
+`@paddor/zrip` publishes to npm from `.github/workflows/release-npm.yml`.
+The workflow version comes from a `zrip-npm-v*` tag or the manual
+`workflow_dispatch` input. It builds the WASM package, runs Node tests, packs
+the tarball, smoke-tests an installed tarball, then publishes from the `npm`
+environment.
+
+Publishing uses npm trusted publishing with GitHub Actions OIDC. In npm,
+configure a trusted publisher for `@paddor/zrip` before tagging:
+
+```text
+GitHub owner: paddor
+GitHub repository: zrip
+Workflow filename: release-npm.yml
+Environment name: npm
+Allowed action: npm publish
+```
+
+If the package does not exist yet, trusted publishing may need a bootstrap
+publish first. Add a publish-capable GitHub Actions secret named `NPM_TOKEN`,
+run `.github/workflows/release-npm.yml`, then remove or rotate that token and
+configure the trusted publisher before the next CI release.
+
+```sh
+git tag -a zrip-npm-v0.5.8 -m "zrip npm 0.5.8"
+git push origin zrip-npm-v0.5.8
+gh run watch --repo paddor/zrip --exit-status
+```
 
 ## Kani
 

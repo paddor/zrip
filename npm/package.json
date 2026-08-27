@@ -1,0 +1,45 @@
+{
+  "name": "@paddor/zrip",
+  "version": "0.5.7",
+  "description": "Pure Rust zstd codec compiled to WebAssembly. Decodes all zstd levels, encodes -8..4, with SIMD auto-detection.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/paddor/zrip.git",
+    "directory": "npm"
+  },
+  "homepage": "https://github.com/paddor/zrip#readme",
+  "bugs": {
+    "url": "https://github.com/paddor/zrip/issues"
+  },
+  "keywords": [
+    "zstd",
+    "zstandard",
+    "compression",
+    "decompression",
+    "wasm",
+    "webassembly"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/mod.d.ts",
+      "import": "./src/mod.js"
+    }
+  },
+  "types": "./src/mod.d.ts",
+  "files": [
+    "src/",
+    "LICENSE",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "bash build.sh",
+    "pack:dry": "npm run build && npm pack --dry-run",
+    "test": "npm run build && node --test"
+  }
+}
