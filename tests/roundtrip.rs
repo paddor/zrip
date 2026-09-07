@@ -454,6 +454,24 @@ fn compress_context_roundtrip() {
     assert_eq!(&decompressed2, data2);
 }
 
+#[cfg(feature = "std")]
+#[test]
+fn compress_context_can_omit_content_checksum() {
+    let data = b"enclosing format already authenticates this payload".repeat(1_000);
+    let mut ctx = zrip::CompressContext::new(1).unwrap();
+    assert!(ctx.content_checksum());
+
+    ctx.set_content_checksum(false);
+    let compressed = ctx.compress(&data).unwrap().to_vec();
+    assert_eq!(compressed[4] & 0x04, 0);
+    assert_eq!(zrip::decompress(&compressed).unwrap(), data);
+
+    ctx.set_content_checksum(true);
+    let compressed = ctx.compress(&data).unwrap().to_vec();
+    assert_ne!(compressed[4] & 0x04, 0);
+    assert_eq!(zrip::decompress(&compressed).unwrap(), data);
+}
+
 #[cfg(all(feature = "std", not(miri)))]
 #[test]
 fn decompress_context_borrows_large_output_for_reuse() {

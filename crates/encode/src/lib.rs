@@ -50,7 +50,24 @@ pub(crate) fn write_frame_header(
     dict_id: Option<u32>,
     window_log: u32,
 ) -> Result<(), CompressError> {
-    write_frame_header_inner(output, Some(content_size), dict_id, window_log)
+    write_frame_header_inner(output, Some(content_size), dict_id, window_log, true)
+}
+
+#[cfg_attr(not(feature = "std"), allow(dead_code))]
+pub(crate) fn write_frame_header_with_checksum(
+    output: &mut impl OutputSink,
+    content_size: usize,
+    dict_id: Option<u32>,
+    window_log: u32,
+    content_checksum: bool,
+) -> Result<(), CompressError> {
+    write_frame_header_inner(
+        output,
+        Some(content_size),
+        dict_id,
+        window_log,
+        content_checksum,
+    )
 }
 
 #[cfg_attr(not(feature = "std"), allow(dead_code))]
@@ -59,7 +76,7 @@ pub(crate) fn write_frame_header_without_content_size(
     dict_id: Option<u32>,
     window_log: u32,
 ) -> Result<(), CompressError> {
-    write_frame_header_inner(output, None, dict_id, window_log)
+    write_frame_header_inner(output, None, dict_id, window_log, true)
 }
 
 fn write_frame_header_inner(
@@ -67,6 +84,7 @@ fn write_frame_header_inner(
     content_size: Option<usize>,
     dict_id: Option<u32>,
     window_log: u32,
+    content_checksum: bool,
 ) -> Result<(), CompressError> {
     output.extend_from_slice(&ZSTD_MAGIC.to_le_bytes())?;
 
@@ -90,7 +108,10 @@ fn write_frame_header_inner(
         Some(_) => 3,
     };
 
-    let descriptor = if single_segment { 0x20 } else { 0 } | 0x04 | (fcs_flag << 6) | dict_id_flag;
+    let descriptor = if single_segment { 0x20 } else { 0 }
+        | if content_checksum { 0x04 } else { 0 }
+        | (fcs_flag << 6)
+        | dict_id_flag;
     output.push(descriptor)?;
 
     if !single_segment {

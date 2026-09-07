@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added reusable-context control over the standard frame content checksum for
+  formats that already authenticate decoded content.
 - Added npm package metadata, Node-compatible WASM initialization, and a dry
   pack/test path for `@paddor/zrip`.
 - Added an npm release workflow that builds, smokes, and publishes
