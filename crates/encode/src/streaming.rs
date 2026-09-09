@@ -22,6 +22,10 @@ use zrip_core::xxhash::Xxh64State;
 /// to flush the final block, write the content checksum, and recover the
 /// writer.
 ///
+/// After a write, flush, or finalization error, the encoder cannot be reused.
+/// Later writes, flushes, [`finish`](Self::finish), and [`reset`](Self::reset)
+/// return errors. Discard the encoder and its incomplete output.
+///
 /// Internal buffers (hash tables, sequence scratch, block encoder workspace)
 /// are allocated once and reused across blocks. To reuse them across
 /// multiple frames, call [`reset`](Self::reset) instead of `finish`:
@@ -43,6 +47,7 @@ pub struct FrameEncoder<W: Write> {
     hasher: Xxh64State,
     header_written: bool,
     finished: bool,
+    failed: bool,
     workspace: BlockEncodeWorkspace,
     dict: Option<Dictionary>,
     first_block: bool,
@@ -105,6 +110,7 @@ impl<W: Write> FrameEncoder<W> {
             hasher: Xxh64State::new(0),
             header_written: false,
             finished: false,
+            failed: false,
             workspace: BlockEncodeWorkspace::new(),
             dict,
             first_block,
@@ -153,10 +159,13 @@ impl<W: Write> FrameEncoder<W> {
     }
 
     fn finish_frame(&mut self) -> io::Result<()> {
+        if self.failed {
+            return Err(io::Error::other("encoder cannot be reused after an error"));
+        }
         if self.finished {
             return Ok(());
         }
-        self.finished = true;
+        self.failed = true;
 
         if !self.header_written {
             self.write_header()?;
@@ -167,12 +176,12 @@ impl<W: Write> FrameEncoder<W> {
         let hash = self.hasher.finish();
         let checksum = (hash & 0xFFFF_FFFF) as u32;
         self.inner.write_all(&checksum.to_le_bytes())?;
+        self.finished = true;
+        self.failed = false;
         Ok(())
     }
 
     fn write_header(&mut self) -> io::Result<()> {
-        self.header_written = true;
-
         self.block_out.clear();
         write_frame_header_without_content_size(
             &mut self.block_out,
@@ -181,6 +190,7 @@ impl<W: Write> FrameEncoder<W> {
         )
         .map_err(io::Error::other)?;
         self.inner.write_all(&self.block_out)?;
+        self.header_written = true;
         Ok(())
     }
 
@@ -352,9 +362,14 @@ fn reduce_hash_table(table: &mut [u32], shift: u32) {
 
 impl<W: Write> Write for FrameEncoder<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.failed {
+            return Err(io::Error::other("encoder cannot be reused after an error"));
+        }
         if self.finished {
             return Err(io::Error::other("encoder already finished"));
         }
+        // Any early return leaves the encoder failed, including partial writes.
+        self.failed = true;
 
         if !self.header_written {
             self.write_header()?;
@@ -374,13 +389,20 @@ impl<W: Write> Write for FrameEncoder<W> {
             }
         }
 
+        self.failed = false;
         Ok(consumed)
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        if self.failed {
+            return Err(io::Error::other("encoder cannot be reused after an error"));
+        }
+        self.failed = true;
         if !self.buffer.is_empty() {
             self.flush_block(false)?;
         }
-        self.inner.flush()
+        self.inner.flush()?;
+        self.failed = false;
+        Ok(())
     }
 }

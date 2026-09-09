@@ -36,6 +36,77 @@ fn streaming_encoder_chunked_writes() {
 }
 
 #[test]
+fn streaming_encoder_errors_remain_errors_at_every_output_position() {
+    use std::cell::RefCell;
+    use std::io::{self, Write};
+    use std::rc::Rc;
+    struct FailOnceAfter {
+        remaining: usize,
+        failed: bool,
+        bytes: Rc<RefCell<Vec<u8>>>,
+    }
+    impl Write for FailOnceAfter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            if self.remaining == 0 && !self.failed {
+                self.failed = true;
+                return Err(io::ErrorKind::WouldBlock.into());
+            }
+            let len = if self.failed {
+                buf.len()
+            } else {
+                buf.len().min(self.remaining).min(3)
+            };
+            self.bytes.borrow_mut().extend_from_slice(&buf[..len]);
+            self.remaining = self.remaining.saturating_sub(len);
+            Ok(len)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let data = b"hello world ".repeat(20);
+    let mut control = zrip::FrameEncoder::new(Vec::new(), 1).unwrap();
+    control.write_all(&data).unwrap();
+    let expected = control.finish().unwrap();
+    for offset in 0..=expected.len() {
+        let bytes = Rc::new(RefCell::new(Vec::new()));
+        let writer = FailOnceAfter {
+            remaining: offset,
+            failed: false,
+            bytes: Rc::clone(&bytes),
+        };
+        let new_writer = || FailOnceAfter {
+            remaining: usize::MAX,
+            failed: false,
+            bytes: Rc::new(RefCell::new(Vec::new())),
+        };
+        let mut enc = zrip::FrameEncoder::new(writer, 1).unwrap();
+        if offset == expected.len() {
+            enc.write_all(&data).unwrap();
+            enc.finish().unwrap();
+            assert_eq!(*bytes.borrow(), expected);
+            continue;
+        }
+        assert!(enc.write_all(&data).is_err() || enc.reset(new_writer()).is_err());
+        assert_eq!(*bytes.borrow(), expected[..offset]);
+        assert!(enc.write_all(b"retry").is_err(), "offset {offset}");
+        assert!(enc.flush().is_err(), "offset {offset}");
+        assert!(enc.reset(new_writer()).is_err(), "offset {offset}");
+        assert_eq!(*bytes.borrow(), expected[..offset]);
+        assert!(enc.finish().is_err(), "offset {offset}");
+    }
+    let writer = FailOnceAfter {
+        remaining: 6,
+        failed: false,
+        bytes: Rc::new(RefCell::new(Vec::new())),
+    };
+    let mut enc = zrip::FrameEncoder::new(writer, 1).unwrap();
+    assert!(enc.write_all(&vec![b'a'; 131_072]).is_err());
+    assert!(enc.write_all(b"retry").is_err());
+    assert!(enc.finish().is_err());
+}
+
+#[test]
 fn streaming_encoder_empty() {
     let encoder = zrip::FrameEncoder::new(Vec::new(), 1).unwrap();
     let compressed = encoder.finish().unwrap();
