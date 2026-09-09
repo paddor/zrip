@@ -6,6 +6,9 @@
   "exports": "./src/mod.ts",
   "publish": {
     "include": ["src/", "deno.json", "LICENSE", "README.md"],
-    "exclude": ["src/pkg/package.json", "!src/pkg/"]
+    "exclude": ["src/**/*_test.ts", "src/pkg/package.json", "!src/pkg/"]
+  },
+  "tasks": {
+    "test": "deno test --allow-read --allow-write --allow-run"
   }
 }

@@ -13,6 +13,8 @@
 
 ### Fixed
 
+- Fix JSR package initialization after `deno bundle` by importing WASM and
+  its generated bindings through the module graph.
 - Accept explicitly encoded dictionary ID zero without requiring a dictionary.
 - Ignore the unused frame descriptor bit while retaining reserved-bit checks.
 - Correct `FrameDecoder` skippable-frame lengths and reject truncated payloads.

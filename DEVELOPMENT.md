@@ -14,6 +14,22 @@ cargo test
 cargo test --no-default-features --features alloc     # no_std tests
 ```
 
+## JSR / WebAssembly
+
+`jsr/build.sh` generates bundler bindings with native WASM imports. The npm
+build requests web bindings separately and writes them into `npm/src/pkg`.
+
+```bash
+cd jsr
+bash build.sh
+deno task test
+```
+
+Use Deno 2.8.3 or newer for `deno bundle` and install `zstd` for cross-checks.
+They cover the default SIMD path, forced scalar loading, synchronous bytes,
+and initialization races. Bundled default initialization runs without file or
+network permissions.
+
 ## Releasing
 
 `release-plz` runs on every push to `main`

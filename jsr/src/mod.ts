@@ -50,17 +50,21 @@
  * ```
  */
 
-import {
-  compress as wasmCompress,
-  compressBound as wasmCompressBound,
-  Compressor as _Compressor,
-  compressWithDict as wasmCompressWithDict,
-  decompress as wasmDecompress,
-  Decompressor as WasmDecompressor,
-  decompressWithDict as wasmDecompressWithDict,
-  Dictionary as _Dictionary,
-  initSync,
-} from "./pkg/zrip_wasm.js";
+import * as wasmBindings from "./pkg/zrip_wasm_bg.js";
+import type * as Wasm from "./pkg/zrip_wasm.js";
+
+// Use generated types for the bindings, including dynamically added methods
+// such as Symbol.dispose. The type-only import does not initialize WASM.
+const {
+  compress: wasmCompress,
+  compressBound: wasmCompressBound,
+  Compressor: _Compressor,
+  compressWithDict: wasmCompressWithDict,
+  decompress: wasmDecompress,
+  Decompressor: WasmDecompressor,
+  decompressWithDict: wasmDecompressWithDict,
+  Dictionary: _Dictionary,
+} = wasmBindings as unknown as typeof Wasm;
 
 /**
  * Reusable compression context. Amortizes internal allocations across
@@ -75,9 +79,9 @@ import {
  * compressor.free();
  * ```
  */
-export const Compressor: typeof _Compressor = _Compressor;
+export const Compressor: typeof Wasm.Compressor = _Compressor;
 /** Type alias for {@linkcode Compressor} instances. */
-export type Compressor = _Compressor;
+export type Compressor = Wasm.Compressor;
 
 /**
  * Pre-parsed zstd dictionary for use with dictionary compression.
@@ -91,9 +95,9 @@ export type Compressor = _Compressor;
  * dict.free();
  * ```
  */
-export const Dictionary: typeof _Dictionary = _Dictionary;
+export const Dictionary: typeof Wasm.Dictionary = _Dictionary;
 /** Type alias for {@linkcode Dictionary} instances. */
-export type Dictionary = _Dictionary;
+export type Dictionary = Wasm.Dictionary;
 
 /** Options for decompression calls. */
 export interface DecompressOptions {
@@ -114,9 +118,9 @@ function maxDecompressedSize(options?: DecompressOptions): number | undefined {
   return max;
 }
 
-const decompressorInner = new WeakMap<Decompressor, WasmDecompressor>();
+const decompressorInner = new WeakMap<Decompressor, Wasm.Decompressor>();
 
-function getDecompressorInner(decompressor: Decompressor): WasmDecompressor {
+function getDecompressorInner(decompressor: Decompressor): Wasm.Decompressor {
   const inner = decompressorInner.get(decompressor);
   if (!inner) {
     throw new TypeError("invalid or freed Decompressor");
@@ -208,32 +212,46 @@ const SIMD_TEST = new Uint8Array([
 ]);
 
 let initialized = false;
+let initialization: Promise<void> | undefined;
 
-/**
- * Initialize the WASM module. Must be called before any other function.
- * Automatically detects WASM SIMD support and loads the appropriate binary.
- */
-export async function init(): Promise<void> {
+function finishInitialization(wasm: Record<string, unknown>): void {
+  // A synchronous caller may have initialized while the import was pending.
   if (initialized) return;
-
-  const simd = WebAssembly.validate(SIMD_TEST);
-  const wasmFile = simd ? "zrip_simd.wasm" : "zrip_wasm_bg.wasm";
-  const wasmUrl = new URL(`./pkg/${wasmFile}`, import.meta.url);
-  const response = await fetch(wasmUrl);
-  const bytes = await response.arrayBuffer();
-  initSync({ module: new WebAssembly.Module(bytes) });
+  wasmBindings.__wbg_set_wasm(wasm);
+  // wasm-bindgen emits this initializer when the module needs startup work.
+  if (typeof wasm.__wbindgen_start === "function") wasm.__wbindgen_start();
   initialized = true;
 }
 
 /**
- * Initialize synchronously with a pre-loaded WASM binary.
- * Use when you have already loaded the WASM bytes (e.g. via `Deno.readFileSync`
- * or `fs.readFileSync` in Node.js).
+ * Initialize the WASM module. Must be called before compression or decoding.
+ * Automatically detects WASM SIMD support and loads the appropriate binary.
  */
+export function init(): Promise<void> {
+  if (initialized) return Promise.resolve();
+  if (initialization) return initialization;
+
+  initialization = (async () => {
+    // Literal imports let bundlers include WASM and its generated JS bindings.
+    const wasm = WebAssembly.validate(SIMD_TEST)
+      ? await import("./pkg/zrip_simd.wasm")
+      : await import("./pkg/zrip_wasm_bg.wasm");
+    finishInitialization(wasm);
+  })().catch((error) => {
+    initialization = undefined;
+    throw error;
+  });
+  return initialization;
+}
+
+/** Initialize synchronously from preloaded WASM bytes. */
 export function initSyncFromBytes(bytes: BufferSource): void {
   if (initialized) return;
-  initSync({ module: new WebAssembly.Module(bytes) });
-  initialized = true;
+  const module = new WebAssembly.Module(bytes);
+  const instance = new WebAssembly.Instance(module, {
+    "./zrip_wasm_bg.js": wasmBindings,
+  });
+  finishInitialization(instance.exports);
 }
 
 /**
