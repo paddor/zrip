@@ -87,7 +87,7 @@ pub fn parse_frame_header_after_magic(
             _ => unreachable!(),
         };
         offset += dict_id_size;
-        Some(id)
+        (id != 0).then_some(id)
     } else {
         None
     };
