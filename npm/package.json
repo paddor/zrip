@@ -1,6 +1,6 @@
 {
   "name": "@paddor/zrip",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "Pure Rust zstd codec compiled to WebAssembly. Decodes all zstd levels, encodes -8..4, with SIMD auto-detection.",
   "license": "MIT",
   "type": "module",

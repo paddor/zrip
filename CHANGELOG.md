@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-09-10
+
 ### Added
 
 - Added reusable-context control over the standard frame content checksum for
@@ -24,6 +26,11 @@
 - Keep `FrameEncoder` failed after write, flush, or finalization errors,
   including partial writes and `WouldBlock`. Discard incomplete output and
   create a new encoder after an error.
+
+### Changed
+
+- Bump `zrip-core` to `0.10.1` and `zrip-encode`/`zrip-decode` to `0.8.7`.
+- Bump `@paddor/zrip` to `0.5.8` on JSR and npm.
 
 ## [0.8.7]
 
