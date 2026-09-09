@@ -36,6 +36,77 @@ fn streaming_encoder_chunked_writes() {
 }
 
 #[test]
+fn streaming_encoder_errors_remain_errors_at_every_output_position() {
+    use std::cell::RefCell;
+    use std::io::{self, Write};
+    use std::rc::Rc;
+    struct FailOnceAfter {
+        remaining: usize,
+        failed: bool,
+        bytes: Rc<RefCell<Vec<u8>>>,
+    }
+    impl Write for FailOnceAfter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            if self.remaining == 0 && !self.failed {
+                self.failed = true;
+                return Err(io::ErrorKind::WouldBlock.into());
+            }
+            let len = if self.failed {
+                buf.len()
+            } else {
+                buf.len().min(self.remaining).min(3)
+            };
+            self.bytes.borrow_mut().extend_from_slice(&buf[..len]);
+            self.remaining = self.remaining.saturating_sub(len);
+            Ok(len)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let data = b"hello world ".repeat(20);
+    let mut control = zrip::FrameEncoder::new(Vec::new(), 1).unwrap();
+    control.write_all(&data).unwrap();
+    let expected = control.finish().unwrap();
+    for offset in 0..=expected.len() {
+        let bytes = Rc::new(RefCell::new(Vec::new()));
+        let writer = FailOnceAfter {
+            remaining: offset,
+            failed: false,
+            bytes: Rc::clone(&bytes),
+        };
+        let new_writer = || FailOnceAfter {
+            remaining: usize::MAX,
+            failed: false,
+            bytes: Rc::new(RefCell::new(Vec::new())),
+        };
+        let mut enc = zrip::FrameEncoder::new(writer, 1).unwrap();
+        if offset == expected.len() {
+            enc.write_all(&data).unwrap();
+            enc.finish().unwrap();
+            assert_eq!(*bytes.borrow(), expected);
+            continue;
+        }
+        assert!(enc.write_all(&data).is_err() || enc.reset(new_writer()).is_err());
+        assert_eq!(*bytes.borrow(), expected[..offset]);
+        assert!(enc.write_all(b"retry").is_err(), "offset {offset}");
+        assert!(enc.flush().is_err(), "offset {offset}");
+        assert!(enc.reset(new_writer()).is_err(), "offset {offset}");
+        assert_eq!(*bytes.borrow(), expected[..offset]);
+        assert!(enc.finish().is_err(), "offset {offset}");
+    }
+    let writer = FailOnceAfter {
+        remaining: 6,
+        failed: false,
+        bytes: Rc::new(RefCell::new(Vec::new())),
+    };
+    let mut enc = zrip::FrameEncoder::new(writer, 1).unwrap();
+    assert!(enc.write_all(&vec![b'a'; 131_072]).is_err());
+    assert!(enc.write_all(b"retry").is_err());
+    assert!(enc.finish().is_err());
+}
+
+#[test]
 fn streaming_encoder_empty() {
     let encoder = zrip::FrameEncoder::new(Vec::new(), 1).unwrap();
     let compressed = encoder.finish().unwrap();
@@ -58,6 +129,94 @@ fn streaming_encoder_all_levels() {
 }
 
 // ===== Streaming decoder (FrameDecoder) =====
+
+#[test]
+fn frame_decoder_does_not_return_failed_block_output() {
+    use std::io::Read;
+    let valid = [
+        0x28, 0xb5, 0x2f, 0xfd, 0, 0, 0x29, 0, 0, b'h', b'e', b'l', b'l', b'o',
+    ];
+    let mut size_mismatch = valid.to_vec();
+    size_mismatch[4] = 0x20;
+    size_mismatch[5] = 4;
+    let reset_frame = zrip::compress(b"ok", 1).unwrap();
+    for (frame, limit) in [
+        (valid.to_vec(), 4),
+        (valid[..valid.len() - 3].to_vec(), 100),
+        (size_mismatch, 100),
+    ] {
+        let mut decoder = zrip::FrameDecoder::with_limit(frame.as_slice(), limit);
+        let mut output = [0xaa; 16];
+        assert!(decoder.read(&mut output).is_err());
+        for _ in 0..3 {
+            assert!(decoder.read(&mut output).is_err());
+            assert_eq!(output, [0xaa; 16]);
+        }
+        decoder.reset(reset_frame.as_slice());
+        let mut output = Vec::new();
+        decoder.read_to_end(&mut output).unwrap();
+        assert_eq!(output, b"ok");
+    }
+}
+
+#[test]
+fn frame_decoder_skippable_frames() {
+    use std::io::{ErrorKind, Read};
+    let frame = zrip::compress(b"hello", 1).unwrap();
+    for payload in [&[][..], b"abc", &[0; 513]] {
+        let mut skippable = vec![0x50, 0x2a, 0x4d, 0x18];
+        skippable.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        skippable.extend_from_slice(payload);
+        let input = [skippable.as_slice(), &frame, &skippable, &frame, &skippable].concat();
+        let mut output = Vec::new();
+        zrip::FrameDecoder::new(input.as_slice())
+            .read_to_end(&mut output)
+            .unwrap();
+        assert_eq!(output, b"hellohello");
+        for len in 1..skippable.len() {
+            let mut output = Vec::new();
+            assert_eq!(
+                zrip::FrameDecoder::new(&skippable[..len])
+                    .read_to_end(&mut output)
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::UnexpectedEof
+            );
+        }
+    }
+}
+
+#[test]
+fn frame_decoder_rejects_partial_headers() {
+    use std::io::{ErrorKind, Read};
+    let frame = zrip::compress(b"hello", 1).unwrap();
+    let header_len = zrip::frame::header::parse_frame_header(&frame)
+        .unwrap()
+        .header_size;
+    for len in 1..header_len {
+        for prefix in [&[][..], frame.as_slice()] {
+            let mut input = prefix.to_vec();
+            input.extend_from_slice(&frame[..len]);
+            let mut decoder = zrip::FrameDecoder::new(input.as_slice());
+            let mut output = Vec::new();
+            assert_eq!(
+                decoder.read_to_end(&mut output).unwrap_err().kind(),
+                ErrorKind::UnexpectedEof
+            );
+        }
+    }
+    let mut output = Vec::new();
+    assert_eq!(
+        zrip::FrameDecoder::new(&[][..])
+            .read_to_end(&mut output)
+            .unwrap(),
+        0
+    );
+    zrip::FrameDecoder::new(frame.as_slice())
+        .read_to_end(&mut output)
+        .unwrap();
+    assert_eq!(output, b"hello");
+}
 
 #[test]
 fn frame_decoder_basic() {

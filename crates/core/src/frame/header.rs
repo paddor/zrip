@@ -44,10 +44,7 @@ pub fn parse_frame_header_after_magic(
     if reserved {
         return Err(DecompressError::BadFrameHeader);
     }
-    let unused = (descriptor & 0x10) != 0;
-    if unused {
-        return Err(DecompressError::BadFrameHeader);
-    }
+    // Descriptor bit 4 is unused and must be ignored by decoders.
 
     let mut offset = 1;
 
@@ -90,7 +87,7 @@ pub fn parse_frame_header_after_magic(
             _ => unreachable!(),
         };
         offset += dict_id_size;
-        Some(id)
+        (id != 0).then_some(id)
     } else {
         None
     };

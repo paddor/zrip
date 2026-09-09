@@ -15,12 +15,23 @@ use zrip_core::error::CompressError;
 use zrip_core::frame::MAX_BLOCK_SIZE;
 use zrip_core::xxhash::Xxh64State;
 
+#[derive(Clone, Copy)]
+enum EncoderState {
+    Ready,
+    Finished,
+    Failed,
+}
+
 /// Streaming zstd compressor implementing [`Write`].
 ///
 /// Buffers input until a full block (128 KiB) is ready, then compresses
 /// and writes it to the underlying writer. Call [`finish`](Self::finish)
 /// to flush the final block, write the content checksum, and recover the
 /// writer.
+///
+/// After a write, flush, or finalization error, the encoder cannot be reused.
+/// Later writes, flushes, [`finish`](Self::finish), and [`reset`](Self::reset)
+/// return errors. Discard the encoder and its incomplete output.
 ///
 /// Internal buffers (hash tables, sequence scratch, block encoder workspace)
 /// are allocated once and reused across blocks. To reuse them across
@@ -42,7 +53,7 @@ pub struct FrameEncoder<W: Write> {
     rep_offsets: [u32; 3],
     hasher: Xxh64State,
     header_written: bool,
-    finished: bool,
+    state: EncoderState,
     workspace: BlockEncodeWorkspace,
     dict: Option<Dictionary>,
     first_block: bool,
@@ -104,7 +115,7 @@ impl<W: Write> FrameEncoder<W> {
             rep_offsets,
             hasher: Xxh64State::new(0),
             header_written: false,
-            finished: false,
+            state: EncoderState::Ready,
             workspace: BlockEncodeWorkspace::new(),
             dict,
             first_block,
@@ -133,7 +144,7 @@ impl<W: Write> FrameEncoder<W> {
         self.finish_frame()?;
         let old = core::mem::replace(&mut self.inner, new_writer);
         self.header_written = false;
-        self.finished = false;
+        self.state = EncoderState::Ready;
         self.first_block = self.dict.is_some();
         self.rep_offsets = match &self.dict {
             Some(d) => *d.rep_offsets(),
@@ -153,10 +164,13 @@ impl<W: Write> FrameEncoder<W> {
     }
 
     fn finish_frame(&mut self) -> io::Result<()> {
-        if self.finished {
+        if matches!(self.state, EncoderState::Failed) {
+            return Err(io::Error::other("encoder cannot be reused after an error"));
+        }
+        if matches!(self.state, EncoderState::Finished) {
             return Ok(());
         }
-        self.finished = true;
+        self.state = EncoderState::Failed;
 
         if !self.header_written {
             self.write_header()?;
@@ -167,12 +181,11 @@ impl<W: Write> FrameEncoder<W> {
         let hash = self.hasher.finish();
         let checksum = (hash & 0xFFFF_FFFF) as u32;
         self.inner.write_all(&checksum.to_le_bytes())?;
+        self.state = EncoderState::Finished;
         Ok(())
     }
 
     fn write_header(&mut self) -> io::Result<()> {
-        self.header_written = true;
-
         self.block_out.clear();
         write_frame_header_without_content_size(
             &mut self.block_out,
@@ -181,6 +194,7 @@ impl<W: Write> FrameEncoder<W> {
         )
         .map_err(io::Error::other)?;
         self.inner.write_all(&self.block_out)?;
+        self.header_written = true;
         Ok(())
     }
 
@@ -352,9 +366,14 @@ fn reduce_hash_table(table: &mut [u32], shift: u32) {
 
 impl<W: Write> Write for FrameEncoder<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.finished {
+        if matches!(self.state, EncoderState::Failed) {
+            return Err(io::Error::other("encoder cannot be reused after an error"));
+        }
+        if matches!(self.state, EncoderState::Finished) {
             return Err(io::Error::other("encoder already finished"));
         }
+        // Any early return leaves the encoder failed, including partial writes.
+        self.state = EncoderState::Failed;
 
         if !self.header_written {
             self.write_header()?;
@@ -374,13 +393,21 @@ impl<W: Write> Write for FrameEncoder<W> {
             }
         }
 
+        self.state = EncoderState::Ready;
         Ok(consumed)
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        if matches!(self.state, EncoderState::Failed) {
+            return Err(io::Error::other("encoder cannot be reused after an error"));
+        }
+        let state = self.state;
+        self.state = EncoderState::Failed;
         if !self.buffer.is_empty() {
             self.flush_block(false)?;
         }
-        self.inner.flush()
+        self.inner.flush()?;
+        self.state = state;
+        Ok(())
     }
 }

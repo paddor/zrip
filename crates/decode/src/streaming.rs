@@ -25,12 +25,16 @@ enum State {
     },
     Checksum,
     Done,
+    Failed,
 }
 
 /// Streaming zstd decompressor implementing [`Read`].
 ///
 /// Wraps a reader of compressed data and yields decompressed bytes.
 /// Supports multi-frame streams and skippable frames.
+///
+/// After a decoding or reader error, further nonempty reads return errors.
+/// Call [`reset`](Self::reset) with a new reader to reuse the decoder.
 ///
 /// ```no_run
 /// use std::io::Read;
@@ -149,6 +153,12 @@ impl<R: Read> FrameDecoder<R> {
         loop {
             match self.state {
                 State::Done => return Ok(()),
+                State::Failed => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "decoder must be reset after an error",
+                    ));
+                }
                 State::FrameHeader => self.read_frame_header()?,
                 State::BlockHeader => self.read_block_header()?,
                 State::BlockData {
@@ -168,7 +178,18 @@ impl<R: Read> FrameDecoder<R> {
 
     fn read_frame_header(&mut self) -> io::Result<()> {
         self.read_buf.resize(18, 0);
-        self.inner.read_exact(&mut self.read_buf[..5])?;
+        loop {
+            match self.inner.read(&mut self.read_buf[..1]) {
+                Ok(0) => {
+                    self.state = State::Done;
+                    return Ok(());
+                }
+                Ok(_) => break,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+        self.inner.read_exact(&mut self.read_buf[1..5])?;
 
         let magic = u32::from_le_bytes([
             self.read_buf[0],
@@ -178,17 +199,20 @@ impl<R: Read> FrameDecoder<R> {
         ]);
 
         if (magic & 0xFFFF_FFF0) == 0x184D_2A50 {
-            self.inner.read_exact(&mut self.read_buf[5..9])?;
+            self.inner.read_exact(&mut self.read_buf[5..8])?;
             let skip_size = u32::from_le_bytes([
+                self.read_buf[4],
                 self.read_buf[5],
                 self.read_buf[6],
                 self.read_buf[7],
-                self.read_buf[8],
-            ]) as usize;
-            io::copy(
-                &mut self.inner.by_ref().take(skip_size as u64),
+            ]);
+            let skipped = io::copy(
+                &mut self.inner.by_ref().take(u64::from(skip_size)),
                 &mut io::sink(),
             )?;
+            if skipped != u64::from(skip_size) {
+                return Err(io::ErrorKind::UnexpectedEof.into());
+            }
             return Ok(());
         }
 
@@ -496,6 +520,9 @@ impl<R: Read> FrameDecoder<R> {
 
 impl<R: Read> Read for FrameDecoder<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
         if self.output_pos >= self.output_buf.len() {
             if let State::Done = &self.state {
                 return Ok(0);
@@ -504,16 +531,11 @@ impl<R: Read> Read for FrameDecoder<R> {
             self.output_buf.clear();
             self.output_pos = 0;
 
-            match self.fill_output() {
-                Ok(()) => {}
-                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => match &self.state {
-                    State::FrameHeader => {
-                        self.state = State::Done;
-                        return Ok(0);
-                    }
-                    _ => return Err(e),
-                },
-                Err(e) => return Err(e),
+            if let Err(e) = self.fill_output() {
+                self.output_buf.clear();
+                self.output_pos = 0;
+                self.state = State::Failed;
+                return Err(e);
             }
         }
 

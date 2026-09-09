@@ -5,6 +5,50 @@
 // Repeat_Mode without a prior table, bitstream exact consumption, and
 // streaming FCS mismatch.
 
+#[test]
+fn explicit_zero_dictionary_id_needs_no_dictionary() {
+    for (flag, width) in [(1, 1), (2, 2), (3, 4)] {
+        let mut frame = zrip::compress(b"hello", 1).unwrap();
+        assert_eq!(frame[4] & 3, 0);
+        let offset = if frame[4] & 0x20 != 0 { 5 } else { 6 };
+        frame[4] |= flag;
+        frame.splice(offset..offset, vec![0; width]);
+        assert_eq!(zrip::decompress(&frame).unwrap(), b"hello");
+        #[cfg(feature = "std")]
+        {
+            use std::io::Read;
+            let mut output = Vec::new();
+            zrip::FrameDecoder::new(frame.as_slice())
+                .read_to_end(&mut output)
+                .unwrap();
+            assert_eq!(output, b"hello");
+        }
+        frame[offset] = 1;
+        assert!(matches!(
+            zrip::decompress(&frame),
+            Err(zrip::DecompressError::DictRequired)
+        ));
+    }
+}
+
+#[test]
+fn ignore_unused_frame_descriptor_bit() {
+    let mut frame = zrip::compress(b"hello", 1).unwrap();
+    frame[4] |= 0x10;
+    assert_eq!(zrip::decompress(&frame).unwrap(), b"hello");
+    #[cfg(feature = "std")]
+    {
+        use std::io::Read;
+        let mut output = Vec::new();
+        zrip::FrameDecoder::new(frame.as_slice())
+            .read_to_end(&mut output)
+            .unwrap();
+        assert_eq!(output, b"hello");
+    }
+    frame[4] |= 0x08;
+    assert!(zrip::decompress(&frame).is_err());
+}
+
 /// Parse a compressed frame far enough to return the offset of the sequence
 /// section's mode byte inside the first compressed block. Panics if the first
 /// block is not a compressed block or has zero sequences.
