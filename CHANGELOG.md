@@ -9,6 +9,18 @@
 - Added an npm release workflow that builds, smokes, and publishes
   `@paddor/zrip` from GitHub Actions with OIDC provenance.
 
+### Fixed
+
+- Accept explicitly encoded dictionary ID zero without requiring a dictionary.
+- Ignore the unused frame descriptor bit while retaining reserved-bit checks.
+- Correct `FrameDecoder` skippable-frame lengths and reject truncated payloads.
+- Reject incomplete streaming frame headers, including after a complete frame.
+- Discard failed decoder output and require `FrameDecoder::reset` after decoding
+  or reader errors, preventing later reads from returning rejected block data.
+- Keep `FrameEncoder` failed after write, flush, or finalization errors,
+  including partial writes and `WouldBlock`. Discard incomplete output and
+  create a new encoder after an error.
+
 ## [0.8.7]
 
 ### Changed
