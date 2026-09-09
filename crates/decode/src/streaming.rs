@@ -185,7 +185,7 @@ impl<R: Read> FrameDecoder<R> {
                     return Ok(());
                 }
                 Ok(_) => break,
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(e) => return Err(e),
             }
         }
