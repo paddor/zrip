@@ -60,6 +60,33 @@ fn streaming_encoder_all_levels() {
 // ===== Streaming decoder (FrameDecoder) =====
 
 #[test]
+fn frame_decoder_skippable_frames() {
+    use std::io::{ErrorKind, Read};
+    let frame = zrip::compress(b"hello", 1).unwrap();
+    for payload in [&[][..], b"abc", &[0; 513]] {
+        let mut skippable = vec![0x50, 0x2a, 0x4d, 0x18];
+        skippable.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        skippable.extend_from_slice(payload);
+        let input = [skippable.as_slice(), &frame, &skippable, &frame, &skippable].concat();
+        let mut output = Vec::new();
+        zrip::FrameDecoder::new(input.as_slice())
+            .read_to_end(&mut output)
+            .unwrap();
+        assert_eq!(output, b"hellohello");
+        for len in 1..skippable.len() {
+            let mut output = Vec::new();
+            assert_eq!(
+                zrip::FrameDecoder::new(&skippable[..len])
+                    .read_to_end(&mut output)
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::UnexpectedEof
+            );
+        }
+    }
+}
+
+#[test]
 fn frame_decoder_rejects_partial_headers() {
     use std::io::{ErrorKind, Read};
     let frame = zrip::compress(b"hello", 1).unwrap();

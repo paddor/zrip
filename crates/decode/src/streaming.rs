@@ -189,17 +189,20 @@ impl<R: Read> FrameDecoder<R> {
         ]);
 
         if (magic & 0xFFFF_FFF0) == 0x184D_2A50 {
-            self.inner.read_exact(&mut self.read_buf[5..9])?;
+            self.inner.read_exact(&mut self.read_buf[5..8])?;
             let skip_size = u32::from_le_bytes([
+                self.read_buf[4],
                 self.read_buf[5],
                 self.read_buf[6],
                 self.read_buf[7],
-                self.read_buf[8],
-            ]) as usize;
-            io::copy(
-                &mut self.inner.by_ref().take(skip_size as u64),
+            ]);
+            let skipped = io::copy(
+                &mut self.inner.by_ref().take(u64::from(skip_size)),
                 &mut io::sink(),
             )?;
+            if skipped != u64::from(skip_size) {
+                return Err(io::ErrorKind::UnexpectedEof.into());
+            }
             return Ok(());
         }
 
