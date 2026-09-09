@@ -60,6 +60,35 @@ fn streaming_encoder_all_levels() {
 // ===== Streaming decoder (FrameDecoder) =====
 
 #[test]
+fn frame_decoder_does_not_return_failed_block_output() {
+    use std::io::Read;
+    let valid = [
+        0x28, 0xb5, 0x2f, 0xfd, 0, 0, 0x29, 0, 0, b'h', b'e', b'l', b'l', b'o',
+    ];
+    let mut size_mismatch = valid.to_vec();
+    size_mismatch[4] = 0x20;
+    size_mismatch[5] = 4;
+    let reset_frame = zrip::compress(b"ok", 1).unwrap();
+    for (frame, limit) in [
+        (valid.to_vec(), 4),
+        (valid[..valid.len() - 3].to_vec(), 100),
+        (size_mismatch, 100),
+    ] {
+        let mut decoder = zrip::FrameDecoder::with_limit(frame.as_slice(), limit);
+        let mut output = [0xaa; 16];
+        assert!(decoder.read(&mut output).is_err());
+        for _ in 0..3 {
+            assert!(decoder.read(&mut output).is_err());
+            assert_eq!(output, [0xaa; 16]);
+        }
+        decoder.reset(reset_frame.as_slice());
+        let mut output = Vec::new();
+        decoder.read_to_end(&mut output).unwrap();
+        assert_eq!(output, b"ok");
+    }
+}
+
+#[test]
 fn frame_decoder_skippable_frames() {
     use std::io::{ErrorKind, Read};
     let frame = zrip::compress(b"hello", 1).unwrap();

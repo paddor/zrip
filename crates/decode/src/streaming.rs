@@ -25,12 +25,16 @@ enum State {
     },
     Checksum,
     Done,
+    Failed,
 }
 
 /// Streaming zstd decompressor implementing [`Read`].
 ///
 /// Wraps a reader of compressed data and yields decompressed bytes.
 /// Supports multi-frame streams and skippable frames.
+///
+/// After a decoding or reader error, further nonempty reads return errors.
+/// Call [`reset`](Self::reset) with a new reader to reuse the decoder.
 ///
 /// ```no_run
 /// use std::io::Read;
@@ -149,6 +153,12 @@ impl<R: Read> FrameDecoder<R> {
         loop {
             match self.state {
                 State::Done => return Ok(()),
+                State::Failed => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "decoder must be reset after an error",
+                    ));
+                }
                 State::FrameHeader => self.read_frame_header()?,
                 State::BlockHeader => self.read_block_header()?,
                 State::BlockData {
@@ -510,6 +520,9 @@ impl<R: Read> FrameDecoder<R> {
 
 impl<R: Read> Read for FrameDecoder<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
         if self.output_pos >= self.output_buf.len() {
             if let State::Done = &self.state {
                 return Ok(0);
@@ -518,7 +531,12 @@ impl<R: Read> Read for FrameDecoder<R> {
             self.output_buf.clear();
             self.output_pos = 0;
 
-            self.fill_output()?;
+            if let Err(e) = self.fill_output() {
+                self.output_buf.clear();
+                self.output_pos = 0;
+                self.state = State::Failed;
+                return Err(e);
+            }
         }
 
         let available = &self.output_buf[self.output_pos..];
