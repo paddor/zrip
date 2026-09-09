@@ -60,6 +60,38 @@ fn streaming_encoder_all_levels() {
 // ===== Streaming decoder (FrameDecoder) =====
 
 #[test]
+fn frame_decoder_rejects_partial_headers() {
+    use std::io::{ErrorKind, Read};
+    let frame = zrip::compress(b"hello", 1).unwrap();
+    let header_len = zrip::frame::header::parse_frame_header(&frame)
+        .unwrap()
+        .header_size;
+    for len in 1..header_len {
+        for prefix in [&[][..], frame.as_slice()] {
+            let mut input = prefix.to_vec();
+            input.extend_from_slice(&frame[..len]);
+            let mut decoder = zrip::FrameDecoder::new(input.as_slice());
+            let mut output = Vec::new();
+            assert_eq!(
+                decoder.read_to_end(&mut output).unwrap_err().kind(),
+                ErrorKind::UnexpectedEof
+            );
+        }
+    }
+    let mut output = Vec::new();
+    assert_eq!(
+        zrip::FrameDecoder::new(&[][..])
+            .read_to_end(&mut output)
+            .unwrap(),
+        0
+    );
+    zrip::FrameDecoder::new(frame.as_slice())
+        .read_to_end(&mut output)
+        .unwrap();
+    assert_eq!(output, b"hello");
+}
+
+#[test]
 fn frame_decoder_basic() {
     use std::io::Read;
     let data = b"Hello, streaming decoder!".repeat(1000);

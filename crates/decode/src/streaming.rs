@@ -168,7 +168,18 @@ impl<R: Read> FrameDecoder<R> {
 
     fn read_frame_header(&mut self) -> io::Result<()> {
         self.read_buf.resize(18, 0);
-        self.inner.read_exact(&mut self.read_buf[..5])?;
+        loop {
+            match self.inner.read(&mut self.read_buf[..1]) {
+                Ok(0) => {
+                    self.state = State::Done;
+                    return Ok(());
+                }
+                Ok(_) => break,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        self.inner.read_exact(&mut self.read_buf[1..5])?;
 
         let magic = u32::from_le_bytes([
             self.read_buf[0],
@@ -504,17 +515,7 @@ impl<R: Read> Read for FrameDecoder<R> {
             self.output_buf.clear();
             self.output_pos = 0;
 
-            match self.fill_output() {
-                Ok(()) => {}
-                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => match &self.state {
-                    State::FrameHeader => {
-                        self.state = State::Done;
-                        return Ok(0);
-                    }
-                    _ => return Err(e),
-                },
-                Err(e) => return Err(e),
-            }
+            self.fill_output()?;
         }
 
         let available = &self.output_buf[self.output_pos..];
