@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use crate::block_encoder::{self, BlockEncodeWorkspace};
 use crate::strategy::{self, LevelParams, Strategy};
-use crate::{block_looks_incompressible, dfast, fast, write_frame_header};
+use crate::{block_looks_incompressible, dfast, fast, write_frame_header_with_checksum};
 use zrip_core::Sequence;
 use zrip_core::dict::Dictionary;
 use zrip_core::error::CompressError;
@@ -114,6 +114,7 @@ impl PreparedDict {
 /// ```
 pub struct CompressContext {
     level: i32,
+    content_checksum: bool,
     prepared: Option<PreparedDict>,
     hash_table: Vec<u32>,
     hash_long: Vec<u32>,
@@ -137,6 +138,7 @@ impl CompressContext {
         };
         Ok(Self {
             level,
+            content_checksum: true,
             prepared: None,
             hash_table,
             hash_long,
@@ -181,6 +183,7 @@ impl CompressContext {
         let hash_long = vec![0u32; prepared.hash_long_snapshot.len()];
         Ok(Self {
             level,
+            content_checksum: true,
             prepared: Some(prepared),
             hash_table,
             hash_long,
@@ -191,6 +194,19 @@ impl CompressContext {
             workspace: BlockEncodeWorkspace::new(),
             combined: Vec::new(),
         })
+    }
+
+    /// Enables or disables the standard Zstandard frame content checksum.
+    ///
+    /// Checksums are enabled by default. Disabling them is useful when an
+    /// enclosing format already authenticates the decoded content.
+    pub const fn set_content_checksum(&mut self, enabled: bool) {
+        self.content_checksum = enabled;
+    }
+
+    /// Whether newly compressed frames include a content checksum.
+    pub const fn content_checksum(&self) -> bool {
+        self.content_checksum
     }
 
     /// Compresses `input` using the context's level and optional dictionary.
@@ -213,6 +229,7 @@ impl CompressContext {
             &mut self.output,
             &mut self.workspace,
             &mut self.combined,
+            self.content_checksum,
         )?;
         Ok(self.take_or_borrow_output())
     }
@@ -251,6 +268,7 @@ impl CompressContext {
             &mut self.output,
             &mut self.workspace,
             &mut self.combined,
+            self.content_checksum,
         )?;
         Ok(self.take_or_borrow_output())
     }
@@ -314,11 +332,12 @@ impl CompressContext {
 
         self.output.clear();
         self.output.reserve(input.len() + 32);
-        write_frame_header(
+        write_frame_header_with_checksum(
             &mut self.output,
             input.len(),
             Some(dict_id),
             params.window_log,
+            self.content_checksum,
         )?;
 
         if input.is_empty() {
@@ -474,9 +493,11 @@ impl CompressContext {
             }
         }
 
-        let hash = xxh64(input, 0);
-        let checksum = (hash & 0xFFFF_FFFF) as u32;
-        self.output.extend_from_slice(&checksum.to_le_bytes());
+        if self.content_checksum {
+            let hash = xxh64(input, 0);
+            let checksum = (hash & 0xFFFF_FFFF) as u32;
+            self.output.extend_from_slice(&checksum.to_le_bytes());
+        }
 
         Ok(self.take_or_borrow_output())
     }
@@ -511,6 +532,7 @@ impl CompressContext {
             &mut self.output,
             &mut self.workspace,
             &mut self.combined,
+            self.content_checksum,
         )?;
         Ok(self.take_or_borrow_output())
     }
@@ -538,6 +560,7 @@ fn compress_core(
     output: &mut Vec<u8>,
     workspace: &mut BlockEncodeWorkspace,
     combined: &mut Vec<u8>,
+    content_checksum: bool,
 ) -> Result<(), CompressError> {
     let mut params = params;
     strategy::apply_raw_literals_size_override(&mut params, input.len());
@@ -557,7 +580,13 @@ fn compress_core(
 
     output.clear();
     output.reserve(input.len() + 32);
-    write_frame_header(output, input.len(), dict_id, params.window_log)?;
+    write_frame_header_with_checksum(
+        output,
+        input.len(),
+        dict_id,
+        params.window_log,
+        content_checksum,
+    )?;
 
     if input.is_empty() {
         block_encoder::encode_raw_block(&[], true, output)?;
@@ -796,9 +825,11 @@ fn compress_core(
         }
     }
 
-    let hash = xxh64(input, 0);
-    let checksum = (hash & 0xFFFF_FFFF) as u32;
-    output.extend_from_slice(&checksum.to_le_bytes());
+    if content_checksum {
+        let hash = xxh64(input, 0);
+        let checksum = (hash & 0xFFFF_FFFF) as u32;
+        output.extend_from_slice(&checksum.to_le_bytes());
+    }
 
     Ok(())
 }
