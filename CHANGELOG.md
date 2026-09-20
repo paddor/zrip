@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added caller-owned output methods to `DecompressContext` for pipelines that
+  need decoded buffers to outlive the next context call without copying.
+
 ## [0.8.8] - 2026-09-10
 
 ### Added
