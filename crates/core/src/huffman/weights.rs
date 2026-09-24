@@ -363,15 +363,12 @@ pub fn build_huffman_decode_table(
 }
 
 /// Builds the decode table for `weights` into `table` and returns the table
-/// log. `_rank_count` and `_rank_start` are unused. They keep the signature
-/// stable.
+/// log.
 #[cfg(feature = "alloc")]
 pub fn build_huffman_decode_table_into(
     weights: &[u8],
     table: &mut Vec<crate::huffman::HuffmanDecodeEntry>,
     all_weights: &mut Vec<u8>,
-    _rank_count: &mut Vec<u32>,
-    _rank_start: &mut Vec<u32>,
 ) -> Result<u8, DecompressError> {
     use crate::huffman::{HuffmanDecodeEntry, MAX_BITS};
 
@@ -654,13 +651,7 @@ mod tests {
         let mut weights = vec![1u8; 256];
         weights.push(8);
         let mut table = Vec::new();
-        let result = build_huffman_decode_table_into(
-            &weights,
-            &mut table,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut Vec::new(),
-        );
+        let result = build_huffman_decode_table_into(&weights, &mut table, &mut Vec::new());
         assert_eq!(result, Err(DecompressError::BadHuffmanWeights));
     }
 }

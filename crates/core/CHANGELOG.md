@@ -15,6 +15,8 @@
 - Huffman decode tables always hold `DECODE_TABLE_SIZE` entries. The
   4-stream decoder indexes them without bounds checks and runs a precomputed
   number of rounds without per-round checks.
+- Breaking: `build_huffman_decode_table_into` no longer takes the unused
+  `rank_count` and `rank_start` buffers.
 
 ## [0.10.1] - 2026-09-10
 
