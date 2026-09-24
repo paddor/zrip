@@ -17,6 +17,14 @@
   number of rounds without per-round checks.
 - Breaking: `build_huffman_decode_table_into` no longer takes the unused
   `rank_count` and `rank_start` buffers.
+- Reject more than 255 Huffman weights in `parse_huffman_weights`,
+  `parse_huffman_weights_into`, `build_huffman_decode_table`, and
+  `build_huffman_decode_table_into`.
+- `parse_huffman_weights_into` decodes four FSE weights per refill.
+  `build_huffman_decode_table_into` counts and sorts weights without
+  branches.
+- `build_decode_table_into` keeps symbol states in a stack array.
+  `BitReader::read_bits` reads with one 8-byte load.
 
 ## [0.10.1] - 2026-09-10
 

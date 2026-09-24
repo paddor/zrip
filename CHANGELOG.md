@@ -15,6 +15,8 @@
 - A block that falls back to raw storage no longer leaves its Huffman table
   available for reuse by the next block, which could reference a table the
   decoder never received.
+- Huffman literal headers with more than 255 explicit weights are rejected,
+  as in C zstd.
 
 ### Changed
 
@@ -58,6 +60,10 @@
 - L-8 to L-1 keep dense literals raw (sampled entropy above 6.25 bits per
   byte). Low-compressibility input encodes at over 500 MiB/s on these
   levels.
+- Faster decoding of small blocks. Custom FSE sequence tables are built in
+  place, Huffman weights decode four per refill, and Huffman table setup no
+  longer branches on zero weights. Decoding 512 B to 2 KiB slices of C zstd
+  L3 output is 1.15x to 1.8x faster.
 
 ## [0.8.8] - 2026-09-10
 
