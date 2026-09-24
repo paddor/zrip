@@ -191,33 +191,47 @@ fn parse_fse_compressed_weights_into(
     let mut rev_reader =
         ReverseBitReader::new(fse_stream).map_err(|_| DecompressError::BadHuffmanWeights)?;
 
+    // The weight table has at most 64 entries (accuracy log <= 6). Padding
+    // it to 64 lets `& 63` replace bounds checks on every lookup.
+    fse_table.resize(
+        64,
+        crate::fse::FseDecodeEntry {
+            base_line: 0,
+            num_bits: 0,
+            symbol: 0,
+        },
+    );
+    let table: &[crate::fse::FseDecodeEntry; 64] = fse_table[..64].try_into().unwrap();
     let mut state1 = FseState::new(fse_table, accuracy_log, &mut rev_reader)
-        .map_err(|_| DecompressError::BadHuffmanWeights)?;
+        .map_err(|_| DecompressError::BadHuffmanWeights)?
+        .state() as usize;
     let mut state2 = FseState::new(fse_table, accuracy_log, &mut rev_reader)
-        .map_err(|_| DecompressError::BadHuffmanWeights)?;
+        .map_err(|_| DecompressError::BadHuffmanWeights)?
+        .state() as usize;
 
     weights.clear();
 
+    // Each step reads at most `accuracy_log` bits. After the remaining-bits
+    // check, a refill leaves at least that many bits in the container, so the
+    // unchecked read is exact.
     loop {
-        weights.push(state1.symbol());
-        let nb1 = state1.num_bits();
-        if nb1 > 0 && rev_reader.bits_remaining() < nb1 as usize {
-            weights.push(state2.symbol());
+        let e1 = table[state1 & 63];
+        weights.push(e1.symbol);
+        if e1.num_bits > 0 && rev_reader.bits_remaining() < e1.num_bits as usize {
+            weights.push(table[state2 & 63].symbol);
             break;
         }
-        state1
-            .update_state(&mut rev_reader)
-            .map_err(|_| DecompressError::BadHuffmanWeights)?;
+        rev_reader.refill();
+        state1 = e1.base_line as usize + rev_reader.read_bits_branchless(e1.num_bits) as usize;
 
-        weights.push(state2.symbol());
-        let nb2 = state2.num_bits();
-        if nb2 > 0 && rev_reader.bits_remaining() < nb2 as usize {
-            weights.push(state1.symbol());
+        let e2 = table[state2 & 63];
+        weights.push(e2.symbol);
+        if e2.num_bits > 0 && rev_reader.bits_remaining() < e2.num_bits as usize {
+            weights.push(table[state1 & 63].symbol);
             break;
         }
-        state2
-            .update_state(&mut rev_reader)
-            .map_err(|_| DecompressError::BadHuffmanWeights)?;
+        rev_reader.refill();
+        state2 = e2.base_line as usize + rev_reader.read_bits_branchless(e2.num_bits) as usize;
 
         if weights.len() > 255 {
             return Err(DecompressError::BadHuffmanWeights);
@@ -378,22 +392,62 @@ pub fn build_huffman_decode_table_into(
         }
     }
 
+    // Group symbols by weight (counting sort). Each weight then fills one
+    // contiguous range with a fixed number of entries per symbol, which
+    // compiles to fixed-width stores instead of a variable-length fill per
+    // symbol.
+    let mut sorted = [0u8; 256];
+    let mut next = [0usize; MAX_BITS as usize + 2];
+    let mut acc = 0usize;
+    for w in 1..=max_w as usize {
+        next[w] = acc;
+        acc += rank_count[w] as usize;
+    }
     for (symbol, &w) in all_weights.iter().enumerate() {
-        if w == 0 {
-            continue;
+        if w > 0 {
+            sorted[next[w as usize]] = symbol as u8;
+            next[w as usize] += 1;
         }
+    }
+    let mut first = 0usize;
+    for w in 1..=max_w {
+        let count = rank_count[w as usize] as usize;
+        let symbols = &sorted[first..first + count];
+        first += count;
         let num_bits = (table_log as u8 + 1) - w;
-        let entries = 1usize << (w - 1);
         let start = rank_start[w as usize] as usize;
-        rank_start[w as usize] += entries as u32;
-        let entry = HuffmanDecodeEntry {
-            symbol: symbol as u8,
-            num_bits,
-        };
-        table[start..start + entries].fill(entry);
+        match w {
+            1 => fill_runs::<1>(table, start, symbols, num_bits),
+            2 => fill_runs::<2>(table, start, symbols, num_bits),
+            3 => fill_runs::<4>(table, start, symbols, num_bits),
+            4 => fill_runs::<8>(table, start, symbols, num_bits),
+            5 => fill_runs::<16>(table, start, symbols, num_bits),
+            _ => {
+                let entries = 1usize << (w - 1);
+                for (i, &symbol) in symbols.iter().enumerate() {
+                    let pos = start + i * entries;
+                    table[pos..pos + entries].fill(HuffmanDecodeEntry { symbol, num_bits });
+                }
+            }
+        }
     }
 
     Ok(table_log as u8)
+}
+
+/// Writes `L` copies of each symbol's entry, one symbol after another,
+/// starting at `start`.
+#[inline(always)]
+fn fill_runs<const L: usize>(
+    table: &mut [crate::huffman::HuffmanDecodeEntry],
+    start: usize,
+    symbols: &[u8],
+    num_bits: u8,
+) {
+    let run = &mut table[start..start + symbols.len() * L];
+    for (chunk, &symbol) in run.as_chunks_mut::<L>().0.iter_mut().zip(symbols) {
+        *chunk = [crate::huffman::HuffmanDecodeEntry { symbol, num_bits }; L];
+    }
 }
 
 fn high_bit(val: u32) -> u32 {
