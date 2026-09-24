@@ -13,81 +13,81 @@ zrip = { path = "..", features = ["dict_builder"] }
 zstd = "0.13"
 
 [[bin]]
-name = "fuzz_roundtrip_frame"
+name = "zrip_fuzz_roundtrip_frame"
 path = "fuzz_targets/roundtrip_frame.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_roundtrip_block"
+name = "zrip_fuzz_roundtrip_block"
 path = "fuzz_targets/roundtrip_block.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_corrupt_decompress"
+name = "zrip_fuzz_corrupt_decompress"
 path = "fuzz_targets/corrupt_decompress.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_c_compress_zrip_decompress"
+name = "zrip_fuzz_c_compress_zrip_decompress"
 path = "fuzz_targets/c_compress_zrip_decompress.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_zrip_compress_c_decompress"
+name = "zrip_fuzz_zrip_compress_c_decompress"
 path = "fuzz_targets/zrip_compress_c_decompress.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_roundtrip_dict"
+name = "zrip_fuzz_roundtrip_dict"
 path = "fuzz_targets/roundtrip_dict.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_corrupt_bitflip"
+name = "zrip_fuzz_corrupt_bitflip"
 path = "fuzz_targets/corrupt_bitflip.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_corrupt_splice"
+name = "zrip_fuzz_corrupt_splice"
 path = "fuzz_targets/corrupt_splice.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_corrupt_truncate"
+name = "zrip_fuzz_corrupt_truncate"
 path = "fuzz_targets/corrupt_truncate.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_corrupt_overwrite"
+name = "zrip_fuzz_corrupt_overwrite"
 path = "fuzz_targets/corrupt_overwrite.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_roundtrip_streaming"
+name = "zrip_fuzz_roundtrip_streaming"
 path = "fuzz_targets/roundtrip_streaming.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_corrupt_zrip_output"
+name = "zrip_fuzz_corrupt_zrip_output"
 path = "fuzz_targets/corrupt_zrip_output.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_corrupt_dict"
+name = "zrip_fuzz_corrupt_dict"
 path = "fuzz_targets/corrupt_dict.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_corrupt_streaming"
+name = "zrip_fuzz_corrupt_streaming"
 path = "fuzz_targets/corrupt_streaming.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_roundtrip_streaming_dict"
+name = "zrip_fuzz_roundtrip_streaming_dict"
 path = "fuzz_targets/roundtrip_streaming_dict.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_corrupt_streaming_dict"
+name = "zrip_fuzz_corrupt_streaming_dict"
 path = "fuzz_targets/corrupt_streaming_dict.rs"
 doc = false

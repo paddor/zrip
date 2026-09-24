@@ -146,8 +146,8 @@ Fuzz targets live in `fuzz/fuzz_targets/`. Round-trip targets cross-validate
 against C zstd. Corruption targets feed mutated compressed data to the decoder.
 
 ```bash
-cargo +nightly fuzz run roundtrip_frame -- -max_len=65536
-cargo +nightly fuzz run c_compress_zrip_decompress
+cargo +nightly fuzz run zrip_fuzz_roundtrip_frame -- -max_len=65536
+cargo +nightly fuzz run zrip_fuzz_c_compress_zrip_decompress
 ```
 
 ## Pre-release Miri + fuzz audit
@@ -190,7 +190,7 @@ If you have an adversarial corpus of small/malformed zstd files (e.g. from
 prior fuzzing campaigns), seed them into the corrupt_decompress target:
 
 ```bash
-cargo +nightly fuzz run fuzz_corrupt_decompress /path/to/adversarial/corpus \
+cargo +nightly fuzz run zrip_fuzz_corrupt_decompress /path/to/adversarial/corpus \
   -- -max_total_time=10800 -jobs=2
 ```
 

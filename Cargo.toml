@@ -44,36 +44,80 @@ name = "quickstart"
 required-features = ["std"]
 
 [[example]]
-name = "decode_compare"
+name = "zrip_decode_compare"
+path = "examples/decode_compare.rs"
 required-features = ["std"]
 
 [[example]]
-name = "mem_profile"
+name = "zrip_mem_profile"
+path = "examples/mem_profile.rs"
 required-features = ["std"]
 
 [[example]]
-name = "profile_decode"
+name = "zrip_profile_decode"
+path = "examples/profile_decode.rs"
 required-features = ["std"]
 
 [[example]]
-name = "profile_decode_corpus"
+name = "zrip_profile_decode_corpus"
+path = "examples/profile_decode_corpus.rs"
 required-features = ["std"]
 
 [[example]]
-name = "profile_encode"
+name = "zrip_profile_encode"
+path = "examples/profile_encode.rs"
 required-features = ["std"]
 
 [[example]]
-name = "profile_czstd"
+name = "zrip_profile_czstd"
+path = "examples/profile_czstd.rs"
 required-features = ["std"]
 
 [[example]]
-name = "profile_czstd_decode"
+name = "zrip_profile_czstd_decode"
+path = "examples/profile_czstd_decode.rs"
 required-features = ["std"]
 
 [[example]]
-name = "profile_xray"
+name = "zrip_profile_xray"
+path = "examples/profile_xray.rs"
 required-features = ["std"]
+
+[[test]]
+name = "zrip_a_miri_ub"
+path = "tests/a_miri_ub.rs"
+
+[[test]]
+name = "zrip_adversarial"
+path = "tests/adversarial.rs"
+
+[[test]]
+name = "zrip_compress_into_alloc"
+path = "tests/compress_into_alloc.rs"
+
+[[test]]
+name = "zrip_dict"
+path = "tests/dict.rs"
+
+[[test]]
+name = "zrip_interop"
+path = "tests/interop.rs"
+
+[[test]]
+name = "zrip_proptest_tests"
+path = "tests/proptest_tests.rs"
+
+[[test]]
+name = "zrip_roundtrip"
+path = "tests/roundtrip.rs"
+
+[[test]]
+name = "zrip_spec_conformance"
+path = "tests/spec_conformance.rs"
+
+[[test]]
+name = "zrip_streaming"
+path = "tests/streaming.rs"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

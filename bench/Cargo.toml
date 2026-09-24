@@ -24,7 +24,9 @@ sha2 = "0.10"
 name = "zrip_bench"
 
 [[example]]
-name = "ruzstd_compare"
+name = "zrip_ruzstd_compare"
+path = "examples/ruzstd_compare.rs"
 
 [[example]]
-name = "bench_streaming_dict"
+name = "zrip_bench_streaming_dict"
+path = "examples/bench_streaming_dict.rs"
