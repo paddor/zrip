@@ -420,27 +420,48 @@ pub fn build_huffman_decode_table_into(
     // `1 << (w - 1)`. So `w & 15` is `w` and only drops the bounds check.
     // Zero weights go to bucket 0 instead of being skipped: zero and nonzero
     // weights interleave unpredictably, so a branch per symbol mispredicts.
+    //
+    // The histogram and the counting sort below run on four contiguous
+    // partitions of the symbols, each with its own counters. With one shared
+    // counter array, consecutive symbols of the same weight waited on each
+    // other's counter store. Contiguous partitions keep symbols of equal
+    // weight in increasing order, as the canonical code needs. Padding
+    // symbols get weight 0 and land in bucket 0, which the fill skips.
+    let q = all_weights.len().div_ceil(4);
+    all_weights.resize(4 * q, 0);
+    let aw = &all_weights[..];
+    let mut hist = [[0u32; 16]; 4];
+    for i in 0..q {
+        for (k, h) in hist.iter_mut().enumerate() {
+            h[(aw[k * q + i] & 15) as usize] += 1;
+        }
+    }
     let mut rank_count = [0u32; 16];
-    for &w in all_weights.iter() {
-        rank_count[(w & 15) as usize] += 1;
+    for (w, count) in rank_count.iter_mut().enumerate() {
+        *count = hist[0][w] + hist[1][w] + hist[2][w] + hist[3][w];
     }
 
-    // Group symbols by weight (counting sort), weight 0 first. Each nonzero
-    // weight then fills one contiguous range with a fixed number of entries
-    // per symbol, which compiles to fixed-width stores instead of a
-    // variable-length fill per symbol. `all_weights` has at most 256 entries,
-    // so `& 255` only drops the bounds check.
-    let mut sorted = [0u8; 256];
-    let mut next = [0u32; 16];
+    // Group symbols by weight (counting sort), weight 0 first, and within a
+    // weight by partition. Each nonzero weight then fills one contiguous range
+    // with a fixed number of entries per symbol, which compiles to fixed-width
+    // stores instead of a variable-length fill per symbol. There are at most
+    // 256 symbols, so `& 255` only drops the bounds check.
+    let mut next = [[0u32; 16]; 4];
     let mut acc = 0u32;
     for w in 0..16 {
-        next[w] = acc;
-        acc += rank_count[w];
+        for k in 0..4 {
+            next[k][w] = acc;
+            acc += hist[k][w];
+        }
     }
-    for (symbol, &w) in all_weights.iter().enumerate() {
-        let slot = &mut next[(w & 15) as usize];
-        sorted[*slot as usize & 255] = symbol as u8;
-        *slot += 1;
+    let mut sorted = [0u8; 256];
+    for i in 0..q {
+        for (k, slots) in next.iter_mut().enumerate() {
+            let symbol = k * q + i;
+            let slot = &mut slots[(aw[symbol] & 15) as usize];
+            sorted[*slot as usize & 255] = symbol as u8;
+            *slot += 1;
+        }
     }
     let mut first = rank_count[0] as usize;
     let mut start = 0usize;
@@ -641,6 +662,51 @@ mod tests {
             }
         }
         assert!(ok > 1000 && too_many > 100, "ok {ok}, too many {too_many}");
+    }
+
+    #[test]
+    fn build_table_into_matches_reference() {
+        let mut seed = 0x7a3d_5c19_e0b4_8f21u64;
+        let mut rand = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let (mut table, mut all) = (Vec::new(), Vec::new());
+        for _ in 0..3000 {
+            // A random complete prefix code with 2 to 256 leaves, at most 11
+            // bits deep, over random symbols. The highest symbol's weight is
+            // implied.
+            let leaves = 2 + (rand() as usize) % 255;
+            let mut depths = vec![1u8, 1];
+            while depths.len() < leaves {
+                let i = (rand() as usize) % depths.len();
+                if depths[i] < 11 {
+                    depths[i] += 1;
+                    depths.push(depths[i]);
+                }
+            }
+            let table_log = *depths.iter().max().unwrap();
+            let last_symbol = leaves - 1 + (rand() as usize) % (256 - leaves + 1);
+            let mut symbols: Vec<usize> = (0..last_symbol).collect();
+            for i in (1..symbols.len()).rev() {
+                symbols.swap(i, (rand() as usize) % (i + 1));
+            }
+            let mut weights = vec![0u8; last_symbol];
+            for (&symbol, &depth) in symbols[..leaves - 1].iter().zip(&depths) {
+                weights[symbol] = table_log + 1 - depth;
+            }
+
+            let (expected, expected_log) = build_huffman_decode_table(&weights).unwrap();
+            let log = build_huffman_decode_table_into(&weights, &mut table, &mut all).unwrap();
+            assert_eq!(log, expected_log);
+            let n = 1 << log;
+            let fields = |t: &[crate::huffman::HuffmanDecodeEntry]| -> Vec<(u8, u8)> {
+                t[..n].iter().map(|e| (e.symbol, e.num_bits)).collect()
+            };
+            assert_eq!(fields(&table), fields(&expected), "{weights:?}");
+        }
     }
 
     #[test]

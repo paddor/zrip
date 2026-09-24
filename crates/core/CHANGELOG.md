@@ -37,6 +37,9 @@
   left-aligned container with a sentinel bit, as C zstd does: a symbol costs
   one shift, one lookup, and one shift, with no separate bit count, and the
   table index needs no mask.
+- `build_huffman_decode_table_into` counts and sorts weights in four
+  contiguous symbol partitions with separate counters, so consecutive
+  symbols of equal weight no longer wait on each other's counter store.
 
 ## [0.10.1] - 2026-09-10
 
