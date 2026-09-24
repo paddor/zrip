@@ -215,41 +215,70 @@ fn parse_fse_compressed_weights_into(
         .map_err(|_| DecompressError::BadHuffmanWeights)?
         .state() as usize;
 
-    weights.clear();
+    // Up to 255 weights, plus up to three more from the step that detects
+    // the overflow.
+    let mut out = [0u8; 260];
+    let mut n = 0usize;
+
+    // Fast path: four steps read at most 24 bits (accuracy log <= 6). After a
+    // refill, the container holds all remaining bits or at least 57, so with
+    // 24 bits left none of the four steps can reach the end of the stream.
+    while n <= 251 {
+        rev_reader.refill_fast_or_regular();
+        if rev_reader.bits_remaining() < 24 {
+            break;
+        }
+        let e1 = table[state1 & 63];
+        state1 = e1.base_line as usize + rev_reader.read_bits_branchless(e1.num_bits) as usize;
+        let e2 = table[state2 & 63];
+        state2 = e2.base_line as usize + rev_reader.read_bits_branchless(e2.num_bits) as usize;
+        let e3 = table[state1 & 63];
+        state1 = e3.base_line as usize + rev_reader.read_bits_branchless(e3.num_bits) as usize;
+        let e4 = table[state2 & 63];
+        state2 = e4.base_line as usize + rev_reader.read_bits_branchless(e4.num_bits) as usize;
+        out[n..n + 4].copy_from_slice(&[e1.symbol, e2.symbol, e3.symbol, e4.symbol]);
+        n += 4;
+    }
 
     // Each step reads at most `accuracy_log` bits. After the remaining-bits
     // check, a refill leaves at least that many bits in the container, so the
     // unchecked read is exact.
     loop {
         let e1 = table[state1 & 63];
-        weights.push(e1.symbol);
+        out[n] = e1.symbol;
+        n += 1;
         if e1.num_bits > 0 && rev_reader.bits_remaining() < e1.num_bits as usize {
-            weights.push(table[state2 & 63].symbol);
+            out[n] = table[state2 & 63].symbol;
+            n += 1;
             break;
         }
         rev_reader.refill();
         state1 = e1.base_line as usize + rev_reader.read_bits_branchless(e1.num_bits) as usize;
 
         let e2 = table[state2 & 63];
-        weights.push(e2.symbol);
+        out[n] = e2.symbol;
+        n += 1;
         if e2.num_bits > 0 && rev_reader.bits_remaining() < e2.num_bits as usize {
-            weights.push(table[state1 & 63].symbol);
+            out[n] = table[state1 & 63].symbol;
+            n += 1;
             break;
         }
         rev_reader.refill();
         state2 = e2.base_line as usize + rev_reader.read_bits_branchless(e2.num_bits) as usize;
 
-        if weights.len() > 255 {
+        if n > 255 {
             return Err(DecompressError::BadHuffmanWeights);
         }
     }
 
     // The final step pushes up to two weights past the in-loop check. At
     // most 255 weights are explicit; the last one is implied.
-    if weights.len() > 255 {
+    if n > 255 {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
+    weights.clear();
+    weights.extend_from_slice(&out[..n]);
     Ok(1 + compressed_size)
 }
 
@@ -333,13 +362,16 @@ pub fn build_huffman_decode_table(
     Ok((table, table_log as u8))
 }
 
+/// Builds the decode table for `weights` into `table` and returns the table
+/// log. `_rank_count` and `_rank_start` are unused. They keep the signature
+/// stable.
 #[cfg(feature = "alloc")]
 pub fn build_huffman_decode_table_into(
     weights: &[u8],
     table: &mut Vec<crate::huffman::HuffmanDecodeEntry>,
     all_weights: &mut Vec<u8>,
-    rank_count: &mut Vec<u32>,
-    rank_start: &mut Vec<u32>,
+    _rank_count: &mut Vec<u32>,
+    _rank_start: &mut Vec<u32>,
 ) -> Result<u8, DecompressError> {
     use crate::huffman::{HuffmanDecodeEntry, MAX_BITS};
 
@@ -385,49 +417,41 @@ pub fn build_huffman_decode_table_into(
         table.resize(super::DECODE_TABLE_SIZE, HuffmanDecodeEntry::default());
     }
 
-    let max_w = table_log as u8 + 1;
+    let max_w = table_log as usize + 1;
 
-    rank_count.resize(max_w as usize + 1, 0);
-    rank_count.fill(0);
+    // Every weight is at most `table_log`, because `weight_sum` includes its
+    // `1 << (w - 1)`. So `w & 15` is `w` and only drops the bounds check.
+    // Zero weights go to bucket 0 instead of being skipped: zero and nonzero
+    // weights interleave unpredictably, so a branch per symbol mispredicts.
+    let mut rank_count = [0u32; 16];
     for &w in all_weights.iter() {
-        if w > 0 && w <= max_w {
-            rank_count[w as usize] += 1;
-        }
+        rank_count[(w & 15) as usize] += 1;
     }
 
-    rank_start.resize(max_w as usize + 1, 0);
-    {
-        let mut cumul = 0u32;
-        for w in 1..=max_w {
-            rank_start[w as usize] = cumul;
-            cumul += rank_count[w as usize] * (1u32 << (w - 1));
-        }
-    }
-
-    // Group symbols by weight (counting sort). Each weight then fills one
-    // contiguous range with a fixed number of entries per symbol, which
-    // compiles to fixed-width stores instead of a variable-length fill per
-    // symbol.
+    // Group symbols by weight (counting sort), weight 0 first. Each nonzero
+    // weight then fills one contiguous range with a fixed number of entries
+    // per symbol, which compiles to fixed-width stores instead of a
+    // variable-length fill per symbol. `all_weights` has at most 256 entries,
+    // so `& 255` only drops the bounds check.
     let mut sorted = [0u8; 256];
-    let mut next = [0usize; MAX_BITS as usize + 2];
-    let mut acc = 0usize;
-    for w in 1..=max_w as usize {
+    let mut next = [0u32; 16];
+    let mut acc = 0u32;
+    for w in 0..16 {
         next[w] = acc;
-        acc += rank_count[w] as usize;
+        acc += rank_count[w];
     }
     for (symbol, &w) in all_weights.iter().enumerate() {
-        if w > 0 {
-            sorted[next[w as usize]] = symbol as u8;
-            next[w as usize] += 1;
-        }
+        let slot = &mut next[(w & 15) as usize];
+        sorted[*slot as usize & 255] = symbol as u8;
+        *slot += 1;
     }
-    let mut first = 0usize;
-    for w in 1..=max_w {
-        let count = rank_count[w as usize] as usize;
+    let mut first = rank_count[0] as usize;
+    let mut start = 0usize;
+    for (w, &count) in rank_count.iter().enumerate().take(max_w + 1).skip(1) {
+        let count = count as usize;
         let symbols = &sorted[first..first + count];
         first += count;
-        let num_bits = (table_log as u8 + 1) - w;
-        let start = rank_start[w as usize] as usize;
+        let num_bits = (max_w - w) as u8;
         match w {
             1 => fill_runs::<1>(table, start, symbols, num_bits),
             2 => fill_runs::<2>(table, start, symbols, num_bits),
@@ -442,6 +466,7 @@ pub fn build_huffman_decode_table_into(
                 }
             }
         }
+        start += count << (w - 1);
     }
 
     Ok(table_log as u8)
@@ -559,6 +584,66 @@ mod tests {
                 "{count} weights"
             );
         }
+    }
+
+    #[test]
+    fn parse_fse_weights_into_matches_reference() {
+        use crate::fse::table_builder::{normalize_counts, serialize_fse_table_description};
+
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut rand = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let (mut out, mut table, mut next, mut dist) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (mut ok, mut too_many) = (0, 0);
+        for _ in 0..20_000 {
+            let accuracy_log = 5 + (rand() % 2) as u8;
+            let symbols = 2 + (rand() % 12) as usize;
+            // A dominant symbol gives zero- and one-bit states, so some
+            // streams decode more than 255 weights.
+            let freqs: Vec<u32> = (0..symbols)
+                .map(|_| {
+                    if rand() % 4 == 0 {
+                        1000
+                    } else {
+                        (rand() % 50) as u32 + 1
+                    }
+                })
+                .collect();
+            let mut compressed = serialize_fse_table_description(
+                &normalize_counts(&freqs, accuracy_log),
+                accuracy_log,
+            );
+            let stream_len = 1 + (rand() % 100) as usize;
+            compressed.extend((0..stream_len).map(|_| rand() as u8));
+            *compressed.last_mut().unwrap() |= 1 << (rand() % 8);
+            if compressed.len() > 127 {
+                continue;
+            }
+            let mut data = vec![compressed.len() as u8];
+            data.extend_from_slice(&compressed);
+
+            let reference = parse_huffman_weights(&data);
+            let result =
+                parse_huffman_weights_into(&data, &mut out, &mut table, &mut next, &mut dist);
+            match (reference, result) {
+                (Ok((weights, consumed)), Ok(result_consumed)) => {
+                    assert_eq!(out, weights);
+                    assert_eq!(result_consumed, consumed);
+                    ok += 1;
+                }
+                (Err(e), Err(result_e)) => {
+                    assert_eq!(result_e, e);
+                    too_many += usize::from(e == DecompressError::BadHuffmanWeights);
+                }
+                (reference, result) => panic!("{reference:?} vs {result:?} for {data:?}"),
+            }
+        }
+        assert!(ok > 1000 && too_many > 100, "ok {ok}, too many {too_many}");
     }
 
     #[test]
