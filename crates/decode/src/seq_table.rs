@@ -26,6 +26,14 @@ impl Clone for SeqTable {
             data: self.data,
         }
     }
+
+    /// Copies only the initialized entries. Decoding reads no others, and a
+    /// small table uses a fraction of the capacity.
+    fn clone_from(&mut self, source: &Self) {
+        let n = source.initialized;
+        self.data[..n].copy_from_slice(&source.data[..n]);
+        self.initialized = n;
+    }
 }
 
 impl SeqTable {

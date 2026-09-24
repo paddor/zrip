@@ -435,7 +435,7 @@ fn initial_sequence_state(
     dict: Option<&zrip_core::dict::Dictionary>,
 ) -> [u32; 3] {
     if let Some(ref cached) = ws.cached_dict_tables {
-        *tables = (**cached).clone();
+        tables.clone_from(cached);
         ws.seq_table_cache_tables_current = false;
         ws.cached_dict_rep
     } else if let Some(d) = dict {

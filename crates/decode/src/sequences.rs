@@ -17,7 +17,6 @@ use zrip_core::fse::{
 };
 use zrip_core::hint::likely;
 
-#[derive(Clone)]
 pub(crate) struct SequenceDecodeTables {
     pub(crate) ll_table: SeqTable,
     pub(crate) ll_accuracy: u8,
@@ -31,6 +30,42 @@ pub(crate) struct SequenceDecodeTables {
     pub(crate) ll_set: bool,
     pub(crate) of_set: bool,
     pub(crate) ml_set: bool,
+}
+
+impl Clone for SequenceDecodeTables {
+    fn clone(&self) -> Self {
+        Self {
+            ll_table: self.ll_table.clone(),
+            ll_accuracy: self.ll_accuracy,
+            ll_kind: self.ll_kind,
+            of_table: self.of_table.clone(),
+            of_accuracy: self.of_accuracy,
+            of_kind: self.of_kind,
+            ml_table: self.ml_table.clone(),
+            ml_accuracy: self.ml_accuracy,
+            ml_kind: self.ml_kind,
+            ll_set: self.ll_set,
+            of_set: self.of_set,
+            ml_set: self.ml_set,
+        }
+    }
+
+    /// Copies the tables in place through `SeqTable::clone_from`. The
+    /// derived version would build a full temporary copy first.
+    fn clone_from(&mut self, source: &Self) {
+        self.ll_table.clone_from(&source.ll_table);
+        self.ll_accuracy = source.ll_accuracy;
+        self.ll_kind = source.ll_kind;
+        self.of_table.clone_from(&source.of_table);
+        self.of_accuracy = source.of_accuracy;
+        self.of_kind = source.of_kind;
+        self.ml_table.clone_from(&source.ml_table);
+        self.ml_accuracy = source.ml_accuracy;
+        self.ml_kind = source.ml_kind;
+        self.ll_set = source.ll_set;
+        self.of_set = source.of_set;
+        self.ml_set = source.ml_set;
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -90,7 +125,7 @@ impl SequenceDecodeTables {
         if self.ll_kind != SequenceTableKind::Predefined {
             #[cfg(feature = "std")]
             {
-                self.ll_table = LL_PREDEFINED.clone();
+                self.ll_table.clone_from(&LL_PREDEFINED);
             }
             #[cfg(not(feature = "std"))]
             {
@@ -107,7 +142,7 @@ impl SequenceDecodeTables {
         if self.of_kind != SequenceTableKind::Predefined {
             #[cfg(feature = "std")]
             {
-                self.of_table = OF_PREDEFINED.clone();
+                self.of_table.clone_from(&OF_PREDEFINED);
             }
             #[cfg(not(feature = "std"))]
             {
@@ -124,7 +159,7 @@ impl SequenceDecodeTables {
         if self.ml_kind != SequenceTableKind::Predefined {
             #[cfg(feature = "std")]
             {
-                self.ml_table = ML_PREDEFINED.clone();
+                self.ml_table.clone_from(&ML_PREDEFINED);
             }
             #[cfg(not(feature = "std"))]
             {
@@ -264,7 +299,7 @@ pub(crate) fn parse_sequence_tables_ws(
             if prev.ll_kind != SequenceTableKind::Predefined {
                 #[cfg(feature = "std")]
                 {
-                    prev.ll_table = LL_PREDEFINED.clone();
+                    prev.ll_table.clone_from(&LL_PREDEFINED);
                 }
                 #[cfg(not(feature = "std"))]
                 {
@@ -321,7 +356,7 @@ pub(crate) fn parse_sequence_tables_ws(
             if prev.of_kind != SequenceTableKind::Predefined {
                 #[cfg(feature = "std")]
                 {
-                    prev.of_table = OF_PREDEFINED.clone();
+                    prev.of_table.clone_from(&OF_PREDEFINED);
                 }
                 #[cfg(not(feature = "std"))]
                 {
@@ -378,7 +413,7 @@ pub(crate) fn parse_sequence_tables_ws(
             if prev.ml_kind != SequenceTableKind::Predefined {
                 #[cfg(feature = "std")]
                 {
-                    prev.ml_table = ML_PREDEFINED.clone();
+                    prev.ml_table.clone_from(&ML_PREDEFINED);
                 }
                 #[cfg(not(feature = "std"))]
                 {
@@ -434,7 +469,10 @@ pub(crate) fn parse_sequence_tables_ws(
     if cacheable {
         ws.seq_table_header.clear();
         ws.seq_table_header.extend_from_slice(&data[..consumed]);
-        ws.seq_table_cache = Some(Box::new(prev.clone()));
+        match &mut ws.seq_table_cache {
+            Some(cache) => cache.as_mut().clone_from(prev),
+            None => ws.seq_table_cache = Some(Box::new(prev.clone())),
+        }
         ws.seq_table_cache_tables_current = true;
     } else {
         ws.seq_table_cache_tables_current = false;
