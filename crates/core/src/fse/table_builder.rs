@@ -230,57 +230,44 @@ pub fn build_decode_table_into(
         );
     }
 
+    if distribution.len() > 256 {
+        return Err(DecompressError::BadFseTable);
+    }
+    // `table` has exactly `table_size` entries, so indices masked with
+    // `len - 1` need no bounds checks. Symbols are `u8`, so `next` indexed by
+    // symbol needs none either.
+    let table = &mut table[..table_size];
+    let mask = table.len() - 1;
     let step = (table_size >> 1) + (table_size >> 3) + 3;
-    let mask = table_size - 1;
+    let mut next = [0u16; 256];
+    symbol_next.clear();
 
-    let mut high_threshold = table_size - 1;
-    symbol_next.resize(distribution.len(), 0);
-    symbol_next.truncate(distribution.len());
-    symbol_next.fill(0);
-
+    let mut high_threshold = mask;
     for (s, &prob) in distribution.iter().enumerate() {
         if prob == -1 {
             if unlikely(high_threshold == 0) {
                 return Err(DecompressError::BadFseTable);
             }
-            table[high_threshold].symbol = s as u8;
+            table[high_threshold & mask].symbol = s as u8;
             high_threshold -= 1;
-            symbol_next[s] = 1;
+            next[s & 255] = 1;
         } else if prob > 0 {
-            symbol_next[s] = prob as u16;
+            next[s & 255] = prob as u16;
         }
     }
 
     let mut position = 0;
-    if high_threshold == table_size - 1 {
+    if high_threshold == mask {
         for (s, &prob) in distribution.iter().enumerate() {
-            if prob <= 0 {
-                continue;
-            }
             let sym = s as u8;
-            let mut remaining = prob as usize;
-            while remaining >= 4 {
-                table[position].symbol = sym;
-                position = (position + step) & mask;
-                table[position].symbol = sym;
-                position = (position + step) & mask;
-                table[position].symbol = sym;
-                position = (position + step) & mask;
-                table[position].symbol = sym;
-                position = (position + step) & mask;
-                remaining -= 4;
-            }
-            for _ in 0..remaining {
+            for _ in 0..prob.max(0) {
                 table[position].symbol = sym;
                 position = (position + step) & mask;
             }
         }
     } else {
         for (s, &prob) in distribution.iter().enumerate() {
-            if prob <= 0 {
-                continue;
-            }
-            for _ in 0..prob {
+            for _ in 0..prob.max(0) {
                 table[position].symbol = s as u8;
                 position = (position + step) & mask;
                 while position > high_threshold {
@@ -294,10 +281,10 @@ pub fn build_decode_table_into(
         return Err(DecompressError::BadFseTable);
     }
 
-    for entry in table.iter_mut().take(table_size) {
+    for entry in table.iter_mut() {
         let s = entry.symbol as usize;
-        let next_state = symbol_next[s] as u32;
-        symbol_next[s] += 1;
+        let next_state = next[s] as u32;
+        next[s] += 1;
 
         let nb = accuracy_log as u32 - high_bit(next_state);
         let new_state = (next_state << nb) - table_size as u32;

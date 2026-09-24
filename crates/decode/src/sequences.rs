@@ -304,7 +304,7 @@ pub(crate) fn parse_sequence_tables_ws(
                 &mut ws.fse_build_buf,
                 &mut ws.fse_symbol_next,
             )?;
-            prev.ll_table = SeqTable::promote_ll(&ws.fse_build_buf);
+            prev.ll_table.fill_ll(&ws.fse_build_buf);
             prev.ll_accuracy = acc;
             prev.ll_kind = SequenceTableKind::Other;
             prev.ll_set = true;
@@ -361,7 +361,7 @@ pub(crate) fn parse_sequence_tables_ws(
                 &mut ws.fse_build_buf,
                 &mut ws.fse_symbol_next,
             )?;
-            prev.of_table = SeqTable::promote_of(&ws.fse_build_buf);
+            prev.of_table.fill_of(&ws.fse_build_buf);
             prev.of_accuracy = acc;
             prev.of_kind = SequenceTableKind::Other;
             prev.of_set = true;
@@ -418,7 +418,7 @@ pub(crate) fn parse_sequence_tables_ws(
                 &mut ws.fse_build_buf,
                 &mut ws.fse_symbol_next,
             )?;
-            prev.ml_table = SeqTable::promote_ml(&ws.fse_build_buf);
+            prev.ml_table.fill_ml(&ws.fse_build_buf);
             prev.ml_accuracy = acc;
             prev.ml_kind = SequenceTableKind::Other;
             prev.ml_set = true;

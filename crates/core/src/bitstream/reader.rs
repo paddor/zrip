@@ -50,27 +50,22 @@ impl<'a> BitReader<'a> {
             return Err(DecompressError::InputExhausted);
         }
 
-        let mut result = 0u32;
-        let mut bits_left = n;
-        let mut bit_offset = 0u8;
-
-        while bits_left > 0 {
-            let avail = 8 - self.bit_pos;
-            let take = bits_left.min(avail);
-            let byte = self.data[self.pos] as u32;
-            let mask = (1u32 << take) - 1;
-            let bits = (byte >> self.bit_pos) & mask;
-            result |= bits << bit_offset;
-
-            bit_offset += take;
-            bits_left -= take;
-            self.bit_pos += take;
-            if self.bit_pos == 8 {
-                self.bit_pos = 0;
-                self.pos += 1;
+        // One little-endian load covers `bit_pos + n <= 32` bits. Near the
+        // end of the data, the missing bytes read as zero; the check above
+        // guarantees the requested bits are all present.
+        let word = match self.data.get(self.pos..self.pos + 8) {
+            Some(bytes) => u64::from_le_bytes(bytes.try_into().unwrap()),
+            None => {
+                let mut buf = [0u8; 8];
+                let tail = &self.data[self.pos..];
+                buf[..tail.len()].copy_from_slice(tail);
+                u64::from_le_bytes(buf)
             }
-        }
-
+        };
+        let result = ((word >> self.bit_pos) & ((1u64 << n) - 1)) as u32;
+        let total = self.bit_pos as usize + n as usize;
+        self.pos += total / 8;
+        self.bit_pos = (total % 8) as u8;
         Ok(result)
     }
 
