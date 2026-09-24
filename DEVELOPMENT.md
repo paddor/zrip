@@ -316,6 +316,18 @@ local detection.
 
 ### Small-input benchmark + chart workflow
 
+Each small input is up to 64 distinct consecutive slices of one size, and
+each timed pass walks all of them. Repeating one slice lets the branch
+predictor learn it and distorts results. `small_decode.svg` draws each
+implementation decoding C zstd's L3 frames (thick) and its own L3 output
+(thin, from the small encode rows). The paranoid line needs a paranoid small
+encode run at L3:
+
+```bash
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release \
+  --features paranoid -- --small-only --levels 3 --impl zrip
+```
+
 `small_encode.svg` only includes zrip, C zstd, and structured-zstd (no
 paranoid). Default `--small-only` benchmarks zrip only:
 

@@ -2004,7 +2004,7 @@ fn draw_small_encode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
     chart_header(
         &area,
         width,
-        "Encode Throughput vs Input Size (Silesia small-input slices)",
+        "Encode Throughput vs Input Size (64 distinct Silesia slices per size)",
         cfg.hw_label.as_deref(),
         18,
     )?;
@@ -2195,8 +2195,24 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
     let left = 90.0;
     let gap = 50.0;
     let total_h = SMALL_PREFIXES.len() as f64 * panel_h + (SMALL_PREFIXES.len() - 1) as f64 * gap;
-    let height = (top + total_h + 125.0) as u32;
+    let height = (top + total_h + 145.0) as u32;
     let path = output_path(out_dir, "small_decode.svg");
+    // Each codec decoding its own L3 output (small encode rows), drawn thin.
+    // lz4rip's thick line already decodes its own blocks.
+    let own_codecs: Vec<&str> = cfg
+        .small_decode_codecs
+        .iter()
+        .copied()
+        .filter(|c| *c != "C zstd" && *c != "lz4rip")
+        .collect();
+    let own_data = load_small_data(cfg, &own_codecs);
+    let own_mbs = |codec: &str, name: &str| {
+        own_data.get(codec).and_then(|rows| {
+            rows.iter()
+                .find(|r| r.input == name && r.level == DECODE_LEVEL)
+                .and_then(dec_mbs)
+        })
+    };
     let area = root(&path, width, height)?;
     let mut subtitle = if common {
         format!("C zstd L{DECODE_LEVEL} bitstream")
@@ -2209,7 +2225,7 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
     chart_header(
         &area,
         width,
-        &format!("Decode Throughput vs Input Size (Silesia slices, {subtitle})"),
+        &format!("Decode Throughput vs Input Size (64 distinct Silesia slices, {subtitle})"),
         cfg.hw_label.as_deref(),
         18,
     )?;
@@ -2223,7 +2239,11 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
         for codec in &cfg.small_decode_codecs {
             let rows = data.get(*codec).cloned().unwrap_or_default();
             for suffix in SMALL_DECODE_SUFFIXES {
-                if let Some(v) = get_decode_mbs(&rows, &format!("{prefix}{suffix}")) {
+                let name = format!("{prefix}{suffix}");
+                for v in [get_decode_mbs(&rows, &name), own_mbs(codec, &name)]
+                    .into_iter()
+                    .flatten()
+                {
                     panel_min = panel_min.min(v);
                     panel_max = panel_max.max(v);
                 }
@@ -2293,8 +2313,29 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
             for (x, y) in pts {
                 dot(&area, x, y, 3, style.color)?;
             }
+            if own_codecs.contains(codec) {
+                let pts = SMALL_DECODE_SUFFIXES
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, suffix)| {
+                        own_mbs(codec, &format!("{prefix}{suffix}"))
+                            .map(|mbs| (map_x(SMALL_DECODE_SIZES[i]), map_y(mbs)))
+                    })
+                    .collect::<Vec<_>>();
+                polyline(&area, &pts, style.color, 1, 0.6, false)?;
+            }
         }
     }
+    text(
+        &area,
+        "thick = decoding C zstd's frames, thin = decoding its own L3 output",
+        px(width as f64 / 2.0),
+        px(height as f64 - 14.0),
+        10,
+        MUTED,
+        HPos::Center,
+        false,
+    )?;
     vtext(
         &area,
         "decode MB/s (log scale)",

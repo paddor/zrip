@@ -32,7 +32,10 @@ struct SmallSize {
 
 struct BenchInput {
     name: String,
+    /// One slice, or for small inputs up to `SMALL_SLICES` consecutive
+    /// slices of `slice_len` bytes each.
     data: Vec<u8>,
+    slice_len: usize,
     sha256: String,
     is_small: bool,
     dict_source: String,
@@ -144,6 +147,10 @@ const SMALL_SOURCES: &[SmallSource] = &[
         base_label: "x-ray",
     },
 ];
+
+/// Distinct consecutive slices per small input. Each timed pass walks all of
+/// them, so no codec sees the same input twice in a row.
+const SMALL_SLICES: usize = 64;
 
 const SMALL_SIZES: &[SmallSize] = &[
     SmallSize {
@@ -281,141 +288,129 @@ impl BenchResult {
     }
 }
 
-fn bench_zrip(data: &[u8], name: &str, level: i32, target_ns: u64) -> BenchResult {
+/// Times `compress` over every slice per pass and `decompress` over the
+/// resulting frames per pass. Sizes in the result are totals over all slices.
+#[allow(clippy::too_many_arguments)]
+fn bench_slices(
+    codec: &str,
+    slices: &[&[u8]],
+    name: &str,
+    level: i32,
+    target_ns: u64,
+    mut compress: impl FnMut(&[u8]) -> Vec<u8>,
+    mut decompress: impl FnMut(&[u8], usize),
+) -> BenchResult {
+    let frames: Vec<Vec<u8>> = slices.iter().map(|s| compress(s)).collect();
+    let compress_ns = bench_loop(3, target_ns, 7, || {
+        for s in slices {
+            std::hint::black_box(compress(std::hint::black_box(s)));
+        }
+    });
+    let decompress_ns = bench_loop(3, target_ns, 7, || {
+        for (f, s) in frames.iter().zip(slices) {
+            decompress(std::hint::black_box(f), s.len());
+        }
+    });
+    BenchResult {
+        codec: codec.into(),
+        input_name: name.into(),
+        level,
+        input_size: slices.iter().map(|s| s.len()).sum(),
+        compressed_size: frames.iter().map(Vec::len).sum(),
+        compress_ns,
+        decompress_ns,
+        input_sha256: String::new(),
+    }
+}
+
+fn bench_zrip(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> BenchResult {
     let mut ctx = zrip::CompressContext::new(level).unwrap();
-    let compressed = ctx.compress(data).unwrap().to_vec();
-    let compress_ns = bench_loop(3, target_ns, 7, || {
-        let _ = std::hint::black_box(ctx.compress(std::hint::black_box(data)).unwrap());
-    });
     let mut dec_ctx = zrip::DecompressContext::new();
-    let decompress_ns = bench_loop(3, target_ns, 7, || {
-        let _ = std::hint::black_box(
-            dec_ctx
-                .decompress(std::hint::black_box(&compressed))
-                .unwrap(),
-        );
-    });
-    BenchResult {
-        codec: ZRIP_CODEC.into(),
-        input_name: name.into(),
+    bench_slices(
+        ZRIP_CODEC,
+        slices,
+        name,
         level,
-        input_size: data.len(),
-        compressed_size: compressed.len(),
-        compress_ns,
-        decompress_ns,
-        input_sha256: String::new(),
-    }
+        target_ns,
+        |s| ctx.compress(s).unwrap().to_vec(),
+        |f, _| {
+            std::hint::black_box(dec_ctx.decompress(f).unwrap());
+        },
+    )
 }
 
-fn bench_lz4rip(data: &[u8], name: &str, level: i32, target_ns: u64) -> BenchResult {
-    let compressed = lz4rip::block::compress(data);
-    let compress_ns = bench_loop(3, target_ns, 7, || {
-        let _ = std::hint::black_box(lz4rip::block::compress(std::hint::black_box(data)));
-    });
-    let decompress_ns = bench_loop(3, target_ns, 7, || {
-        let _ = std::hint::black_box(
-            lz4rip::block::decompress(std::hint::black_box(&compressed), data.len()).unwrap(),
-        );
-    });
-    BenchResult {
-        codec: "lz4rip".into(),
-        input_name: name.into(),
+fn bench_lz4rip(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> BenchResult {
+    bench_slices(
+        "lz4rip",
+        slices,
+        name,
         level,
-        input_size: data.len(),
-        compressed_size: compressed.len(),
-        compress_ns,
-        decompress_ns,
-        input_sha256: String::new(),
-    }
+        target_ns,
+        lz4rip::block::compress,
+        |f, len| {
+            std::hint::black_box(lz4rip::block::decompress(f, len).unwrap());
+        },
+    )
 }
 
-fn bench_ruzstd(data: &[u8], name: &str, level: i32, target_ns: u64) -> BenchResult {
+fn bench_ruzstd(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> BenchResult {
     use ruzstd::encoding::CompressionLevel;
     let ruz_level = match level {
         1 => CompressionLevel::Fastest,
         _ => CompressionLevel::Uncompressed,
     };
-    let compressed = ruzstd::encoding::compress_to_vec(data, ruz_level);
-    let compress_ns = bench_loop(3, target_ns, 7, || {
-        let _ = std::hint::black_box(ruzstd::encoding::compress_to_vec(
-            std::hint::black_box(data),
-            ruz_level,
-        ));
-    });
-    let decompress_ns = bench_loop(3, target_ns, 7, || {
-        let mut dec = ruzstd::decoding::FrameDecoder::new();
-        let mut out = Vec::with_capacity(data.len() + 1024);
-        dec.decode_all_to_vec(std::hint::black_box(&compressed), &mut out)
-            .unwrap();
-        std::hint::black_box(&out);
-    });
-    BenchResult {
-        codec: "ruzstd".into(),
-        input_name: name.into(),
+    bench_slices(
+        "ruzstd",
+        slices,
+        name,
         level,
-        input_size: data.len(),
-        compressed_size: compressed.len(),
-        compress_ns,
-        decompress_ns,
-        input_sha256: String::new(),
-    }
+        target_ns,
+        |s| ruzstd::encoding::compress_to_vec(s, ruz_level),
+        |f, len| {
+            let mut dec = ruzstd::decoding::FrameDecoder::new();
+            let mut out = Vec::with_capacity(len + 1024);
+            dec.decode_all_to_vec(f, &mut out).unwrap();
+            std::hint::black_box(&out);
+        },
+    )
 }
 
-fn bench_structured_zstd(data: &[u8], name: &str, level: i32, target_ns: u64) -> BenchResult {
+fn bench_structured_zstd(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> BenchResult {
     use structured_zstd::encoding::CompressionLevel;
     let sz_level = CompressionLevel::Level(level);
-    let compressed = structured_zstd::encoding::compress_slice_to_vec(data, sz_level);
-    let compress_ns = bench_loop(3, target_ns, 7, || {
-        let _ = std::hint::black_box(structured_zstd::encoding::compress_slice_to_vec(
-            std::hint::black_box(data),
-            sz_level,
-        ));
-    });
-    let decompress_ns = bench_loop(3, target_ns, 7, || {
-        let mut dec = structured_zstd::decoding::FrameDecoder::new();
-        let mut out = vec![0u8; data.len() + 1024];
-        dec.decode_all(std::hint::black_box(&compressed), &mut out)
-            .unwrap();
-        std::hint::black_box(&out);
-    });
-    BenchResult {
-        codec: "structured-zstd".into(),
-        input_name: name.into(),
+    bench_slices(
+        "structured-zstd",
+        slices,
+        name,
         level,
-        input_size: data.len(),
-        compressed_size: compressed.len(),
-        compress_ns,
-        decompress_ns,
-        input_sha256: String::new(),
-    }
+        target_ns,
+        |s| structured_zstd::encoding::compress_slice_to_vec(s, sz_level),
+        |f, len| {
+            let mut dec = structured_zstd::decoding::FrameDecoder::new();
+            let mut out = vec![0u8; len + 1024];
+            dec.decode_all(f, &mut out).unwrap();
+            std::hint::black_box(&out);
+        },
+    )
 }
 
-fn bench_c_zstd(data: &[u8], name: &str, level: i32, target_ns: u64) -> BenchResult {
+fn bench_c_zstd(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> BenchResult {
     let mut compressor = zstd::bulk::Compressor::new(level).unwrap();
-    let compressed = compressor.compress(data).unwrap();
     let mut decompressor = zstd::bulk::Decompressor::new().unwrap();
-    let mut decomp_buf = Vec::with_capacity(data.len() + 1024);
-    let compress_ns = bench_loop(3, target_ns, 7, || {
-        let _ = std::hint::black_box(compressor.compress(std::hint::black_box(data)).unwrap());
-    });
-    let decompress_ns = bench_loop(3, target_ns, 7, || {
-        decomp_buf.clear();
-        let _ = std::hint::black_box(
-            decompressor
-                .decompress_to_buffer(std::hint::black_box(&compressed), &mut decomp_buf)
-                .unwrap(),
-        );
-    });
-    BenchResult {
-        codec: "C zstd".into(),
-        input_name: name.into(),
+    let mut buf = Vec::new();
+    bench_slices(
+        "C zstd",
+        slices,
+        name,
         level,
-        input_size: data.len(),
-        compressed_size: compressed.len(),
-        compress_ns,
-        decompress_ns,
-        input_sha256: String::new(),
-    }
+        target_ns,
+        |s| compressor.compress(s).unwrap(),
+        |f, len| {
+            buf.clear();
+            buf.reserve(len + 1024);
+            std::hint::black_box(decompressor.decompress_to_buffer(f, &mut buf).unwrap());
+        },
+    )
 }
 
 fn train_dict_for_file(data: &[u8], dict_size: usize) -> Vec<u8> {
@@ -433,7 +428,7 @@ fn train_dict_for_file(data: &[u8], dict_size: usize) -> Vec<u8> {
 }
 
 fn bench_zrip_dict(
-    data: &[u8],
+    slices: &[&[u8]],
     name: &str,
     level: i32,
     target_ns: u64,
@@ -441,104 +436,97 @@ fn bench_zrip_dict(
 ) -> BenchResult {
     let dict = zrip::dict::Dictionary::from_bytes(dict_bytes).unwrap();
     let mut ctx =
-        zrip::CompressContext::with_dict_for_size(level, dict.clone(), data.len()).unwrap();
-    let compressed = ctx.compress(data).unwrap().to_vec();
-    let compress_ns = bench_loop(3, target_ns, 7, || {
-        let _ = std::hint::black_box(ctx.compress(std::hint::black_box(data)).unwrap());
-    });
-    let decompress_ns = bench_loop(3, target_ns, 7, || {
-        let _ = std::hint::black_box(
-            zrip::decompress_with_dict(std::hint::black_box(&compressed), &dict).unwrap(),
-        );
-    });
-    BenchResult {
-        codec: "zrip+dict".into(),
-        input_name: name.into(),
+        zrip::CompressContext::with_dict_for_size(level, dict.clone(), slices[0].len()).unwrap();
+    bench_slices(
+        "zrip+dict",
+        slices,
+        name,
         level,
-        input_size: data.len(),
-        compressed_size: compressed.len(),
-        compress_ns,
-        decompress_ns,
-        input_sha256: String::new(),
-    }
+        target_ns,
+        |s| ctx.compress(s).unwrap().to_vec(),
+        |f, _| {
+            std::hint::black_box(zrip::decompress_with_dict(f, &dict).unwrap());
+        },
+    )
 }
 
 fn bench_c_zstd_dict(
-    data: &[u8],
+    slices: &[&[u8]],
     name: &str,
     level: i32,
     target_ns: u64,
     dict_bytes: &[u8],
 ) -> BenchResult {
     let mut compressor = zstd::bulk::Compressor::with_dictionary(level, dict_bytes).unwrap();
-    let compressed = compressor.compress(data).unwrap();
     let mut decompressor = zstd::bulk::Decompressor::with_dictionary(dict_bytes).unwrap();
-    let mut decomp_buf = Vec::with_capacity(data.len() + 1024);
-    let compress_ns = bench_loop(3, target_ns, 7, || {
-        let _ = std::hint::black_box(compressor.compress(std::hint::black_box(data)).unwrap());
-    });
-    let decompress_ns = bench_loop(3, target_ns, 7, || {
-        decomp_buf.clear();
-        let _ = std::hint::black_box(
-            decompressor
-                .decompress_to_buffer(std::hint::black_box(&compressed), &mut decomp_buf)
-                .unwrap(),
-        );
-    });
-    BenchResult {
-        codec: "C zstd+dict".into(),
-        input_name: name.into(),
+    let mut buf = Vec::new();
+    bench_slices(
+        "C zstd+dict",
+        slices,
+        name,
         level,
-        input_size: data.len(),
-        compressed_size: compressed.len(),
-        compress_ns,
-        decompress_ns,
-        input_sha256: String::new(),
-    }
+        target_ns,
+        |s| compressor.compress(s).unwrap(),
+        |f, len| {
+            buf.clear();
+            buf.reserve(len + 1024);
+            std::hint::black_box(decompressor.decompress_to_buffer(f, &mut buf).unwrap());
+        },
+    )
 }
 
+/// Times `codec` decoding every frame of `frames` (C zstd's output for
+/// `slices`) per pass, after checking each decodes to its slice's length.
+/// The frames carry content checksums, which the decoders verify.
 fn bench_decode_only(
     codec: &str,
-    compressed: &[u8],
-    original_size: usize,
-    compressed_size: usize,
+    frames: &[Vec<u8>],
+    slices: &[&[u8]],
     name: &str,
     level: i32,
     target_ns: u64,
 ) -> BenchResult {
+    fn run(
+        frames: &[Vec<u8>],
+        slices: &[&[u8]],
+        target_ns: u64,
+        mut decode: impl FnMut(&[u8], usize) -> usize,
+    ) -> f64 {
+        for (f, s) in frames.iter().zip(slices) {
+            assert_eq!(decode(f, s.len()), s.len(), "decoded length mismatch");
+        }
+        bench_loop(3, target_ns, 7, || {
+            for (f, s) in frames.iter().zip(slices) {
+                std::hint::black_box(decode(std::hint::black_box(f), s.len()));
+            }
+        })
+    }
     let decompress_ns = match codec {
         "C zstd" => {
             let mut decompressor = zstd::bulk::Decompressor::new().unwrap();
-            let mut buf = Vec::with_capacity(original_size + 1024);
-            bench_loop(3, target_ns, 7, || {
+            let mut buf = Vec::new();
+            run(frames, slices, target_ns, |f, len| {
                 buf.clear();
-                let _ = std::hint::black_box(
-                    decompressor
-                        .decompress_to_buffer(std::hint::black_box(compressed), &mut buf)
-                        .unwrap(),
-                );
+                buf.reserve(len + 1024);
+                decompressor.decompress_to_buffer(f, &mut buf).unwrap()
             })
         }
         "zrip" | "zrip paranoid" => {
             let mut ctx = zrip::DecompressContext::new();
-            bench_loop(3, target_ns, 7, || {
-                let _ =
-                    std::hint::black_box(ctx.decompress(std::hint::black_box(compressed)).unwrap());
+            run(frames, slices, target_ns, |f, _| {
+                ctx.decompress(f).unwrap().len()
             })
         }
-        "ruzstd" => bench_loop(3, target_ns, 7, || {
+        "ruzstd" => run(frames, slices, target_ns, |f, len| {
             let mut dec = ruzstd::decoding::FrameDecoder::new();
-            let mut out = Vec::with_capacity(original_size + 1024);
-            dec.decode_all_to_vec(std::hint::black_box(compressed), &mut out)
-                .unwrap();
-            std::hint::black_box(&out);
+            let mut out = Vec::with_capacity(len + 1024);
+            dec.decode_all_to_vec(f, &mut out).unwrap();
+            out.len()
         }),
-        "structured-zstd" => bench_loop(3, target_ns, 7, || {
+        "structured-zstd" => run(frames, slices, target_ns, |f, len| {
             let mut dec = structured_zstd::decoding::FrameDecoder::new();
-            let mut out = vec![0u8; original_size + 1024];
-            dec.decode_all(std::hint::black_box(compressed), &mut out)
-                .unwrap();
-            std::hint::black_box(&out);
+            let mut out = vec![0u8; len + 1024];
+            dec.decode_all(f, &mut out).unwrap()
         }),
         _ => unreachable!("unsupported codec for decode-only: {}", codec),
     };
@@ -546,8 +534,8 @@ fn bench_decode_only(
         codec: codec.to_string(),
         input_name: name.into(),
         level,
-        input_size: original_size,
-        compressed_size,
+        input_size: slices.iter().map(|s| s.len()).sum(),
+        compressed_size: frames.iter().map(Vec::len).sum(),
         compress_ns: 0.0,
         decompress_ns,
         input_sha256: String::new(),
@@ -703,11 +691,13 @@ fn load_benchmark_inputs(
                     ));
                 }
                 let name = format!("{}_{}", source.prefix, size.label);
-                let data = base[..size.bytes].to_vec();
+                let count = (base.len() / size.bytes).min(SMALL_SLICES);
+                let data = base[..count * size.bytes].to_vec();
                 let sha256 = sha256_hex(&data);
                 inputs.push(BenchInput {
                     name,
                     data,
+                    slice_len: size.bytes,
                     sha256,
                     is_small: true,
                     dict_source: source.prefix.to_string(),
@@ -723,6 +713,7 @@ fn load_benchmark_inputs(
             let (data, sha256) = load_corpus_entry(entry)?;
             inputs.push(BenchInput {
                 name: entry.label.to_string(),
+                slice_len: data.len(),
                 data,
                 sha256,
                 is_small: false,
@@ -744,6 +735,7 @@ fn load_benchmark_inputs(
         inputs.push(BenchInput {
             dict_source: dict_source_name(&name),
             name,
+            slice_len: data.len(),
             data,
             sha256,
             is_small: false,
@@ -1213,8 +1205,9 @@ fn main() {
 
     for input in &all_inputs {
         let name = input.name.as_str();
-        let data = input.data.as_slice();
-        eprintln!("{name} ({} bytes)", data.len());
+        let slices: Vec<&[u8]> = input.data.chunks_exact(input.slice_len).collect();
+        let slices = slices.as_slice();
+        eprintln!("{name} ({} x {} bytes)", slices.len(), input.slice_len);
 
         let dict_bytes = if dict_mode {
             dicts.get(&input.dict_source)
@@ -1227,7 +1220,10 @@ fn main() {
 
             if decode_only {
                 let mut compressor = zstd::bulk::Compressor::new(level).unwrap();
-                let compressed = compressor.compress(data).unwrap();
+                let frames: Vec<Vec<u8>> = slices
+                    .iter()
+                    .map(|s| compressor.compress(s).unwrap())
+                    .collect();
                 for &codec in &active_codecs {
                     let cache_key = (
                         codec.to_string(),
@@ -1239,15 +1235,7 @@ fn main() {
                         continue;
                     }
 
-                    let mut r = bench_decode_only(
-                        codec,
-                        &compressed,
-                        data.len(),
-                        compressed.len(),
-                        name,
-                        level,
-                        target_ns,
-                    );
+                    let mut r = bench_decode_only(codec, &frames, slices, name, level, target_ns);
                     r.input_sha256.clone_from(&input.sha256);
                     level_batch.push(r);
                 }
@@ -1269,21 +1257,21 @@ fn main() {
                     }
 
                     let mut r = match codec {
-                        "C zstd" => bench_c_zstd(data, name, level, target_ns),
-                        "zrip" | "zrip paranoid" => bench_zrip(data, name, level, target_ns),
-                        "ruzstd" => bench_ruzstd(data, name, level, target_ns),
-                        "structured-zstd" => bench_structured_zstd(data, name, level, target_ns),
-                        "lz4rip" => bench_lz4rip(data, name, level, target_ns),
+                        "C zstd" => bench_c_zstd(slices, name, level, target_ns),
+                        "zrip" | "zrip paranoid" => bench_zrip(slices, name, level, target_ns),
+                        "ruzstd" => bench_ruzstd(slices, name, level, target_ns),
+                        "structured-zstd" => bench_structured_zstd(slices, name, level, target_ns),
+                        "lz4rip" => bench_lz4rip(slices, name, level, target_ns),
                         "zrip+dict" => {
                             if let Some(db) = dict_bytes {
-                                bench_zrip_dict(data, name, level, target_ns, db)
+                                bench_zrip_dict(slices, name, level, target_ns, db)
                             } else {
                                 continue;
                             }
                         }
                         "C zstd+dict" => {
                             if let Some(db) = dict_bytes {
-                                bench_c_zstd_dict(data, name, level, target_ns, db)
+                                bench_c_zstd_dict(slices, name, level, target_ns, db)
                             } else {
                                 continue;
                             }
