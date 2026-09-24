@@ -53,20 +53,42 @@ impl<'a> BitReader<'a> {
         // One little-endian load covers `bit_pos + n <= 32` bits. Near the
         // end of the data, the missing bytes read as zero; the check above
         // guarantees the requested bits are all present.
-        let word = match self.data.get(self.pos..self.pos + 8) {
-            Some(bytes) => u64::from_le_bytes(bytes.try_into().unwrap()),
-            None => {
-                let mut buf = [0u8; 8];
-                let tail = &self.data[self.pos..];
-                buf[..tail.len()].copy_from_slice(tail);
-                u64::from_le_bytes(buf)
-            }
-        };
+        let word = self.load_u64(self.pos);
         let result = ((word >> self.bit_pos) & ((1u64 << n) - 1)) as u32;
         let total = self.bit_pos as usize + n as usize;
         self.pos += total / 8;
         self.bit_pos = (total % 8) as u8;
         Ok(result)
+    }
+
+    /// Eight bytes from `byte` as a little-endian word. Bytes past the end of
+    /// the data read as zero.
+    #[inline(always)]
+    fn load_u64(&self, byte: usize) -> u64 {
+        match self.data.get(byte..byte + 8) {
+            Some(bytes) => u64::from_le_bytes(bytes.try_into().unwrap()),
+            None => {
+                let mut buf = [0u8; 8];
+                let tail = self.data.get(byte..).unwrap_or(&[]);
+                buf[..tail.len()].copy_from_slice(tail);
+                u64::from_le_bytes(buf)
+            }
+        }
+    }
+
+    /// The bits from absolute bit position `bit` on, starting at bit 0. At
+    /// least 57 bits are valid. Bits past the end of the data read as zero.
+    #[inline(always)]
+    pub(crate) fn window_at(&self, bit: usize) -> u64 {
+        self.load_u64(bit / 8) >> (bit % 8)
+    }
+
+    /// Moves to absolute bit position `bit`, at most the data length in bits.
+    #[inline(always)]
+    pub(crate) fn seek(&mut self, bit: usize) {
+        debug_assert!(bit <= self.data.len() * 8);
+        self.pos = bit / 8;
+        self.bit_pos = (bit % 8) as u8;
     }
 
     pub fn read_bits_u16(&mut self, n: u8) -> Result<u16, DecompressError> {

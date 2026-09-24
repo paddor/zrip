@@ -28,6 +28,9 @@
 - `build_decode_table_into` uses C zstd's two-stage spread for tables up to
   512 states without "less than one" probabilities, and sets symbol states
   without branching on zero probabilities.
+- `parse_fse_table_description_into` reads each field from a 64-bit window
+  instead of calling `read_bits`, and counts runs of zero-probability
+  repeat codes in one step.
 
 ## [0.10.1] - 2026-09-10
 

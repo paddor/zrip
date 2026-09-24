@@ -19,61 +19,94 @@ pub fn parse_fse_table_description_into(
     max_symbol: u8,
     distribution: &mut Vec<i16>,
 ) -> Result<u8, DecompressError> {
-    let accuracy_log = reader.read_bits(4)? as u8 + 5;
+    // Each field comes from a 64-bit window at `bit` instead of a
+    // `read_bits` call. `bit > end` after a field means the input ran out
+    // inside it, where `read_bits` would have failed.
+    let end = reader.bits_consumed() + reader.bits_remaining();
+    let mut bit = reader.bits_consumed();
+    if bit + 4 > end {
+        return Err(DecompressError::InputExhausted);
+    }
+    let accuracy_log = (reader.window_at(bit) & 15) as u8 + 5;
+    bit += 4;
     if accuracy_log > MAX_TABLE_LOG {
         return Err(DecompressError::BadFseTable);
     }
 
     let table_size = 1i32 << accuracy_log;
     let mut remaining = table_size + 1;
+    // `threshold` is always `1 << (nb_bits - 1)`.
     let mut threshold = table_size;
-    let mut nb_bits = accuracy_log + 1;
-    distribution.clear();
+    let mut nb_bits = accuracy_log as usize + 1;
+    // Probabilities go to a zeroed stack buffer, so a run of zero
+    // probabilities only advances `n`. `n` is capped at `max_len`: reaching
+    // it ends the loop, and a run past it fails (`remaining` stays above 1).
+    let max_len = max_symbol as usize + 1;
+    let mut out = [0i16; 256];
+    let mut n = 0usize;
 
-    while remaining > 1 && distribution.len() <= max_symbol as usize {
+    while remaining > 1 && n < max_len {
+        // A count uses `nb_bits - 1` bits when those are below `max_val`,
+        // else `nb_bits` bits, with the high values shifted down by
+        // `max_val`. Both candidates are computed so the choice can compile
+        // to selects.
+        let window = reader.window_at(bit);
         let max_val = (2 * threshold - 1) - remaining;
-
-        let lower = reader.read_bits(nb_bits - 1)? as i32;
-        let count = if lower < max_val {
+        let lower = window as i32 & (threshold - 1);
+        let full = window as i32 & (2 * threshold - 1);
+        let long = lower >= max_val;
+        let count = if !long {
             lower
+        } else if full >= threshold {
+            full - max_val
         } else {
-            let extra = reader.read_bits(1)? as i32;
-            let full = lower + (extra << (nb_bits - 1));
-            if full >= threshold {
-                full - max_val
-            } else {
-                full
-            }
+            full
         };
-
-        let prob = count - 1;
-        if prob == -1 {
-            distribution.push(-1);
-            remaining -= 1;
-        } else if prob == 0 {
-            distribution.push(0);
-        } else {
-            distribution.push(prob as i16);
-            remaining -= prob;
+        let used = nb_bits - 1 + usize::from(long);
+        bit += used;
+        if bit > end {
+            return Err(DecompressError::InputExhausted);
         }
 
+        // "Less than one" (-1) takes one table cell.
+        let prob = count - 1;
+        out[n & 255] = prob as i16;
+        n += 1;
+        remaining -= prob.abs();
         if remaining < 0 {
             return Err(DecompressError::BadFseTable);
         }
 
         if prob == 0 {
+            // A zero is followed by 2-bit repeat codes: each `3` adds three
+            // zeros and continues, the first code below 3 adds that many and
+            // ends the run. Count the `3` codes at once. After the count, at
+            // least 44 bits of the window are left, enough for 16 codes.
+            let mut run = window >> used;
             loop {
-                let repeat = reader.read_bits(2)? as usize;
-                distribution.extend(core::iter::repeat_n(0, repeat));
-                if repeat < 3 {
+                let threes = (!run).trailing_zeros() / 2;
+                if threes < 16 {
+                    let last = ((run >> (2 * threes)) & 3) as usize;
+                    bit += 2 * threes as usize + 2;
+                    if bit > end {
+                        return Err(DecompressError::InputExhausted);
+                    }
+                    n = (n + 3 * threes as usize + last).min(max_len);
                     break;
                 }
+                bit += 32;
+                if bit > end {
+                    return Err(DecompressError::InputExhausted);
+                }
+                n = (n + 48).min(max_len);
+                run = reader.window_at(bit);
             }
         }
 
-        while remaining < threshold {
-            nb_bits -= 1;
-            threshold >>= 1;
+        if remaining < threshold && remaining > 1 {
+            let high = 31 - (remaining as u32).leading_zeros();
+            nb_bits = high as usize + 1;
+            threshold = 1 << high;
         }
     }
 
@@ -81,12 +114,10 @@ pub fn parse_fse_table_description_into(
         return Err(DecompressError::BadFseTable);
     }
 
+    reader.seek(bit);
     reader.align_to_byte();
-
-    while distribution.len() <= max_symbol as usize {
-        distribution.push(0);
-    }
-
+    distribution.clear();
+    distribution.extend_from_slice(&out[..max_len]);
     Ok(accuracy_log)
 }
 
@@ -470,6 +501,138 @@ mod tests {
         let (parsed, acc) = parse_fse_table_description(&mut reader, 29).unwrap();
         assert_eq!(acc, 5);
         assert_eq!(&parsed[..30], &dist[..]);
+    }
+
+    /// The field-by-field parser this module used before the windowed one.
+    fn reference_parse(
+        reader: &mut BitReader,
+        max_symbol: u8,
+    ) -> Result<(Vec<i16>, u8), DecompressError> {
+        let accuracy_log = reader.read_bits(4)? as u8 + 5;
+        if accuracy_log > MAX_TABLE_LOG {
+            return Err(DecompressError::BadFseTable);
+        }
+        let table_size = 1i32 << accuracy_log;
+        let mut remaining = table_size + 1;
+        let mut threshold = table_size;
+        let mut nb_bits = accuracy_log + 1;
+        let mut distribution = Vec::new();
+        while remaining > 1 && distribution.len() <= max_symbol as usize {
+            let max_val = (2 * threshold - 1) - remaining;
+            let lower = reader.read_bits(nb_bits - 1)? as i32;
+            let count = if lower < max_val {
+                lower
+            } else {
+                let extra = reader.read_bits(1)? as i32;
+                let full = lower + (extra << (nb_bits - 1));
+                if full >= threshold {
+                    full - max_val
+                } else {
+                    full
+                }
+            };
+            let prob = count - 1;
+            distribution.push(prob as i16);
+            remaining -= prob.abs();
+            if remaining < 0 {
+                return Err(DecompressError::BadFseTable);
+            }
+            if prob == 0 {
+                loop {
+                    let repeat = reader.read_bits(2)? as usize;
+                    distribution.extend(core::iter::repeat_n(0, repeat));
+                    if repeat < 3 {
+                        break;
+                    }
+                }
+            }
+            while remaining < threshold {
+                nb_bits -= 1;
+                threshold >>= 1;
+            }
+        }
+        if remaining != 1 {
+            return Err(DecompressError::BadFseTable);
+        }
+        reader.align_to_byte();
+        while distribution.len() <= max_symbol as usize {
+            distribution.push(0);
+        }
+        Ok((distribution, accuracy_log))
+    }
+
+    #[test]
+    fn parse_description_matches_reference() {
+        let mut seed = 0x853c_49e6_748f_ea9bu64;
+        let mut rand = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut dist = Vec::new();
+        let (mut ok, mut err) = (0, 0);
+        for round in 0..30_000 {
+            let max_symbol = [12u8, 31, 35, 52, 255][round % 5];
+            let data: Vec<u8> = match round % 4 {
+                // Two symbols with a long run of zeros between them, whole
+                // or truncated.
+                3 => {
+                    let gap = 1 + (rand() as usize) % 200;
+                    let mut sparse = vec![0i16; gap + 2];
+                    sparse[0] = 16;
+                    sparse[gap + 1] = 16;
+                    let mut bytes = serialize_fse_table_description(&sparse, 5);
+                    if rand() % 2 == 0 {
+                        bytes.truncate((rand() as usize) % bytes.len());
+                    }
+                    bytes
+                }
+                // Valid descriptions, then truncated copies of them.
+                0 | 1 => {
+                    let accuracy_log = 5 + (rand() % 5) as u8;
+                    let symbols = 2 + (rand() as usize) % (max_symbol as usize);
+                    let freqs: Vec<u32> = (0..symbols)
+                        .map(|_| {
+                            if rand() % 3 == 0 {
+                                0
+                            } else {
+                                (rand() % 100) as u32 + 1
+                            }
+                        })
+                        .collect();
+                    if freqs.iter().filter(|&&f| f > 0).count() < 2 {
+                        continue;
+                    }
+                    let mut bytes = serialize_fse_table_description(
+                        &normalize_counts(&freqs, accuracy_log),
+                        accuracy_log,
+                    );
+                    bytes.extend((0..rand() % 4).map(|_| rand() as u8));
+                    if round % 4 == 1 {
+                        bytes.truncate((rand() as usize) % bytes.len());
+                    }
+                    bytes
+                }
+                _ => (0..(rand() % 40)).map(|_| rand() as u8).collect(),
+            };
+            let mut reader = BitReader::new(&data);
+            let mut expected_reader = BitReader::new(&data);
+            let result = parse_fse_table_description_into(&mut reader, max_symbol, &mut dist);
+            match (result, reference_parse(&mut expected_reader, max_symbol)) {
+                (Ok(acc), Ok((expected, expected_acc))) => {
+                    assert_eq!((acc, &dist), (expected_acc, &expected), "{data:?}");
+                    assert_eq!(reader.bytes_consumed(), expected_reader.bytes_consumed());
+                    ok += 1;
+                }
+                (Err(e), Err(expected)) => {
+                    assert_eq!(e, expected, "{data:?}");
+                    err += 1;
+                }
+                (result, expected) => panic!("{result:?} vs {expected:?} for {data:?}"),
+            }
+        }
+        assert!(ok > 5000 && err > 5000, "ok {ok}, err {err}");
     }
 
     /// The plain spread: one symbol cell at a time, skipping cells taken by
