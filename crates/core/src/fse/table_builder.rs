@@ -10,6 +10,10 @@ use crate::error::DecompressError;
 use crate::fse::{FseDecodeEntry, MAX_TABLE_LOG};
 use crate::hint::unlikely;
 
+/// Largest table the fast spread in `build_decode_table_into` handles. It
+/// covers the sequence tables (accuracy log <= 9) and Huffman weights.
+const SPREAD_MAX: usize = 1 << 9;
+
 pub fn parse_fse_table_description_into(
     reader: &mut BitReader,
     max_symbol: u8,
@@ -242,22 +246,53 @@ pub fn build_decode_table_into(
     let mut next = [0u16; 256];
     symbol_next.clear();
 
+    // Zero and positive probabilities mix unpredictably, so `next` is set
+    // without a branch. "Less than one" (-1) symbols are rare and take the
+    // branch.
     let mut high_threshold = mask;
+    let mut total = 0i32;
     for (s, &prob) in distribution.iter().enumerate() {
-        if prob == -1 {
+        next[s & 255] = prob.max(0) as u16 + u16::from(prob == -1);
+        total += i32::from(prob.max(0));
+        if unlikely(prob == -1) {
             if unlikely(high_threshold == 0) {
                 return Err(DecompressError::BadFseTable);
             }
             table[high_threshold & mask].symbol = s as u8;
             high_threshold -= 1;
-            next[s & 255] = 1;
-        } else if prob > 0 {
-            next[s & 255] = prob as u16;
         }
     }
 
     let mut position = 0;
-    if high_threshold == mask {
+    if high_threshold == mask
+        && (32..=SPREAD_MAX).contains(&table_size)
+        && total == table_size as i32
+    {
+        // C zstd's fast spread: lay the symbols down in order, eight bytes
+        // per write, then scatter them with a loop that has no data-dependent
+        // branches. A variable-length loop per symbol mispredicts once per
+        // symbol. Most counts in small tables are at most 8, so the inner
+        // loop rarely runs. `total == table_size` keeps every write inside
+        // `spread`.
+        let mut spread = [0u8; SPREAD_MAX + 8];
+        let mut pos = 0usize;
+        for (s, &prob) in distribution.iter().enumerate() {
+            let bytes = [s as u8; 8];
+            let n = prob.max(0) as usize;
+            spread[pos..pos + 8].copy_from_slice(&bytes);
+            let mut i = 8;
+            while i < n {
+                spread[pos + i..pos + i + 8].copy_from_slice(&bytes);
+                i += 8;
+            }
+            pos += n;
+        }
+        for &[a, b] in spread[..table_size].as_chunks::<2>().0 {
+            table[position & mask].symbol = a;
+            table[(position + step) & mask].symbol = b;
+            position = (position + 2 * step) & mask;
+        }
+    } else if high_threshold == mask {
         for (s, &prob) in distribution.iter().enumerate() {
             let sym = s as u8;
             for _ in 0..prob.max(0) {
@@ -435,5 +470,106 @@ mod tests {
         let (parsed, acc) = parse_fse_table_description(&mut reader, 29).unwrap();
         assert_eq!(acc, 5);
         assert_eq!(&parsed[..30], &dist[..]);
+    }
+
+    /// The plain spread: one symbol cell at a time, skipping cells taken by
+    /// "less than one" symbols.
+    fn reference_decode_table(distribution: &[i16], accuracy_log: u8) -> Vec<FseDecodeEntry> {
+        let size = 1usize << accuracy_log;
+        let mask = size - 1;
+        let step = (size >> 1) + (size >> 3) + 3;
+        let mut symbols = vec![0u8; size];
+        let mut next = vec![0u32; distribution.len()];
+        let mut high = mask;
+        for (s, &prob) in distribution.iter().enumerate() {
+            if prob == -1 {
+                symbols[high] = s as u8;
+                high -= 1;
+                next[s] = 1;
+            } else {
+                next[s] = prob.max(0) as u32;
+            }
+        }
+        let mut position = 0;
+        for (s, &prob) in distribution.iter().enumerate() {
+            for _ in 0..prob.max(0) {
+                symbols[position] = s as u8;
+                position = (position + step) & mask;
+                while position > high {
+                    position = (position + step) & mask;
+                }
+            }
+        }
+        assert_eq!(position, 0);
+        symbols
+            .iter()
+            .map(|&symbol| {
+                let state = next[symbol as usize];
+                next[symbol as usize] += 1;
+                let num_bits = accuracy_log as u32 - high_bit(state);
+                FseDecodeEntry {
+                    base_line: ((state << num_bits) - size as u32) as u16,
+                    num_bits: num_bits as u8,
+                    symbol,
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn decode_table_matches_reference() {
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut rand = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let (mut table, mut next) = (Vec::new(), Vec::new());
+        for round in 0..4000 {
+            let accuracy_log = 5 + (rand() % 5) as u8;
+            let size = 1i32 << accuracy_log;
+            let symbols = 2 + (rand() % 60) as usize;
+            // Half the rounds use "less than one" symbols (-1).
+            let low_prob = round % 2 == 0;
+            let mut dist = vec![0i16; symbols];
+            let mut remaining = size;
+            for d in dist.iter_mut() {
+                match rand() % 4 {
+                    0 => {}
+                    1 if low_prob && remaining > 1 => {
+                        *d = -1;
+                        remaining -= 1;
+                    }
+                    _ => {
+                        let p = 1 + (rand() % (size as u64 / 4)) as i32;
+                        let p = p.min(remaining - 1);
+                        if p > 0 {
+                            *d = p as i16;
+                            remaining -= p;
+                        }
+                    }
+                }
+            }
+            // Give the rest to one symbol so the counts fill the table.
+            let last = (rand() as usize) % symbols;
+            if dist[last] == -1 {
+                dist[last] = 0;
+                remaining += 1;
+            }
+            dist[last] += remaining as i16;
+
+            build_decode_table_into(&dist, accuracy_log, &mut table, &mut next).unwrap();
+            let fields = |t: &[FseDecodeEntry]| -> Vec<(u8, u8, u16)> {
+                t.iter()
+                    .map(|e| (e.symbol, e.num_bits, e.base_line))
+                    .collect()
+            };
+            assert_eq!(
+                fields(&table),
+                fields(&reference_decode_table(&dist, accuracy_log)),
+                "{dist:?} at log {accuracy_log}"
+            );
+        }
     }
 }

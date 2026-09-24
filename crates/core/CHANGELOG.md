@@ -25,6 +25,9 @@
   branches.
 - `build_decode_table_into` keeps symbol states in a stack array.
   `BitReader::read_bits` reads with one 8-byte load.
+- `build_decode_table_into` uses C zstd's two-stage spread for tables up to
+  512 states without "less than one" probabilities, and sets symbol states
+  without branching on zero probabilities.
 
 ## [0.10.1] - 2026-09-10
 
