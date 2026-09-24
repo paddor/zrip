@@ -152,6 +152,12 @@ fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompr
         }
     }
 
+    // The final step pushes up to two weights past the in-loop check. At
+    // most 255 weights are explicit; the last one is implied.
+    if weights.len() > 255 {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
+
     Ok((weights, 1 + compressed_size))
 }
 
@@ -238,6 +244,12 @@ fn parse_fse_compressed_weights_into(
         }
     }
 
+    // The final step pushes up to two weights past the in-loop check. At
+    // most 255 weights are explicit; the last one is implied.
+    if weights.len() > 255 {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
+
     Ok(1 + compressed_size)
 }
 
@@ -247,7 +259,7 @@ pub fn build_huffman_decode_table(
 ) -> Result<(Vec<crate::huffman::HuffmanDecodeEntry>, u8), DecompressError> {
     use crate::huffman::{HuffmanDecodeEntry, MAX_BITS};
 
-    if weights.is_empty() {
+    if weights.is_empty() || weights.len() > 255 {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
@@ -331,7 +343,7 @@ pub fn build_huffman_decode_table_into(
 ) -> Result<u8, DecompressError> {
     use crate::huffman::{HuffmanDecodeEntry, MAX_BITS};
 
-    if weights.is_empty() {
+    if weights.is_empty() || weights.len() > 255 {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
@@ -494,5 +506,76 @@ mod tests {
         let sym1_count = table[..4].iter().filter(|e| e.symbol == 1).count();
         assert_eq!(sym0_count, 2);
         assert_eq!(sym1_count, 2);
+    }
+
+    /// FSE-compressed weight header whose stream decodes to `count` weights.
+    /// With two symbols at 16/32, every state reads one bit: two 5-bit
+    /// initial states, then one bit per weight except the last two.
+    fn fse_weights_header(count: usize) -> Vec<u8> {
+        use crate::bitstream::writer::BitWriter;
+        use crate::fse::table_builder::serialize_fse_table_description;
+
+        let mut compressed = serialize_fse_table_description(&[16, 16], 5);
+        let mut stream = BitWriter::new();
+        for _ in 0..10 + count - 2 {
+            stream.write_bits(0, 1);
+        }
+        stream.close_reverse_stream();
+        compressed.extend_from_slice(&stream.into_bytes());
+        let mut data = vec![compressed.len() as u8];
+        data.extend_from_slice(&compressed);
+        data
+    }
+
+    #[test]
+    fn parse_fse_weights_limit() {
+        let data = fse_weights_header(255);
+        let (weights, _) = parse_huffman_weights(&data).unwrap();
+        assert_eq!(weights.len(), 255);
+        let mut out = Vec::new();
+        parse_huffman_weights_into(
+            &data,
+            &mut out,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(out.len(), 255);
+
+        for count in [256, 257] {
+            let data = fse_weights_header(count);
+            assert!(parse_huffman_weights(&data).is_err(), "{count} weights");
+            let result = parse_huffman_weights_into(
+                &data,
+                &mut out,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+            );
+            assert_eq!(
+                result,
+                Err(DecompressError::BadHuffmanWeights),
+                "{count} weights"
+            );
+        }
+    }
+
+    #[test]
+    fn build_table_rejects_more_than_255_weights() {
+        // 256 weight-1 symbols and one weight-8 symbol sum to 384. The
+        // implied last symbol (weight 8) completes a 512-entry table, but
+        // the alphabet would have 258 symbols.
+        let mut weights = vec![1u8; 256];
+        weights.push(8);
+        let mut table = Vec::new();
+        let result = build_huffman_decode_table_into(
+            &weights,
+            &mut table,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+        );
+        assert_eq!(result, Err(DecompressError::BadHuffmanWeights));
     }
 }
