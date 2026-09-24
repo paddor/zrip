@@ -127,6 +127,12 @@ pub(super) fn decode_4_streams_core(
     let mut o4_idx: usize = 0;
 
     let tl = table_log as u32;
+    // `shift >= 53` bounds every fast-round index below the 2048-entry table,
+    // so the lookups need neither a mask nor a bounds check.
+    if !(1..=11).contains(&tl) {
+        return Err(DecompressError::BadHuffmanStream);
+    }
+    let shift = 64 - tl;
 
     #[inline(always)]
     fn can_refill_fast(bits_consumed: u32, ptr: usize, data_len: usize) -> bool {
@@ -156,23 +162,47 @@ pub(super) fn decode_4_streams_core(
         }};
     }
 
-    // A fixed-size table indexed with a mask needs no bounds checks.
+    // A fixed-size table needs no bounds checks for the fast-round indices,
+    // which `shift` keeps below its size.
     let fixed: &[HuffmanDecodeEntry; DECODE_TABLE_SIZE] = table
         .first_chunk()
         .ok_or(DecompressError::BadHuffmanStream)?;
-    const INDEX_MASK: usize = DECODE_TABLE_SIZE - 1;
+
+    // The fast rounds use C zstd's layout: each stream is a left-aligned
+    // container `$b` with a sentinel bit. A load sets bit 0, and each symbol
+    // shifts the container left by its length, so the next code is always
+    // the top `tl` bits and `trailing_zeros` is the number of bits consumed
+    // since the load. A symbol then depends on the previous one only through
+    // shift, lookup, shift; no separate bit count sits in that chain. A round
+    // reads at most 62 bits after a load, so the sentinel never reaches the
+    // top 11 bits and bit 0's own value is never read.
+    macro_rules! reload {
+        ($b:expr, $p_idx:expr, $data:expr) => {{
+            let consumed = $b.trailing_zeros();
+            $p_idx -= (consumed >> 3) as usize;
+            $b = (bitstream_primitives::read_u64_le_unaligned($data, $p_idx) | 1) << (consumed & 7);
+        }};
+    }
 
     macro_rules! decode_five {
-        ($c:expr, $bc:expr, $output:expr, $o_idx:expr) => {{
+        ($b:expr, $output:expr, $o_idx:expr) => {{
             let mut syms = [0u8; 5];
             for s in &mut syms {
-                let idx = (($c << ($bc & 63)) >> (64 - tl)) as usize;
-                let e = fixed[idx & INDEX_MASK];
+                let e = fixed[($b >> shift) as usize];
                 *s = e.symbol;
-                $bc += e.num_bits as u32;
+                $b <<= e.num_bits;
             }
             $output[$o_idx..$o_idx + 5].copy_from_slice(&syms);
             $o_idx += 5;
+        }};
+    }
+
+    // Back to the reader's layout: the container as loaded at `$p_idx`, and
+    // the bits consumed since that load.
+    macro_rules! unload {
+        ($b:expr, $c:expr, $bc:expr, $p_idx:expr, $data:expr) => {{
+            $bc = $b.trailing_zeros();
+            $c = bitstream_primitives::read_u64_le_unaligned($data, $p_idx);
         }};
     }
 
@@ -186,24 +216,40 @@ pub(super) fn decode_4_streams_core(
         by_output.min(by_input)
     }
 
-    loop {
-        let rounds = safe_rounds(o1_idx, seg1_end, p1_idx, fast1_limit)
-            .min(safe_rounds(o2_idx, seg2_end, p2_idx, fast2_limit))
-            .min(safe_rounds(o3_idx, seg3_end, p3_idx, fast3_limit))
-            .min(safe_rounds(o4_idx, seg4_end, p4_idx, fast4_limit));
-        if rounds == 0 {
-            break;
+    let mut rounds = safe_rounds(o1_idx, seg1_end, p1_idx, fast1_limit)
+        .min(safe_rounds(o2_idx, seg2_end, p2_idx, fast2_limit))
+        .min(safe_rounds(o3_idx, seg3_end, p3_idx, fast3_limit))
+        .min(safe_rounds(o4_idx, seg4_end, p4_idx, fast4_limit));
+    if rounds > 0 {
+        // Every stream has at least 8 bytes here, so each container is a full
+        // load with at most 8 bits consumed.
+        let mut b1 = (c1 | 1) << bc1;
+        let mut b2 = (c2 | 1) << bc2;
+        let mut b3 = (c3 | 1) << bc3;
+        let mut b4 = (c4 | 1) << bc4;
+        loop {
+            for _ in 0..rounds {
+                reload!(b1, p1_idx, r1.data);
+                reload!(b2, p2_idx, r2.data);
+                reload!(b3, p3_idx, r3.data);
+                reload!(b4, p4_idx, r4.data);
+                decode_five!(b1, out1, o1_idx);
+                decode_five!(b2, out2, o2_idx);
+                decode_five!(b3, out3, o3_idx);
+                decode_five!(b4, out4, o4_idx);
+            }
+            rounds = safe_rounds(o1_idx, seg1_end, p1_idx, fast1_limit)
+                .min(safe_rounds(o2_idx, seg2_end, p2_idx, fast2_limit))
+                .min(safe_rounds(o3_idx, seg3_end, p3_idx, fast3_limit))
+                .min(safe_rounds(o4_idx, seg4_end, p4_idx, fast4_limit));
+            if rounds == 0 {
+                break;
+            }
         }
-        for _ in 0..rounds {
-            refill!(c1, bc1, p1_idx, r1.data);
-            refill!(c2, bc2, p2_idx, r2.data);
-            refill!(c3, bc3, p3_idx, r3.data);
-            refill!(c4, bc4, p4_idx, r4.data);
-            decode_five!(c1, bc1, out1, o1_idx);
-            decode_five!(c2, bc2, out2, o2_idx);
-            decode_five!(c3, bc3, out3, o3_idx);
-            decode_five!(c4, bc4, out4, o4_idx);
-        }
+        unload!(b1, c1, bc1, p1_idx, r1.data);
+        unload!(b2, c2, bc2, p2_idx, r2.data);
+        unload!(b3, c3, bc3, p3_idx, r3.data);
+        unload!(b4, c4, bc4, p4_idx, r4.data);
     }
 
     macro_rules! finish_fast {

@@ -33,6 +33,10 @@
   repeat codes in one step.
 - Decode the last symbols of a Huffman stream with one shift, lookup, and
   add each, instead of a refill and exact bit count per symbol.
+- The 4-stream Huffman decoder's fast rounds keep each stream as a
+  left-aligned container with a sentinel bit, as C zstd does: a symbol costs
+  one shift, one lookup, and one shift, with no separate bit count, and the
+  table index needs no mask.
 
 ## [0.10.1] - 2026-09-10
 

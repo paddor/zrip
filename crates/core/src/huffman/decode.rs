@@ -281,61 +281,80 @@ mod tests {
         );
     }
 
-    #[test]
-    fn stream_tail_matches_reference() {
-        use crate::huffman::weights::build_huffman_decode_table;
-
-        let mut seed = 0x9e6c_63d0_676a_9a99u64;
-        let mut rand = move || {
+    fn xorshift(seed: u64) -> impl FnMut() -> u64 {
+        let mut seed = seed;
+        move || {
             seed ^= seed << 13;
             seed ^= seed >> 7;
             seed ^= seed << 17;
             seed
-        };
+        }
+    }
+
+    /// Decode table, table log, used symbols, and `(code, length)` per symbol.
+    type RandomCode = (Vec<HuffmanDecodeEntry>, u8, Vec<u8>, Vec<(u32, u8)>);
+
+    /// A random complete prefix code over up to 60 of the 256 symbols, at
+    /// most 11 bits deep.
+    fn random_code(rand: &mut impl FnMut() -> u64) -> RandomCode {
+        use crate::huffman::weights::build_huffman_decode_table;
+
+        // Split random leaves.
+        let leaves = 2 + (rand() as usize) % 60;
+        let mut depths = vec![1u8, 1];
+        while depths.len() < leaves {
+            let i = (rand() as usize) % depths.len();
+            if depths[i] < 11 {
+                depths[i] += 1;
+                depths.push(depths[i]);
+            }
+        }
+        let table_log = *depths.iter().max().unwrap();
+        // Leaf `k` is symbol `symbols[k]`. The last leaf takes the highest
+        // symbol, whose weight is implied.
+        let last_symbol = leaves - 1 + (rand() as usize) % (256 - leaves + 1);
+        let mut symbols: Vec<usize> = (0..last_symbol).collect();
+        for i in (1..symbols.len()).rev() {
+            symbols.swap(i, (rand() as usize) % (i + 1));
+        }
+        symbols.truncate(leaves - 1);
+        symbols.push(last_symbol);
+        let mut weights = vec![0u8; last_symbol];
+        for (&symbol, &depth) in symbols[..leaves - 1].iter().zip(&depths) {
+            weights[symbol] = table_log + 1 - depth;
+        }
+        let (table, log) = build_huffman_decode_table(&weights).unwrap();
+        assert_eq!(log, table_log);
+
+        let mut codes = vec![(0u32, 0u8); 256];
+        for (i, e) in table[..1 << table_log].iter().enumerate() {
+            codes[e.symbol as usize] = ((i >> (table_log - e.num_bits)) as u32, e.num_bits);
+        }
+        let symbols = symbols.iter().map(|&s| s as u8).collect();
+        (table, log, symbols, codes)
+    }
+
+    /// A reverse Huffman stream that decodes to `message`.
+    fn encode_stream(message: &[u8], codes: &[(u32, u8)]) -> Vec<u8> {
+        let mut writer = BitWriter::new();
+        for &symbol in message.iter().rev() {
+            let (code, bits) = codes[symbol as usize];
+            writer.write_bits(code, bits);
+        }
+        writer.close_reverse_stream();
+        writer.into_bytes()
+    }
+
+    #[test]
+    fn stream_tail_matches_reference() {
+        let mut rand = xorshift(0x9e6c_63d0_676a_9a99);
         let (mut ok, mut err) = (0, 0);
         for _ in 0..2000 {
-            // A random complete prefix code: split random leaves, at most
-            // 11 bits deep.
-            let leaves = 2 + (rand() as usize) % 60;
-            let mut depths = vec![1u8, 1];
-            while depths.len() < leaves {
-                let i = (rand() as usize) % depths.len();
-                if depths[i] < 11 {
-                    depths[i] += 1;
-                    depths.push(depths[i]);
-                }
-            }
-            let table_log = *depths.iter().max().unwrap();
-            // Leaf `k` is symbol `symbols[k]`. The last leaf takes the
-            // highest symbol, whose weight is implied.
-            let last_symbol = leaves - 1 + (rand() as usize) % (256 - leaves + 1);
-            let mut symbols: Vec<usize> = (0..last_symbol).collect();
-            for i in (1..symbols.len()).rev() {
-                symbols.swap(i, (rand() as usize) % (i + 1));
-            }
-            symbols.truncate(leaves - 1);
-            symbols.push(last_symbol);
-            let mut weights = vec![0u8; last_symbol];
-            for (&symbol, &depth) in symbols[..leaves - 1].iter().zip(&depths) {
-                weights[symbol] = table_log + 1 - depth;
-            }
-            let (table, log) = build_huffman_decode_table(&weights).unwrap();
-            assert_eq!(log, table_log);
-
-            let mut codes = vec![(0u32, 0u8); 256];
-            for (i, e) in table[..1 << table_log].iter().enumerate() {
-                codes[e.symbol as usize] = ((i >> (table_log - e.num_bits)) as u32, e.num_bits);
-            }
+            let (table, log, symbols, codes) = random_code(&mut rand);
             let message: Vec<u8> = (0..=(rand() as usize) % 300)
-                .map(|_| symbols[(rand() as usize) % leaves] as u8)
+                .map(|_| symbols[(rand() as usize) % symbols.len()])
                 .collect();
-            let mut writer = BitWriter::new();
-            for &symbol in message.iter().rev() {
-                let (code, bits) = codes[symbol as usize];
-                writer.write_bits(code, bits);
-            }
-            writer.close_reverse_stream();
-            let stream = writer.into_bytes();
+            let stream = encode_stream(&message, &codes);
 
             let mut variants = vec![stream.clone()];
             let mut flipped = stream.clone();
@@ -368,6 +387,84 @@ mod tests {
             }
         }
         assert!(ok > 2000 && err > 2000, "ok {ok}, err {err}");
+    }
+
+    #[test]
+    fn four_streams_match_single_stream_decode() {
+        let mut rand = xorshift(0x2f69_3a8e_1bd5_c047);
+        let (mut ok, mut err) = (0, 0);
+        for _ in 0..1500 {
+            let (table, log, symbols, codes) = random_code(&mut rand);
+            // Long enough messages that the fast rounds run.
+            let size = 16 + (rand() as usize) % 2000;
+            let message: Vec<u8> = (0..size)
+                .map(|_| symbols[(rand() as usize) % symbols.len()])
+                .collect();
+            let seg = size.div_ceil(4);
+            let parts = [
+                &message[..seg],
+                &message[seg..2 * seg],
+                &message[2 * seg..3 * seg],
+                &message[3 * seg..],
+            ];
+            let streams: Vec<Vec<u8>> = parts.iter().map(|m| encode_stream(m, &codes)).collect();
+
+            let mut variants = Vec::new();
+            for corrupt in 0..3 {
+                let mut streams = streams.clone();
+                let k = (rand() as usize) % 4;
+                match corrupt {
+                    1 => {
+                        let bit = (rand() as usize) % (streams[k].len() * 8);
+                        streams[k][bit / 8] ^= 1 << (bit % 8);
+                    }
+                    2 => {
+                        let len = streams[k].len();
+                        streams[k].truncate(1 + (rand() as usize) % len);
+                        if streams[k].last() == Some(&0) {
+                            streams[k].pop();
+                            streams[k].push(1);
+                        }
+                    }
+                    _ => {}
+                }
+                if streams[..3].iter().any(|s| s.len() > usize::from(u16::MAX)) {
+                    continue;
+                }
+                let mut data = Vec::new();
+                for stream in &streams[..3] {
+                    data.extend_from_slice(&(stream.len() as u16).to_le_bytes());
+                }
+                for stream in &streams {
+                    data.extend_from_slice(stream);
+                }
+                variants.push((corrupt, data, streams));
+            }
+
+            for (corrupt, data, streams) in variants {
+                // Reference: each stream on its own.
+                let expected: Result<Vec<u8>, DecompressError> = streams
+                    .iter()
+                    .zip(parts)
+                    .map(|(s, part)| decode_single_stream(&table, log, s, part.len()))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(|p| p.concat());
+                let mut out = Vec::new();
+                let result = decode_4_streams_into(&table, log, &data, size, &mut out);
+                match (expected, result) {
+                    (Ok(expected), Ok(())) => {
+                        assert_eq!(out, expected);
+                        if corrupt == 0 {
+                            assert_eq!(out, message);
+                        }
+                        ok += 1;
+                    }
+                    (Err(_), Err(_)) => err += 1,
+                    (expected, result) => panic!("{expected:?} vs {result:?} (corrupt {corrupt})"),
+                }
+            }
+        }
+        assert!(ok > 1500 && err > 500, "ok {ok}, err {err}");
     }
 
     #[test]
