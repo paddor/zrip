@@ -115,7 +115,7 @@ pub(crate) fn compress_dfast_block(
             hash_long,
             sequences,
         ),
-        (..=4, _, _) => compress_dfast_block_impl::<0, 0, 4>(
+        (..=4, _, _) => compress_dfast_block_mls4(
             src,
             block_start,
             block_end,
@@ -139,6 +139,29 @@ pub(crate) fn compress_dfast_block(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn compress_dfast_block_mls4(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_short: &mut [u32],
+    hash_long: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    simd_body!(compress_dfast_block_impl::<0, 0, 4>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_short,
+        hash_long,
+        sequences,
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
 #[inline(never)]
 fn compress_dfast_block_h15_mls4(
     src: &[u8],
@@ -150,7 +173,7 @@ fn compress_dfast_block_h15_mls4(
     hash_long: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_dfast_block_impl::<15, 15, 4>(
+    simd_body!(compress_dfast_block_impl::<15, 15, 4>(
         src,
         block_start,
         block_end,
@@ -159,7 +182,7 @@ fn compress_dfast_block_h15_mls4(
         hash_short,
         hash_long,
         sequences,
-    );
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -174,7 +197,7 @@ fn compress_dfast_block_h16_mls4(
     hash_long: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_dfast_block_impl::<16, 16, 4>(
+    simd_body!(compress_dfast_block_impl::<16, 16, 4>(
         src,
         block_start,
         block_end,
@@ -183,7 +206,7 @@ fn compress_dfast_block_h16_mls4(
         hash_short,
         hash_long,
         sequences,
-    );
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -198,7 +221,7 @@ fn compress_dfast_block_h17_mls4(
     hash_long: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_dfast_block_impl::<17, 17, 4>(
+    simd_body!(compress_dfast_block_impl::<17, 17, 4>(
         src,
         block_start,
         block_end,
@@ -207,7 +230,7 @@ fn compress_dfast_block_h17_mls4(
         hash_short,
         hash_long,
         sequences,
-    );
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -222,7 +245,7 @@ fn compress_dfast_block_h18_mls4(
     hash_long: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_dfast_block_impl::<18, 18, 4>(
+    simd_body!(compress_dfast_block_impl::<18, 18, 4>(
         src,
         block_start,
         block_end,
@@ -231,7 +254,7 @@ fn compress_dfast_block_h18_mls4(
         hash_short,
         hash_long,
         sequences,
-    );
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -246,7 +269,7 @@ fn compress_dfast_block_mls5(
     hash_long: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_dfast_block_impl::<0, 0, 5>(
+    simd_body!(compress_dfast_block_impl::<0, 0, 5>(
         src,
         block_start,
         block_end,
@@ -255,7 +278,7 @@ fn compress_dfast_block_mls5(
         hash_short,
         hash_long,
         sequences,
-    );
+    ));
 }
 
 /// 4-cursor DFast match finder with prefetch pipeline.
@@ -265,6 +288,7 @@ fn compress_dfast_block_mls5(
 /// iteration probes two positions, reusing hash computations across shifts
 /// and prefetching both hash_short and hash_long for the next position.
 #[allow(clippy::too_many_arguments)]
+#[inline(always)]
 fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const MLS: u32>(
     src: &[u8],
     block_start: usize,
@@ -297,10 +321,6 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
     } else {
         1usize << params.window_log
     };
-
-    let probe_interval = (block_size / 4).max(4096).min(block_size);
-    let mut probe_limit = block_start + probe_interval;
-    let mut total_match_bytes: usize = 0;
 
     let hash_log = if HASH_LOG != 0 {
         HASH_LOG
@@ -370,7 +390,6 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                 if (r1 > 0) & (ip0 >= r1) && rd32!(src, ip0) == rd32!(src, ip0 - r1) {
                     let ml = count_match!(src, ip0 + 4, ip0 - r1 + 4, block_end) + 4;
                     core::mem::swap(&mut rep0, &mut rep1);
-                    total_match_bytes += ml;
                     sequences.push(Sequence {
                         literal_length: 0,
                         offset: r1 as u32,
@@ -423,7 +442,6 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                         }
                         let back = ip2 - ip0;
                         let mlen = count_match!(src, ip2 + 4, ip2 - r0 + 4, block_end) + 4 + back;
-                        total_match_bytes += mlen;
                         sequences.push(Sequence {
                             literal_length: (ip0 - anchor) as u32,
                             offset: r0 as u32,
@@ -448,16 +466,14 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
             {
                 hash_store!(hash_short, hs1, ip1 as u32);
                 hash_store!(hash_long, hl1, ip1 as u32);
-                let mut back = 0usize;
-                while ip0 > anchor + back
-                    && match_long > back + block_start
-                    && src[ip0 - back - 1] == src[match_long - back - 1]
-                {
-                    back += 1;
-                }
+                let back = crate::fast::count_back(
+                    src,
+                    ip0,
+                    match_long,
+                    (ip0 - anchor).min(match_long.saturating_sub(block_start)),
+                );
                 let match_start = ip0 - back;
                 let mlen = count_match!(src, ip0 + 8, match_long + 8, block_end) + 8 + back;
-                total_match_bytes += mlen;
                 let offset = (match_start - (match_long - back)) as u32;
                 sequences.push(Sequence {
                     literal_length: (match_start - anchor) as u32,
@@ -496,15 +512,13 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                             hash_store!(hash_short, hs1, ip1 as u32);
                             hash_store!(hash_long, hl1, ip1 as u32);
                             ip0 = ip1;
-                            let mut back = 0usize;
-                            while ip0 > anchor + back
-                                && ml_next > back + block_start
-                                && src[ip0 - back - 1] == src[ml_next - back - 1]
-                            {
-                                back += 1;
-                            }
+                            let back = crate::fast::count_back(
+                                src,
+                                ip0,
+                                ml_next,
+                                (ip0 - anchor).min(ml_next.saturating_sub(block_start)),
+                            );
                             let match_start = ip0 - back;
-                            total_match_bytes += long_len + back;
                             let offset = (match_start - (ml_next - back)) as u32;
                             sequences.push(Sequence {
                                 literal_length: (match_start - anchor) as u32,
@@ -530,16 +544,14 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                 hash_store!(hash_short, hs1, ip1 as u32);
                 hash_store!(hash_long, hl1, ip1 as u32);
                 let mut mlen = count_match!(src, ip0 + 4, match_short + 4, block_end) + 4;
-                let mut back = 0usize;
-                while ip0 > anchor + back
-                    && match_short > back + block_start
-                    && src[ip0 - back - 1] == src[match_short - back - 1]
-                {
-                    back += 1;
-                }
+                let back = crate::fast::count_back(
+                    src,
+                    ip0,
+                    match_short,
+                    (ip0 - anchor).min(match_short.saturating_sub(block_start)),
+                );
                 let match_start = ip0 - back;
                 mlen += back;
-                total_match_bytes += mlen;
                 let offset = (match_start - (match_short - back)) as u32;
                 sequences.push(Sequence {
                     literal_length: (match_start - anchor) as u32,
@@ -590,16 +602,14 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                     hash_store!(hash_short, hs1, ip1 as u32);
                     hash_store!(hash_long, hl1, ip1 as u32);
                 }
-                let mut back = 0usize;
-                while ip0 > anchor + back
-                    && match_long > back + block_start
-                    && src[ip0 - back - 1] == src[match_long - back - 1]
-                {
-                    back += 1;
-                }
+                let back = crate::fast::count_back(
+                    src,
+                    ip0,
+                    match_long,
+                    (ip0 - anchor).min(match_long.saturating_sub(block_start)),
+                );
                 let match_start = ip0 - back;
                 let mlen = count_match!(src, ip0 + 8, match_long + 8, block_end) + 8 + back;
-                total_match_bytes += mlen;
                 let offset = (match_start - (match_long - back)) as u32;
                 sequences.push(Sequence {
                     literal_length: (match_start - anchor) as u32,
@@ -640,15 +650,13 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                                 hash_store!(hash_long, hl1, ip1 as u32);
                             }
                             ip0 = ip1;
-                            let mut back = 0usize;
-                            while ip0 > anchor + back
-                                && ml_next > back + block_start
-                                && src[ip0 - back - 1] == src[ml_next - back - 1]
-                            {
-                                back += 1;
-                            }
+                            let back = crate::fast::count_back(
+                                src,
+                                ip0,
+                                ml_next,
+                                (ip0 - anchor).min(ml_next.saturating_sub(block_start)),
+                            );
                             let match_start = ip0 - back;
-                            total_match_bytes += long_len + back;
                             let offset = (match_start - (ml_next - back)) as u32;
                             sequences.push(Sequence {
                                 literal_length: (match_start - anchor) as u32,
@@ -676,16 +684,14 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
                     hash_store!(hash_long, hl1, ip1 as u32);
                 }
                 let mut mlen = count_match!(src, ip0 + 4, match_short + 4, block_end) + 4;
-                let mut back = 0usize;
-                while ip0 > anchor + back
-                    && match_short > back + block_start
-                    && src[ip0 - back - 1] == src[match_short - back - 1]
-                {
-                    back += 1;
-                }
+                let back = crate::fast::count_back(
+                    src,
+                    ip0,
+                    match_short,
+                    (ip0 - anchor).min(match_short.saturating_sub(block_start)),
+                );
                 let match_start = ip0 - back;
                 mlen += back;
-                total_match_bytes += mlen;
                 let offset = (match_start - (match_short - back)) as u32;
                 sequences.push(Sequence {
                     literal_length: (match_start - anchor) as u32,
@@ -723,15 +729,6 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
             {
                 primitives::prefetch_ht(hash_short, hs1);
                 primitives::prefetch_ht(hash_long, hl1);
-            }
-
-            if ip0 >= probe_limit {
-                let scanned = ip0 - block_start;
-                if total_match_bytes * 6 < scanned {
-                    sequences.clear();
-                    return;
-                }
-                probe_limit = probe_limit.saturating_add(probe_interval).min(block_end);
             }
 
             if ip3 >= ilimit {

@@ -65,13 +65,14 @@ impl FseEncodeTable {
         let mut next_state_number = vec![0u32; distribution.len()];
         for s in 0..distribution.len() {
             let prob = distribution[s];
-            if prob <= 0 {
-                let max_nb_bits = accuracy_log;
-                let min_state_plus = if prob == -1 { 1u32 } else { 0 };
-                symbol_tt[s].delta_nb_bits = ((max_nb_bits as u32 + 1) << 16) - min_state_plus;
+            // A "less than one" probability (-1) owns one state, exactly like
+            // probability 1 (C zstd's FSE_buildCTable).
+            if prob == 0 {
+                symbol_tt[s].delta_nb_bits =
+                    ((accuracy_log as u32 + 1) << 16).wrapping_sub(1 << accuracy_log);
                 symbol_tt[s].delta_find_state = 0;
                 next_state_number[s] = cumul[s];
-            } else if prob == 1 {
+            } else if prob == 1 || prob == -1 {
                 let max_bits_out = accuracy_log as u32;
                 let min_state_plus = 1u32 << accuracy_log;
                 symbol_tt[s].delta_nb_bits = (max_bits_out << 16).wrapping_sub(min_state_plus);

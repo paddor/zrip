@@ -92,11 +92,11 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
             let ll = $literal_length as usize;
             let ml = $match_length as usize;
             let mut seq_output = output.begin_sequence(ll, ml)?;
-            if ll != 0 {
-                seq_output.extend_literals_range(literals, lit_off)?;
-                op += ll;
-                lit_off += ll;
-            }
+            // No `ll != 0` branch: an empty literal run is a harmless copy
+            // into the output slack.
+            seq_output.extend_literals_range(literals, lit_off)?;
+            op += ll;
+            lit_off += ll;
 
             let off = $offset as usize;
             let out_pos = op - output_base;

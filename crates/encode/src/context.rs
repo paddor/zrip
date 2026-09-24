@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use crate::block_encoder::{self, BlockEncodeWorkspace};
 use crate::strategy::{self, LevelParams, Strategy};
-use crate::{block_looks_incompressible, dfast, fast, write_frame_header_with_checksum};
+use crate::{dfast, fast, skip_match_search, write_frame_header_with_checksum};
 use zrip_core::Sequence;
 use zrip_core::dict::Dictionary;
 use zrip_core::error::CompressError;
@@ -276,9 +276,8 @@ impl CompressContext {
     fn compress_with_prepared(&mut self, input: &[u8]) -> Result<Cow<'_, [u8]>, CompressError> {
         let prep = self.prepared.as_ref().unwrap();
         let total_window = prep.prefix_len + input.len();
-        let mut params = strategy::level_params_for_size(self.level, total_window)
+        let params = strategy::level_params_for_size(self.level, total_window)
             .expect("level validated at construction");
-        strategy::apply_raw_literals_size_override(&mut params, input.len());
 
         let use_attached = !input.is_empty()
             && input.len() <= ATTACH_THRESHOLD
@@ -385,7 +384,7 @@ impl CompressContext {
                     true,
                     &mut self.output,
                     &mut self.workspace,
-                    strategy::use_custom_sequence_tables(&params, input.len()),
+                    strategy::block_policy(&params, input.len()),
                 )?;
             }
         } else {
@@ -435,7 +434,7 @@ impl CompressContext {
                         true,
                         &mut self.output,
                         &mut self.workspace,
-                        strategy::use_custom_sequence_tables(&params, input.len()),
+                        strategy::block_policy(&params, input.len()),
                     )?;
                 }
             } else {
@@ -485,7 +484,7 @@ impl CompressContext {
                             is_last,
                             &mut self.output,
                             &mut self.workspace,
-                            strategy::use_custom_sequence_tables(&params, input.len()),
+                            strategy::block_policy(&params, input.len()),
                         )?;
                     }
                     offset += chunk_size;
@@ -562,9 +561,6 @@ fn compress_core(
     combined: &mut Vec<u8>,
     content_checksum: bool,
 ) -> Result<(), CompressError> {
-    let mut params = params;
-    strategy::apply_raw_literals_size_override(&mut params, input.len());
-
     let hash_size = match params.strategy {
         Strategy::Fast => 1usize << params.hash_log,
         Strategy::DFast => 1usize << params.chain_log,
@@ -632,7 +628,7 @@ fn compress_core(
                             true,
                             output,
                             workspace,
-                            strategy::use_custom_sequence_tables(&params, input.len()),
+                            strategy::block_policy(&params, input.len()),
                         )?;
                     }
                 } else if has_prefix {
@@ -672,7 +668,7 @@ fn compress_core(
                                 is_last,
                                 output,
                                 workspace,
-                                strategy::use_custom_sequence_tables(&params, input.len()),
+                                strategy::block_policy(&params, input.len()),
                             )?;
                         }
                         offset += chunk_size;
@@ -685,7 +681,7 @@ fn compress_core(
                         let is_last = block_end >= input.len();
                         let block = &input[offset..block_end];
 
-                        if block_looks_incompressible(block) {
+                        if skip_match_search(&params, input.len(), block) {
                             block_encoder::encode_raw_block(block, is_last, output)?;
                         } else {
                             fast::compress_fast_block(
@@ -714,7 +710,7 @@ fn compress_core(
                                     is_last,
                                     output,
                                     workspace,
-                                    strategy::use_custom_sequence_tables(&params, input.len()),
+                                    strategy::block_policy(&params, input.len()),
                                 )?;
                             }
                         }
@@ -744,7 +740,7 @@ fn compress_core(
                         true,
                         output,
                         workspace,
-                        strategy::use_custom_sequence_tables(&params, input.len()),
+                        strategy::block_policy(&params, input.len()),
                     )?;
                 } else if has_prefix {
                     combined.clear();
@@ -782,7 +778,7 @@ fn compress_core(
                             is_last,
                             output,
                             workspace,
-                            strategy::use_custom_sequence_tables(&params, input.len()),
+                            strategy::block_policy(&params, input.len()),
                         )?;
                         offset += chunk_size;
                     }
@@ -795,7 +791,7 @@ fn compress_core(
                         let is_last = block_end >= input.len();
                         let block = &input[offset..block_end];
 
-                        if block_looks_incompressible(block) {
+                        if skip_match_search(&params, input.len(), block) {
                             block_encoder::encode_raw_block(block, is_last, output)?;
                         } else {
                             dfast::compress_dfast_block(
@@ -815,7 +811,7 @@ fn compress_core(
                                 is_last,
                                 output,
                                 workspace,
-                                strategy::use_custom_sequence_tables(&params, input.len()),
+                                strategy::block_policy(&params, input.len()),
                             )?;
                         }
                         offset = block_end;

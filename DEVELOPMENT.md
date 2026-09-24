@@ -111,7 +111,7 @@ Proves decoder and encoder bounds safety via bounded model checking.
 Requires [Kani](https://model-checking.github.io/kani/)
 (`cargo install --locked kani-verifier && cargo kani setup`).
 
-Eighteen proof harnesses across two crates:
+Sixteen proof harnesses across two crates:
 
 - **Decoder** (`crates/decode/src/fast_vec.rs`, 11 harnesses): one arithmetic
   proof that `BlockOutput::new` reserves sufficient capacity for all wildcopy
@@ -120,10 +120,9 @@ Eighteen proof harnesses across two crates:
   `wild_copy_match_16plus_unchecked`, and `wild_copy_match_single_unchecked`
   (three dispatch paths).
 
-- **Encoder** (`crates/encode/src/primitives.rs`, 7 harnesses): `rd32`,
-  `rd64`, `hash_load`, `hash_store`, `count_match` (8-byte fast loop + byte
-  tail), and two `BitstreamScratch` proofs (`flush`/`write_byte` + `finish`
-  never exposes uninitialized bytes via `set_len`).
+- **Encoder** (`crates/encode/src/primitives.rs`, 5 harnesses): `rd32`,
+  `rd64`, `hash_load`, `hash_store`, and `count_match` (8-byte fast loop +
+  byte tail).
 
 ```sh
 # decoder (~2 min)

@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 
 use crate::output::OutputSink;
 use crate::primitives;
+use crate::strategy::BlockPolicy;
 use zrip_core::Sequence;
 use zrip_core::bitstream::writer::BitWriter;
 use zrip_core::error::CompressError;
@@ -13,7 +14,7 @@ use zrip_core::fse::{
     ML_BASELINE_TABLE, ML_BITS_TABLE, ML_DEFAULT_ACCURACY, ML_DEFAULT_DIST, OF_DEFAULT_ACCURACY,
     OF_DEFAULT_DIST,
 };
-use zrip_core::huffman::encode::HuffmanEncodeTable;
+use zrip_core::huffman::encode::{HuffmanEncodeTable, byte_histogram};
 
 #[inline]
 fn write_seq_count(output: &mut Vec<u8>, num_seq: u32) {
@@ -397,16 +398,33 @@ pub(crate) fn encode_compressed_block(
     last: bool,
     output: &mut impl OutputSink,
     workspace: &mut BlockEncodeWorkspace,
-    use_custom_sequence_tables: bool,
+    policy: BlockPolicy,
 ) -> Result<(), CompressError> {
-    if sequences.is_empty() {
-        return encode_raw_block(src, last, output);
-    }
+    simd_body!(encode_compressed_block_impl(
+        src,
+        sequences,
+        rep_offsets,
+        last,
+        output,
+        workspace,
+        policy
+    ))
+}
 
+#[inline(always)]
+fn encode_compressed_block_impl(
+    src: &[u8],
+    sequences: &[Sequence],
+    rep_offsets: &mut [u32; 3],
+    last: bool,
+    output: &mut impl OutputSink,
+    workspace: &mut BlockEncodeWorkspace,
+    policy: BlockPolicy,
+) -> Result<(), CompressError> {
     let n = sequences.len();
     let total_match: usize = sequences.iter().map(|s| s.match_length as usize).sum();
-    if total_match <= n * 3 {
-        return encode_raw_block(src, last, output);
+    if n == 0 || total_match <= n * 3 {
+        return encode_literals_only_block(src, last, output, workspace, policy);
     }
 
     let saved_rep = *rep_offsets;
@@ -419,7 +437,7 @@ pub(crate) fn encode_compressed_block(
         &mut workspace.huf_concat,
         &mut workspace.huf_stream,
         &mut workspace.prev_huffman,
-        use_custom_sequence_tables,
+        policy,
     );
 
     let has_repeat =
@@ -436,7 +454,7 @@ pub(crate) fn encode_compressed_block(
         );
     }
 
-    let do_codes = use_custom_sequence_tables && n >= 64;
+    let do_codes = policy.custom_tables && n >= 64;
     let seq_data = if do_codes {
         let (ll_freq, ml_freq, of_freq, total_extra_bits) =
             compute_frequencies(&workspace.packed_seqs);
@@ -495,6 +513,8 @@ pub(crate) fn encode_compressed_block(
     let block_len = literal_section_len + seq_data.len();
     if block_len >= src.len() {
         *rep_offsets = saved_rep;
+        // The decoder never sees this block's table, so it cannot be reused.
+        workspace.prev_huffman = None;
         return encode_raw_block(src, last, output);
     }
 
@@ -510,7 +530,58 @@ pub(crate) fn encode_compressed_block(
     output.extend_from_slice(seq_data)
 }
 
+/// Encodes a block without sequences: Huffman-coded literals and an empty
+/// sequence section. Falls back to a raw block when that is not smaller.
+fn encode_literals_only_block(
+    src: &[u8],
+    last: bool,
+    output: &mut impl OutputSink,
+    workspace: &mut BlockEncodeWorkspace,
+    policy: BlockPolicy,
+) -> Result<(), CompressError> {
+    let raw_literals = encode_literals_section(
+        src,
+        &mut workspace.lit_section,
+        &mut workspace.huf_concat,
+        &mut workspace.huf_stream,
+        &mut workspace.prev_huffman,
+        policy,
+    );
+    // One byte for the empty sequence section (Number_of_Sequences = 0).
+    let block_len = workspace.lit_section.len() + 1;
+    if raw_literals || block_len >= src.len() {
+        // The decoder never sees this block's table, so it cannot be reused.
+        workspace.prev_huffman = None;
+        return encode_raw_block(src, last, output);
+    }
+    let header = ((block_len as u32) << 3) | 0x04 | u32::from(last);
+    output.push(header as u8)?;
+    output.push((header >> 8) as u8)?;
+    output.push((header >> 16) as u8)?;
+    output.extend_from_slice(&workspace.lit_section)?;
+    output.push(0)
+}
+
 pub(crate) fn encode_compressed_block_raw(
+    src: &[u8],
+    sequences: &[Sequence],
+    rep_offsets: &mut [u32; 3],
+    last: bool,
+    output: &mut impl OutputSink,
+    workspace: &mut BlockEncodeWorkspace,
+) -> Result<(), CompressError> {
+    simd_body!(encode_compressed_block_raw_impl(
+        src,
+        sequences,
+        rep_offsets,
+        last,
+        output,
+        workspace
+    ))
+}
+
+#[inline(always)]
+fn encode_compressed_block_raw_impl(
     src: &[u8],
     sequences: &[Sequence],
     rep_offsets: &mut [u32; 3],
@@ -564,13 +635,32 @@ fn pack_sequences_and_literals(
     rep_offsets: &mut [u32; 3],
     workspace: &mut BlockEncodeWorkspace,
 ) {
+    simd_body!(pack_sequences_and_literals_impl(
+        src,
+        sequences,
+        rep_offsets,
+        workspace
+    ));
+}
+
+#[inline(always)]
+fn pack_sequences_and_literals_impl(
+    src: &[u8],
+    sequences: &[Sequence],
+    rep_offsets: &mut [u32; 3],
+    workspace: &mut BlockEncodeWorkspace,
+) {
     let n = sequences.len();
     let src_len = src.len();
 
-    workspace.lit_buf.clear();
-    workspace.lit_buf.reserve(src_len + 16);
-    workspace.packed_seqs.clear();
-    workspace.packed_seqs.reserve(n);
+    let mut lit_buf = core::mem::take(&mut workspace.lit_buf);
+    if lit_buf.len() < src_len + 32 {
+        lit_buf.resize(src_len + 32, 0);
+    }
+    let mut lit_pos = 0usize;
+    let mut packed_seqs = core::mem::take(&mut workspace.packed_seqs);
+    packed_seqs.clear();
+    packed_seqs.reserve(n);
 
     let mut lit_offset = 0usize;
 
@@ -581,11 +671,14 @@ fn pack_sequences_and_literals(
     for seq in &sequences[..n] {
         let ll = seq.literal_length as usize;
         debug_assert!(lit_offset + ll <= src_len);
-        if ll != 0 {
-            workspace
-                .lit_buf
-                .extend_from_slice(&src[lit_offset..lit_offset + ll]);
+        if ll <= 16 && lit_offset + 16 <= src_len {
+            let s16: &[u8; 16] = src[lit_offset..].first_chunk().unwrap();
+            let d16: &mut [u8; 16] = lit_buf[lit_pos..].first_chunk_mut().unwrap();
+            *d16 = *s16;
+        } else {
+            lit_buf[lit_pos..lit_pos + ll].copy_from_slice(&src[lit_offset..lit_offset + ll]);
         }
+        lit_pos += ll;
         lit_offset += ll + seq.match_length as usize;
 
         let actual_offset = seq.offset;
@@ -642,7 +735,7 @@ fn pack_sequences_and_literals(
             | ((of_extra as u64) << (ll_nb + ml_nb));
         let extra_nbits = ll_nb + ml_nb + of_c;
 
-        workspace.packed_seqs.push(PackedSeq {
+        packed_seqs.push(PackedSeq {
             extra_bits,
             ll_c,
             ml_c,
@@ -655,10 +748,13 @@ fn pack_sequences_and_literals(
     rep_offsets[2] = rep2;
 
     if lit_offset < src_len {
-        workspace
-            .lit_buf
-            .extend_from_slice(&src[lit_offset..src_len]);
+        let rest = src_len - lit_offset;
+        lit_buf[lit_pos..lit_pos + rest].copy_from_slice(&src[lit_offset..src_len]);
+        lit_pos += rest;
     }
+    lit_buf.truncate(lit_pos);
+    workspace.lit_buf = lit_buf;
+    workspace.packed_seqs = packed_seqs;
 }
 
 fn compute_frequencies(packed: &[PackedSeq]) -> ([u32; 36], [u32; 53], [u32; 32], u64) {
@@ -676,7 +772,7 @@ fn compute_frequencies(packed: &[PackedSeq]) -> ([u32; 36], [u32; 53], [u32; 32]
 }
 
 /// Approximate log2(x) in 8.8 fixed point (result = log2(x) * 256).
-fn log2_fp8(x: u32) -> u32 {
+pub(crate) fn log2_fp8(x: u32) -> u32 {
     if x <= 1 {
         return 0;
     }
@@ -737,53 +833,101 @@ fn huf_worth_trying(data: &[u8]) -> bool {
     estimated_bytes + tree_overhead + min_gain < n as u64
 }
 
+/// Literals the entropy gate samples. Shorter literal runs are measured
+/// from their full histogram.
+const DENSITY_SAMPLE: usize = 4096;
+
+/// Whether bytes with these counts have an order-0 entropy above
+/// `limit_fp8` bits per byte (8.8 fixed point).
+fn histogram_too_dense(counts: &[u32; 256], limit_fp8: u32) -> bool {
+    let n: u32 = counts.iter().sum();
+    if n == 0 {
+        return false;
+    }
+    let log2_n = log2_fp8(n);
+    let bits_fp8: u64 = counts
+        .iter()
+        .filter(|&&c| c > 0)
+        .map(|&c| u64::from(c) * u64::from(log2_n - log2_fp8(c)))
+        .sum();
+    bits_fp8 > u64::from(limit_fp8) * u64::from(n)
+}
+
 fn encode_literals_section(
     lits: &[u8],
     output: &mut Vec<u8>,
     huf_concat: &mut Vec<u8>,
     huf_stream: &mut Vec<u8>,
     prev_huffman: &mut Option<HuffmanEncodeTable>,
-    try_huffman_literals: bool,
+    policy: BlockPolicy,
 ) -> bool {
     output.clear();
 
-    let use_4_streams = lits.len() >= 1024;
+    let try_huffman_literals = policy.custom_tables;
 
-    if let Some(prev) = prev_huffman.as_ref()
-        && prev.can_encode(lits)
-    {
+    let use_4_streams = lits.len() >= 1024;
+    let encode = |table: &HuffmanEncodeTable, concat: &mut Vec<u8>, stream: &mut Vec<u8>| {
         if use_4_streams {
-            prev.encode_4_streams_into(lits, huf_concat, huf_stream);
+            table.encode_4_streams_into(lits, concat, stream);
         } else {
-            prev.encode_single_stream_into(lits, huf_concat);
+            table.encode_single_stream_into(lits, concat);
         }
+    };
+
+    // Pick between reusing the previous table, a fresh table with its
+    // description, and raw bytes by estimated size, as C zstd does. Reuse is
+    // only a win when the old table still fits these literals.
+    let want_fresh = try_huffman_literals || huf_worth_trying(lits);
+    if prev_huffman.is_none() && !want_fresh {
+        encode_raw_literals_header(lits.len(), output);
+        return true;
+    }
+    // Dense literals stay raw. Long runs are judged by a sample, so they
+    // skip the full histogram when they fail.
+    let limit = policy.max_literal_entropy_fp8;
+    if limit != u32::MAX
+        && lits.len() > DENSITY_SAMPLE
+        && histogram_too_dense(&byte_histogram(&lits[..DENSITY_SAMPLE]), limit)
+    {
+        *prev_huffman = None;
+        encode_raw_literals_header(lits.len(), output);
+        return true;
+    }
+    let freqs = byte_histogram(lits);
+    if limit != u32::MAX && lits.len() <= DENSITY_SAMPLE && histogram_too_dense(&freqs, limit) {
+        *prev_huffman = None;
+        encode_raw_literals_header(lits.len(), output);
+        return true;
+    }
+    let reuse_bits = prev_huffman.as_ref().and_then(|p| p.estimate_bits(&freqs));
+    let fresh = if want_fresh {
+        HuffmanEncodeTable::from_histogram(&freqs).map(|t| {
+            let bits = t.estimate_bits(&freqs).unwrap_or(u64::MAX)
+                + t.weights_description().len() as u64 * 8;
+            (t, bits)
+        })
+    } else {
+        None
+    };
+    let fresh_bits = fresh.as_ref().map_or(u64::MAX, |f| f.1);
+
+    if let Some(bits) = reuse_bits
+        && bits <= fresh_bits
+    {
+        encode(prev_huffman.as_ref().unwrap(), huf_concat, huf_stream);
         let compressed_size = huf_concat.len();
         if compressed_size < lits.len() {
             encode_treeless_literals_header(lits.len(), compressed_size, use_4_streams, output);
             output.extend_from_slice(huf_concat);
             return false;
         }
-    }
-
-    if !try_huffman_literals && !huf_worth_trying(lits) {
-        *prev_huffman = None;
-        encode_raw_literals_header(lits.len(), output);
-        return true;
-    }
-
-    if let Some(table) = HuffmanEncodeTable::from_data(lits) {
-        let tree_desc = table.serialize_weights();
-        if use_4_streams {
-            table.encode_4_streams_into(lits, huf_concat, huf_stream);
-        } else {
-            table.encode_single_stream_into(lits, huf_concat);
-        }
-
+    } else if let Some((table, _)) = fresh {
+        encode(&table, huf_concat, huf_stream);
+        let tree_desc = table.weights_description();
         let compressed_size = tree_desc.len() + huf_concat.len();
-
         if compressed_size < lits.len() {
             encode_compressed_literals_header(lits.len(), compressed_size, use_4_streams, output);
-            output.extend_from_slice(&tree_desc);
+            output.extend_from_slice(tree_desc);
             output.extend_from_slice(huf_concat);
             *prev_huffman = Some(table);
             return false;
@@ -861,6 +1005,15 @@ fn encode_raw_literals_header(size: usize, output: &mut Vec<u8>) {
 }
 
 fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf: &mut Vec<u8>) {
+    simd_body!(encode_seq_predefined_impl(packed, output, writer_buf));
+}
+
+#[inline(always)]
+fn encode_seq_predefined_impl(
+    packed: &[PackedSeq],
+    output: &mut Vec<u8>,
+    writer_buf: &mut Vec<u8>,
+) {
     let n = packed.len();
     let num_seq = n as u32;
     output.clear();
@@ -945,6 +1098,20 @@ fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf:
 }
 
 fn encode_seq_repeat(
+    packed: &[PackedSeq],
+    ll_t: &FseEncodeTable,
+    of_t: &FseEncodeTable,
+    ml_t: &FseEncodeTable,
+    output: &mut Vec<u8>,
+    writer_buf: &mut Vec<u8>,
+) {
+    simd_body!(encode_seq_repeat_impl(
+        packed, ll_t, of_t, ml_t, output, writer_buf
+    ));
+}
+
+#[inline(always)]
+fn encode_seq_repeat_impl(
     packed: &[PackedSeq],
     ll_t: &FseEncodeTable,
     of_t: &FseEncodeTable,
@@ -1231,6 +1398,24 @@ fn build_table_enc(
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
 fn encode_seq_custom(
+    packed: &[PackedSeq],
+    ll_freq: &[u32; 36],
+    ml_freq: &[u32; 53],
+    of_freq: &[u32; 32],
+    n: usize,
+    pred_size: usize,
+    output: &mut Vec<u8>,
+    writer_buf: &mut Vec<u8>,
+    tables: &mut CustomSeqTables,
+) -> bool {
+    simd_body!(encode_seq_custom_impl(
+        packed, ll_freq, ml_freq, of_freq, n, pred_size, output, writer_buf, tables
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn encode_seq_custom_impl(
     packed: &[PackedSeq],
     ll_freq: &[u32; 36],
     ml_freq: &[u32; 53],
@@ -1572,4 +1757,173 @@ fn ml_code(ml: u32) -> u8 {
 #[inline]
 fn of_code(offset_value: u32) -> u8 {
     (31 - offset_value.leading_zeros()) as u8
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const KNUTH: u32 = 0x9E37_79B1;
+    const POLICY: BlockPolicy = BlockPolicy {
+        custom_tables: true,
+        max_literal_entropy_fp8: u32::MAX,
+    };
+
+    /// Bytes skewed toward low symbols (about 5 bits per byte) with almost no
+    /// repeated strings.
+    fn skewed_literals(len: usize) -> Vec<u8> {
+        (0..len as u32)
+            .map(|i| {
+                let r = i.wrapping_mul(KNUTH).rotate_left(13).wrapping_mul(KNUTH);
+                ((r >> 26) & (r >> 20) & 63) as u8 + b' '
+            })
+            .collect()
+    }
+
+    fn block_header(out: &[u8]) -> (bool, u32, usize) {
+        let h = u32::from(out[0]) | (u32::from(out[1]) << 8) | (u32::from(out[2]) << 16);
+        (h & 1 == 1, (h >> 1) & 3, (h >> 3) as usize)
+    }
+
+    #[test]
+    fn block_without_sequences_is_huffman_coded() {
+        let src = skewed_literals(64 * 1024);
+        let mut out = Vec::new();
+        let mut ws = BlockEncodeWorkspace::new();
+        let mut rep = [1, 4, 8];
+        encode_compressed_block(&src, &[], &mut rep, true, &mut out, &mut ws, POLICY).unwrap();
+
+        let (last, block_type, size) = block_header(&out);
+        assert!(last);
+        assert_eq!(block_type, 2, "compressed block");
+        assert_eq!(size, out.len() - 3);
+        assert!(out.len() * 10 < src.len() * 9, "{} bytes", out.len());
+        assert_eq!(out[3] & 3, 2, "Huffman literals with a tree");
+        assert_eq!(out.last(), Some(&0), "empty sequence section");
+        assert_eq!(rep, [1, 4, 8]);
+        assert!(ws.prev_huffman.is_some());
+    }
+
+    #[test]
+    fn block_without_sequences_falls_back_to_raw_for_dense_bytes() {
+        // Uniform bytes: Huffman cannot beat raw storage.
+        let src: Vec<u8> = (0..4096u32)
+            .map(|i| (i.wrapping_mul(KNUTH) >> 24) as u8)
+            .collect();
+        let mut out = Vec::new();
+        let mut ws = BlockEncodeWorkspace::new();
+        encode_compressed_block(&src, &[], &mut [1, 4, 8], false, &mut out, &mut ws, POLICY)
+            .unwrap();
+        let (last, block_type, size) = block_header(&out);
+        assert!(!last);
+        assert_eq!(block_type, 0, "raw block");
+        assert_eq!(size, src.len());
+        assert!(ws.prev_huffman.is_none());
+    }
+
+    #[test]
+    fn fresh_table_replaces_one_that_cannot_code_new_symbols() {
+        let mut ws = BlockEncodeWorkspace::new();
+        let first = skewed_literals(16 * 1024);
+        let mut out = Vec::new();
+        encode_compressed_block(
+            &first,
+            &[],
+            &mut [1, 4, 8],
+            false,
+            &mut out,
+            &mut ws,
+            POLICY,
+        )
+        .unwrap();
+        assert!(ws.prev_huffman.is_some());
+
+        // Same shape, shifted to byte values the first table has no code for.
+        let second: Vec<u8> = first.iter().map(|&b| b + 128).collect();
+        let mut out = Vec::new();
+        encode_compressed_block(
+            &second,
+            &[],
+            &mut [1, 4, 8],
+            true,
+            &mut out,
+            &mut ws,
+            POLICY,
+        )
+        .unwrap();
+        let (_, block_type, _) = block_header(&out);
+        assert_eq!(block_type, 2);
+        assert_eq!(out[3] & 3, 2, "new tree, not treeless reuse");
+    }
+
+    #[test]
+    fn previous_table_is_reused_for_the_same_distribution() {
+        let mut ws = BlockEncodeWorkspace::new();
+        let data = skewed_literals(32 * 1024);
+        let mut out = Vec::new();
+        encode_compressed_block(
+            &data[..16 * 1024],
+            &[],
+            &mut [1, 4, 8],
+            false,
+            &mut out,
+            &mut ws,
+            POLICY,
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        encode_compressed_block(
+            &data[16 * 1024..],
+            &[],
+            &mut [1, 4, 8],
+            true,
+            &mut out,
+            &mut ws,
+            POLICY,
+        )
+        .unwrap();
+        assert_eq!(out[3] & 3, 3, "treeless literals");
+    }
+
+    #[test]
+    fn dense_literals_stay_raw_under_an_entropy_limit() {
+        // About 7 bits per byte: Huffman saves roughly 12%.
+        let src: Vec<u8> = (0..16_384u32)
+            .map(|i| (i.wrapping_mul(KNUTH) >> 25) as u8)
+            .collect();
+        let limited = BlockPolicy {
+            custom_tables: true,
+            max_literal_entropy_fp8: 6 * 256,
+        };
+        let mut out = Vec::new();
+        let mut ws = BlockEncodeWorkspace::new();
+        encode_compressed_block(&src, &[], &mut [1, 4, 8], true, &mut out, &mut ws, limited)
+            .unwrap();
+        assert_eq!(block_header(&out).1, 0, "raw block under the limit");
+
+        let mut out = Vec::new();
+        let mut ws = BlockEncodeWorkspace::new();
+        encode_compressed_block(&src, &[], &mut [1, 4, 8], true, &mut out, &mut ws, POLICY)
+            .unwrap();
+        assert_eq!(block_header(&out).1, 2, "Huffman-coded without a limit");
+    }
+
+    #[test]
+    fn sequence_codes_follow_the_zstd_tables() {
+        for ll in 0..16 {
+            assert_eq!(ll_code(ll), ll as u8);
+        }
+        assert_eq!(ll_code(16), 16);
+        assert_eq!(ll_code(63), 24);
+        assert_eq!(ll_code(64), 25);
+        assert_eq!(ll_code(65_535), 34);
+        for ml in 3..35 {
+            assert_eq!(ml_code(ml), (ml - 3) as u8);
+        }
+        assert_eq!(ml_code(35), 32);
+        assert_eq!(ml_code(131), 43);
+        assert_eq!(of_code(1), 0);
+        assert_eq!(of_code(4), 2);
+        assert_eq!(of_code(1 << 20), 20);
+    }
 }

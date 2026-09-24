@@ -20,6 +20,34 @@ macro_rules! paranoid_unsafe_call {
     };
 }
 
+/// Evaluates `$body` compiled for x86-64-v3 (AVX2, BMI1/2, LZCNT) when the CPU
+/// supports it, and compiled for the build target otherwise.
+///
+/// Use it as a whole function body around a call to an `#[inline(always)]`
+/// implementation, so the implementation is duplicated into both contexts.
+/// `fearless_simd` selects the level at runtime and provides the safe
+/// target-feature entry point.
+#[cfg(all(feature = "simd", target_arch = "x86_64", not(target_feature = "avx2")))]
+macro_rules! simd_body {
+    ($body:expr) => {
+        match fearless_simd::Level::new().as_avx2() {
+            Some(avx2) => fearless_simd::Simd::vectorize(
+                avx2,
+                #[inline(always)]
+                || $body,
+            ),
+            None => $body,
+        }
+    };
+}
+
+#[cfg(not(all(feature = "simd", target_arch = "x86_64", not(target_feature = "avx2"))))]
+macro_rules! simd_body {
+    ($body:expr) => {
+        $body
+    };
+}
+
 pub(crate) mod block_encoder;
 #[cfg(feature = "std")]
 pub mod context;
@@ -158,7 +186,20 @@ fn window_descriptor_for_log(window_log: u32) -> u8 {
     ((window_log - 10) as u8) << 3
 }
 
-pub(crate) fn block_looks_incompressible(data: &[u8]) -> bool {
+/// Whether to store `data`, a block of an `input_len`-byte input, raw without
+/// a match search.
+///
+/// Inputs that keep raw literals skip the sampling: it costs about as much as
+/// their match search, and a block without matches is stored raw anyway.
+pub(crate) fn skip_match_search(
+    params: &strategy::LevelParams,
+    input_len: usize,
+    data: &[u8],
+) -> bool {
+    !strategy::keeps_raw_literals(params, input_len) && block_looks_incompressible(data)
+}
+
+fn block_looks_incompressible(data: &[u8]) -> bool {
     const SAMPLE: usize = 1024;
     const DISTINCT_THRESHOLD: u32 = 200;
     const MAX_FREQ_DENOM: u32 = 24;
@@ -225,10 +266,8 @@ pub fn compress_opts(
 
 #[allow(clippy::unnecessary_wraps)]
 fn compress_inner(input: &[u8], params: &strategy::LevelParams) -> Result<Vec<u8>, CompressError> {
-    let mut params = *params;
-    strategy::apply_raw_literals_size_override(&mut params, input.len());
     let mut output = Vec::with_capacity(input.len() + 32);
-    compress_frame(input, &params, &mut output)?;
+    compress_frame(input, params, &mut output)?;
     Ok(output)
 }
 
@@ -260,7 +299,7 @@ fn compress_frame(
                     let is_last = block_end >= input.len();
                     let block = &input[offset..block_end];
 
-                    if block_looks_incompressible(block) {
+                    if skip_match_search(params, input.len(), block) {
                         block_encoder::encode_raw_block(block, is_last, output)?;
                     } else {
                         #[cfg(feature = "ldm")]
@@ -311,7 +350,7 @@ fn compress_frame(
                                 is_last,
                                 output,
                                 &mut workspace,
-                                strategy::use_custom_sequence_tables(params, input.len()),
+                                strategy::block_policy(params, input.len()),
                             )?;
                         }
                     }
@@ -329,7 +368,7 @@ fn compress_frame(
                     let is_last = block_end >= input.len();
                     let block = &input[offset..block_end];
 
-                    if block_looks_incompressible(block) {
+                    if skip_match_search(params, input.len(), block) {
                         block_encoder::encode_raw_block(block, is_last, output)?;
                     } else {
                         #[cfg(feature = "ldm")]
@@ -370,7 +409,7 @@ fn compress_frame(
                             is_last,
                             output,
                             &mut workspace,
-                            strategy::use_custom_sequence_tables(params, input.len()),
+                            strategy::block_policy(params, input.len()),
                         )?;
                     }
                     offset = block_end;
@@ -391,9 +430,8 @@ pub fn compress_with_dict(
     dict: &zrip_core::dict::Dictionary,
 ) -> Result<Vec<u8>, CompressError> {
     let total_window = dict.content().len() + input.len();
-    let mut params = strategy::level_params_for_size(level, total_window)
+    let params = strategy::level_params_for_size(level, total_window)
         .ok_or(CompressError::InvalidLevel(level))?;
-    strategy::apply_raw_literals_size_override(&mut params, input.len());
 
     let mut output = Vec::with_capacity(input.len() + 32);
     write_frame_header(&mut output, input.len(), Some(dict.id()), params.window_log)?;
@@ -444,7 +482,7 @@ pub fn compress_with_dict(
                     true,
                     &mut output,
                     &mut workspace,
-                    strategy::use_custom_sequence_tables(&params, input.len()),
+                    strategy::block_policy(&params, input.len()),
                 )?;
             }
         } else {
@@ -489,7 +527,7 @@ pub fn compress_with_dict(
                                 is_last,
                                 &mut output,
                                 &mut workspace,
-                                strategy::use_custom_sequence_tables(&params, input.len()),
+                                strategy::block_policy(&params, input.len()),
                             )?;
                         }
                         offset += chunk_size;
@@ -530,7 +568,7 @@ pub fn compress_with_dict(
                             is_last,
                             &mut output,
                             &mut workspace,
-                            strategy::use_custom_sequence_tables(&params, input.len()),
+                            strategy::block_policy(&params, input.len()),
                         )?;
                         offset += chunk_size;
                     }
@@ -547,9 +585,8 @@ pub fn compress_with_dict(
 }
 
 pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usize, CompressError> {
-    let mut params = strategy::level_params_for_size(level, input.len())
+    let params = strategy::level_params_for_size(level, input.len())
         .ok_or(CompressError::InvalidLevel(level))?;
-    strategy::apply_raw_literals_size_override(&mut params, input.len());
     let mut sink = SliceSink::new(output);
     compress_frame(input, &params, &mut sink)?;
     Ok(sink.pos())
@@ -591,6 +628,87 @@ mod tests {
             let ldm = params.ldm_params.unwrap();
             assert!(ldm.hash_log >= ldm.bucket_size_log);
         }
+    }
+
+    /// Bytes from a skewed alphabet: about 3.5 bits of order-0 entropy per
+    /// byte and few repeated 6-byte strings.
+    fn skewed_bytes(len: usize) -> Vec<u8> {
+        let mut x = 0x2545_F491_4F6C_DD1Du64;
+        (0..len)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                let r = (x >> 32) as u32;
+                b"eeeeeeettttaaoonnissshhrdl  "[(r % 28) as usize] + (r >> 30) as u8
+            })
+            .collect()
+    }
+
+    /// Words from a 64-word vocabulary. Repeats are short and sparse, so a
+    /// sparse match search misses most of them.
+    fn wordy_bytes(len: usize) -> Vec<u8> {
+        const WORDS: &str = "the of and to in is was for on that with as by at \
+            from his her they this have had were which their are but not one \
+            all been when there she would what so if will more no out up into \
+            could them than then some other time very about only upon over \
+            such said great before after little";
+        let words: Vec<&str> = WORDS.split_whitespace().collect();
+        let mut x = 0x9E37_79B9_7F4A_7C15u64;
+        let mut out = Vec::with_capacity(len + 16);
+        while out.len() < len {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            out.extend_from_slice(words[(x >> 58) as usize % words.len()].as_bytes());
+            out.push(b' ');
+        }
+        out.truncate(len);
+        out
+    }
+
+    #[test]
+    fn negative_levels_skip_huffman_on_tiny_inputs() {
+        // No usable matches: only Huffman could shrink these bytes.
+        let data = skewed_bytes(2048);
+        for level in -8..=-1 {
+            let out = compress(&data, level).unwrap();
+            assert!(out.len() > data.len(), "L{level}: {} compressed", out.len());
+        }
+        for level in 1..=4 {
+            let out = compress(&data, level).unwrap();
+            assert!(out.len() * 5 < data.len() * 4, "L{level}: {}", out.len());
+        }
+    }
+
+    #[test]
+    fn negative_levels_still_match_tiny_inputs() {
+        let data = wordy_bytes(2048);
+        let sizes: Vec<usize> = (-8..=-1)
+            .map(|level| compress(&data, level).unwrap().len())
+            .collect();
+        // At least 10% smaller, and no smaller output at a faster level.
+        assert!(sizes.iter().all(|&n| n * 11 < data.len() * 10), "{sizes:?}");
+        assert!(sizes.windows(2).all(|w| w[0] >= w[1]), "{sizes:?}");
+    }
+
+    #[test]
+    fn negative_levels_huffman_code_above_their_raw_limit() {
+        let data = skewed_bytes(32 * 1024);
+        for level in -8..=-1 {
+            let out = compress(&data, level).unwrap();
+            assert!(out.len() * 5 < data.len() * 4, "L{level}: {}", out.len());
+        }
+    }
+
+    #[test]
+    fn faster_levels_keep_raw_literals_longer() {
+        let limits: Vec<usize> = (-8..=-1)
+            .map(|level| strategy::raw_literals_limit(level).unwrap())
+            .collect();
+        assert_eq!(limits.last(), Some(&2048));
+        assert!(limits.windows(2).all(|w| w[0] > w[1]), "{limits:?}");
+        assert_eq!(strategy::raw_literals_limit(1), None);
     }
 
     #[test]

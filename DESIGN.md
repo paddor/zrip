@@ -53,16 +53,16 @@ currently level 1.
 
 | Level | Strategy | Hash table | Window | Min match | Target | Search log | Search strength | Notes |
 |------:|:---------|:-----------|:-------|:---------:|-------:|-----------:|----------------:|:------|
-| -8 | Fast | 32 KiB | 512 KiB | 5 | 7 | 0 | 7 | `force_raw_literals` (zrip-only) |
-| -7 | Fast | 64 KiB | 512 KiB | 5 | 9 | 0 | 7 | Tiny inputs use target 6 |
-| -6 | Fast | 64 KiB | 512 KiB | 5 | 7 | 0 | 7 | |
-| -5 | Fast | 64 KiB | 512 KiB | 5 | 6 | 0 | 7 | |
-| -4 | Fast | 64 KiB | 512 KiB | 5 | 5 | 0 | 7 | |
-| -3 | Fast | 64 KiB | 512 KiB | 5 | 4 | 0 | 7 | |
-| -2 | Fast | 64 KiB | 512 KiB | 5 | 3 | 0 | 7 | |
-| -1 | Fast | 64 KiB | 512 KiB | 5 | 2 | 0 | 7 | |
-| 1 | Fast | 64 KiB | 512 KiB | 4 | 1 | 0 | 8 | default |
-| 2 | Fast | 512 KiB | 1 MiB | 4 | 1 | 0 | 8 | |
+| -8 | Fast | 32 KiB | 512 KiB | 6 | 21 | 0 | 5 | zrip-only |
+| -7 | Fast | 32 KiB | 512 KiB | 6 | 17 | 0 | 7 | |
+| -6 | Fast | 32 KiB | 512 KiB | 6 | 13 | 0 | 7 | |
+| -5 | Fast | 32 KiB | 512 KiB | 6 | 9 | 0 | 7 | |
+| -4 | Fast | 32 KiB | 512 KiB | 6 | 5 | 0 | 7 | |
+| -3 | Fast | 64 KiB | 512 KiB | 6 | 4 | 0 | 7 | |
+| -2 | Fast | 64 KiB | 512 KiB | 6 | 3 | 0 | 7 | |
+| -1 | Fast | 64 KiB | 512 KiB | 6 | 2 | 0 | 7 | |
+| 1 | Fast | 128 KiB | 512 KiB | 6 | 1 | 0 | 7 | default |
+| 2 | Fast | 256 KiB | 1 MiB | 6 | 1 | 0 | 7 | |
 | 3 | DFast | 2x 1 MiB | 2 MiB | 4 | 1 | 1 | 5 | Dual hash; 32-128 KiB uses strength 7 |
 | 4 | DFast | 2x 4 MiB | 16 MiB | 4 | 1 | 0 | 8 | Dual hash |
 
@@ -70,49 +70,42 @@ Negative levels trade ratio for throughput by increasing `target_length`
 (skip acceleration). Higher `target_length` means more positions are skipped
 on consecutive match-finding misses.
 
-**L-8** skips Huffman table construction and always emits raw literal blocks
-with predefined FSE tables. This eliminates the most expensive part of the
-encode pipeline (Huffman tree build, stream encoding, custom FSE table
-estimation) at the cost of compression ratio. The result is a valid zstd
-frame that any decoder handles, but with LZ4-class encode throughput.
+**L-8** is L-7 with a larger step and a lower search strength, so the skip
+distance grows faster through regions without matches. It keeps the full
+encode pipeline and trades a little ratio for speed.
 
-**L-7 through L2** use the full encode pipeline: Huffman-compressed literals
+**L-8 through L2** use the full encode pipeline: Huffman-compressed literals
 (with treeless reuse across blocks) and predefined or custom FSE tables for
 sequences, whichever produces smaller output.
 
 **L3 and L4** use the DFast strategy with two hash tables (short 4-byte and
 long 8-byte matches) for better match quality at lower throughput.
 
-**Two-tier raw literals decision.** Avoids the expensive
-build-Huffman-table-encode-discard cycle for blocks where Huffman overhead
-exceeds savings:
+**Raw literals decision.** The negative levels keep dense literals raw:
+Huffman coding costs more time than it saves on them. `block_policy` in
+`strategy.rs` sets an order-0 entropy limit of 6.25 bits per byte at L-8 to
+L-1. `encode_literals_section` measures the full
+histogram for up to 4 KiB of literals and a 4 KiB sample for longer runs.
 
-1. Size override (`strategy.rs:apply_raw_literals_size_override`): L-8 always
-   uses raw literals. Other Fast levels only force raw literals when
-   `min_match >= 5`, `target_length == 7`, and the input is <= 16 KiB. With
-   the built-in table, this applies to L-6. Other levels rely on the entropy
-   pre-check.
-
-2. Entropy pre-check (`block_encoder.rs:huf_worth_trying`): for blocks
-   <= 32 KiB that passed the size ramp, estimates compressed size from a
-   byte histogram using integer-only fixed-point log2. Skips Huffman if
-   estimated savings (including tree description overhead) are below
-   ~3%. Also bails immediately if `max_sym > 128` (high byte range means
-   expensive tree description for marginal gain). Blocks > 32 KiB always
-   try Huffman since tree overhead is negligible at that scale.
+Small inputs on the negative levels keep all literals raw and use predefined
+sequence tables (`raw_literals_limit`): up to 2 KiB at L-1, growing 1.5x or
+1.33x per level to 24 KiB at L-8. Building a Huffman table costs a few
+microseconds regardless of input size, which dominates messages of a few
+KiB. Without Huffman, matches are the only compression, so the negative
+levels use a denser match search on these inputs (`small_input_search`:
+target length 8 at L-8 down to 1 at L-1, 5-byte minimum match). These inputs
+also skip the incompressibility sampling (`skip_match_search`), which costs
+about as much as their match search.
 
 
 ## Block encoder (`crates/encode/src/block_encoder.rs`)
 
 Per-block decisions:
 
-**Literals**: Level -8 always emits raw literal blocks (skips Huffman tree
-construction entirely). Other Fast levels may also force raw literals for
-small inputs through the per-level raw-literal size ramp in
-`strategy.rs:apply_raw_literals_size_override`. All other blocks try
-Huffman-compressed literals with treeless reuse across blocks via
-`prev_huffman`. For literal blocks >= 1024 bytes, encodes into 4 independent
-streams to enable decoder-side parallelism.
+**Literals**: Blocks try Huffman-compressed literals, subject to the
+entropy limit above, with treeless reuse across blocks via `prev_huffman`.
+For literal blocks >= 1024 bytes, encodes into 4 independent streams to
+enable decoder-side parallelism.
 
 **3-way FSE table mode selection.** Compares predefined, custom
 (data-derived), and repeat (carry-over from previous block or dict) FSE
@@ -132,7 +125,8 @@ one lookup. ~1.3 KiB total footprint vs ~20 KiB for full tables.
 
 **Incompressibility fast path**: `block_looks_incompressible()` samples the
 first 1024 bytes. Skips compression if >= 200 distinct byte values and max
-frequency < 1/24. Applied before entering the match finder.
+frequency < 1/24. Applied before entering the match finder, except on
+inputs that keep raw literals.
 
 **Fallback**: If the compressed block >= source size, rep offsets are reverted
 and a raw block is emitted.

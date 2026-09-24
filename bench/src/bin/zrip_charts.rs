@@ -303,13 +303,14 @@ impl Config {
                 "structured-zstd",
                 "ruzstd",
             ],
-            small_codecs: vec!["C zstd", "zrip", "structured-zstd"],
+            small_codecs: vec!["C zstd", "zrip", "structured-zstd", "lz4rip"],
             small_decode_codecs: vec![
                 "C zstd",
                 "zrip",
                 "zrip paranoid",
                 "structured-zstd",
                 "ruzstd",
+                "lz4rip",
             ],
         }
     }
@@ -571,7 +572,7 @@ fn load_small_decode_data(
     let search_dirs = if decode_cmp.is_dir() {
         vec![decode_cmp]
     } else {
-        vec![base.join("small"), base]
+        vec![base.join("small"), base.clone()]
     };
     let common_bitstream =
         search_dirs.len() == 1 && search_dirs[0].ends_with(Path::new("decode_cmp"));
@@ -583,15 +584,27 @@ fn load_small_decode_data(
             continue;
         }
         for &codec in codecs {
-            load_rows_from_path(&level_dir.join(codec_file(codec)), codec, 0, None, &mut out);
+            if codec != "lz4rip" {
+                load_rows_from_path(&level_dir.join(codec_file(codec)), codec, 0, None, &mut out);
+            }
         }
+    }
+    // lz4rip cannot decode zstd; its rows decode its own LZ4 blocks.
+    if codecs.contains(&"lz4rip") {
+        let path = base
+            .join("small")
+            .join(format!("L{LEVEL}"))
+            .join(codec_file("lz4rip"));
+        load_rows_from_path(&path, "lz4rip", 0, None, &mut out);
     }
     let out = out
         .into_iter()
         .map(|(codec, rows)| {
             let mut latest = BTreeMap::new();
             for row in rows {
-                if row.level == DECODE_LEVEL && is_small_name(&row.input, SMALL_DECODE_SUFFIXES) {
+                if row.level == small_decode_level(&codec)
+                    && is_small_name(&row.input, SMALL_DECODE_SUFFIXES)
+                {
                     latest.insert(row.input.clone(), row);
                 }
             }
@@ -599,6 +612,15 @@ fn load_small_decode_data(
         })
         .collect();
     (out, common_bitstream)
+}
+
+/// Level of the small-decode rows for `codec`. lz4rip has a single level.
+fn small_decode_level(codec: &str) -> i32 {
+    if codec == "lz4rip" {
+        LEVEL
+    } else {
+        DECODE_LEVEL
+    }
 }
 
 fn load_rows_from_path(
@@ -2097,19 +2119,24 @@ fn draw_small_encode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
                 }
             }
             let (lo, hi) = band_envelope(&rows, prefix, &codec_levels, map_x, map_y);
+            // A single-level codec (lz4rip) has no band: one solid line.
+            let single = codec_levels.len() == 1;
             polyline(&area, &hi, style.color, 2, 1.0, false)?;
-            polyline(&area, &lo, style.color, 2, 1.0, true)?;
-            for (pts, label) in [
-                (&hi, fmt_level(*codec_levels.first().unwrap())),
+            if !single {
+                polyline(&area, &lo, style.color, 2, 1.0, true)?;
+            }
+            let ends = [
+                (&hi, fmt_scatter_level(codec, codec_levels[0])),
                 (&lo, fmt_level(*codec_levels.last().unwrap())),
-            ] {
-                for &(x, y) in pts {
+            ];
+            for (pts, label) in &ends[..if single { 1 } else { 2 }] {
+                for &(x, y) in pts.iter() {
                     dot(&area, x, y, 3, style.color)?;
                 }
                 if let Some(&(x, y)) = pts.last() {
                     text(
                         &area,
-                        label,
+                        label.as_str(),
                         px(x + 6.0),
                         px(y),
                         7,
@@ -2158,7 +2185,7 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
         &data,
         &cfg.small_decode_codecs,
         &small_inputs,
-        |_| vec![DECODE_LEVEL],
+        |codec| vec![small_decode_level(codec)],
         "small decode",
     )?;
     let width = 830;
@@ -2171,11 +2198,14 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
     let height = (top + total_h + 125.0) as u32;
     let path = output_path(out_dir, "small_decode.svg");
     let area = root(&path, width, height)?;
-    let subtitle = if common {
+    let mut subtitle = if common {
         format!("C zstd L{DECODE_LEVEL} bitstream")
     } else {
         format!("L{DECODE_LEVEL}")
     };
+    if data.contains_key("lz4rip") {
+        subtitle.push_str("; lz4rip: LZ4 blocks");
+    }
     chart_header(
         &area,
         width,
@@ -2188,21 +2218,24 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
         let p_bot = p_top + panel_h;
         let x_left = left;
         let x_right = left + panel_w;
+        let mut panel_min = f64::INFINITY;
         let mut panel_max: f64 = 0.0;
         for codec in &cfg.small_decode_codecs {
             let rows = data.get(*codec).cloned().unwrap_or_default();
             for suffix in SMALL_DECODE_SUFFIXES {
                 if let Some(v) = get_decode_mbs(&rows, &format!("{prefix}{suffix}")) {
+                    panel_min = panel_min.min(v);
                     panel_max = panel_max.max(v);
                 }
             }
         }
-        if panel_max <= 0.0 {
+        if !panel_min.is_finite() || panel_max <= 0.0 {
             continue;
         }
+        let y_min = panel_min / 1.15;
         let y_max = panel_max * 1.15;
         draw_small_panel_frame(
-            &area, prefix, x_left, x_right, p_top, p_bot, 0.0, y_max, false,
+            &area, prefix, x_left, x_right, p_top, p_bot, y_min, y_max, true,
         )?;
         let map_x = |size: usize| {
             x_left
@@ -2210,7 +2243,10 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
                     / (200_000.0_f64.log10() - 400.0_f64.log10())
                     * (x_right - x_left)
         };
-        let map_y = |mbs: f64| p_bot - (mbs / y_max) * (p_bot - p_top);
+        let map_y = |mbs: f64| {
+            p_bot
+                - (mbs.log10() - y_min.log10()) / (y_max.log10() - y_min.log10()) * (p_bot - p_top)
+        };
         draw_small_x_grid(
             &area,
             x_left,
@@ -2221,22 +2257,21 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
             SMALL_DECODE_SIZES,
             SIZE_DECODE_LABELS,
         )?;
-        let step = nice_step(y_max, 5);
-        let mut v = step;
-        while v < y_max {
-            let y = map_y(v);
-            line(&area, x_left, y, x_right, y, GRID, 1)?;
-            text(
-                &area,
-                format!("{v:.0}"),
-                px(x_left - 8.0),
-                px(y),
-                9,
-                MUTED,
-                HPos::Right,
-                false,
-            )?;
-            v += step;
+        for tick in log_ticks(y_min, y_max) {
+            let y = map_y(tick);
+            if p_top + 5.0 < y && y < p_bot - 5.0 {
+                line(&area, x_left, y, x_right, y, GRID, 1)?;
+                text(
+                    &area,
+                    format!("{tick:.0}"),
+                    px(x_left - 8.0),
+                    px(y),
+                    9,
+                    MUTED,
+                    HPos::Right,
+                    false,
+                )?;
+            }
         }
         for codec in &cfg.small_decode_codecs {
             let rows = data.get(*codec).cloned().unwrap_or_default();
@@ -2260,7 +2295,14 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
             }
         }
     }
-    vtext(&area, "decode MB/s", 20, px(top + total_h / 2.0), 11, TEXT)?;
+    vtext(
+        &area,
+        "decode MB/s (log scale)",
+        20,
+        px(top + total_h / 2.0),
+        11,
+        TEXT,
+    )?;
     draw_marker_legend(
         &area,
         cfg,

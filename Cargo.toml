@@ -17,7 +17,7 @@ include = ["src/**/*", "README.md", "LICENSE", "CHANGELOG.md", "DESIGN.md", "SAF
 [features]
 default = ["std", "frame", "ldm", "simd"]
 std = ["alloc", "zrip-core/std", "zrip-encode/std", "zrip-decode/std"]
-simd = ["zrip-decode/simd"]
+simd = ["zrip-decode/simd", "zrip-encode/simd"]
 alloc = ["zrip-core/alloc", "zrip-encode/alloc", "zrip-decode/alloc"]
 frame = ["std", "zrip-encode/frame", "zrip-decode/frame"]
 ldm = ["std", "zrip-encode/ldm"]

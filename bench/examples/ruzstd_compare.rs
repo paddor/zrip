@@ -30,17 +30,36 @@ fn cpu_nanos() -> u64 {
     ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
 }
 
+/// Minimum CPU time per timed batch. `CLOCK_PROCESS_CPUTIME_ID` is a real
+/// syscall, so reading it once per call would dominate tiny inputs.
+const MIN_BATCH_NS: u64 = 100_000;
+
 fn bench_loop<F: FnMut()>(warmup: usize, target_ns: u64, rounds: usize, mut f: F) -> f64 {
     for _ in 0..warmup {
         f();
+    }
+    // Double the batch until one batch runs long enough that the timer read
+    // costs well under 1% of it.
+    let mut batch = 1u64;
+    loop {
+        let start = cpu_nanos();
+        for _ in 0..batch {
+            std::hint::black_box(&mut f)();
+        }
+        if cpu_nanos() - start >= MIN_BATCH_NS || batch >= 1 << 20 {
+            break;
+        }
+        batch *= 2;
     }
     let mut best = f64::MAX;
     for _ in 0..rounds {
         let mut iters = 0u64;
         let start = cpu_nanos();
         loop {
-            std::hint::black_box(&mut f)();
-            iters += 1;
+            for _ in 0..batch {
+                std::hint::black_box(&mut f)();
+            }
+            iters += batch;
             if cpu_nanos() - start >= target_ns {
                 break;
             }

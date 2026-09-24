@@ -269,8 +269,7 @@ pub fn build_huffman_decode_table(
     let mut all_weights: Vec<u8> = weights.to_vec();
     all_weights.push(last_weight);
 
-    let table_size = 1usize << table_log;
-    let mut table = vec![HuffmanDecodeEntry::default(); table_size];
+    let mut table = vec![HuffmanDecodeEntry::default(); super::DECODE_TABLE_SIZE];
 
     let max_w = table_log as u8 + 1;
 
@@ -355,10 +354,9 @@ pub fn build_huffman_decode_table_into(
     all_weights.extend_from_slice(weights);
     all_weights.push(last_weight);
 
-    let table_size = 1usize << table_log;
-    if table.len() != table_size {
+    if table.len() != super::DECODE_TABLE_SIZE {
         table.clear();
-        table.resize(table_size, HuffmanDecodeEntry::default());
+        table.resize(super::DECODE_TABLE_SIZE, HuffmanDecodeEntry::default());
     }
 
     let max_w = table_log as u8 + 1;
@@ -437,9 +435,9 @@ mod tests {
         let weights = vec![2];
         let (table, table_log) = build_huffman_decode_table(&weights).unwrap();
         assert_eq!(table_log, 2);
-        assert_eq!(table.len(), 4);
-        let sym0_count = table.iter().filter(|e| e.symbol == 0).count();
-        let sym1_count = table.iter().filter(|e| e.symbol == 1).count();
+        assert_eq!(table.len(), crate::huffman::DECODE_TABLE_SIZE);
+        let sym0_count = table[..4].iter().filter(|e| e.symbol == 0).count();
+        let sym1_count = table[..4].iter().filter(|e| e.symbol == 1).count();
         assert_eq!(sym0_count, 2);
         assert_eq!(sym1_count, 2);
     }

@@ -87,19 +87,25 @@ impl<'a> BlockOutput<'a> {
 
     #[inline(always)]
     fn extend_slice_range_in_block(&mut self, src: &[u8], start: usize, len: usize) {
-        if len == 0 {
-            return;
-        }
         #[cfg(not(feature = "paranoid"))]
         unsafe {
             debug_assert!(self.vec.len() + len + WILDCOPY_OVERLENGTH <= self.vec.capacity());
             // SAFETY: The caller proves `src[start..start + len]` is readable
             // and that this write stays in the reserved block output range.
-            fast_extend_from_ptr(self.vec, src.as_ptr().add(start), len);
+            fast_extend_from_ptr(self.vec, src.as_ptr().add(start), len, src.len() - start);
         }
         #[cfg(feature = "paranoid")]
         {
-            self.vec.extend_from_slice(&src[start..start + len]);
+            // Short runs append a fixed 16 bytes and truncate: a constant-size
+            // copy has no length-dependent branches. `new` reserved the slack,
+            // so neither step reallocates.
+            if len <= 16 && src.len() - start >= 16 {
+                let end = self.vec.len() + len;
+                self.vec.extend_from_slice(&src[start..start + 16]);
+                self.vec.truncate(end);
+            } else {
+                self.vec.extend_from_slice(&src[start..start + len]);
+            }
         }
     }
 }
@@ -323,23 +329,37 @@ unsafe fn copy_64(src: *const u8, dst: *mut u8) {
 
 /// Copy `src` into the end of `vec` using 16-byte chunk copies.
 ///
-/// All reads stay within `src` bounds (no wild over-read).
+/// All reads stay within the `avail` readable source bytes. When at least 16
+/// are available, the first 16 bytes are copied unconditionally, as C zstd
+/// does: the copy length then needs no size-class branches, which mispredict
+/// on the varying literal lengths of real data.
 ///
 /// # Safety
 ///
-/// `sp..sp+len` must be readable, and `vec` must have at least `len + 16`
-/// bytes of spare capacity from its current end.
+/// `sp..sp+avail` must be readable with `len <= avail`, and `vec` must have
+/// at least `len + 16` bytes of spare capacity from its current end.
 #[cfg(not(feature = "paranoid"))]
 #[inline(always)]
-unsafe fn fast_extend_from_ptr(vec: &mut Vec<u8>, sp: *const u8, len: usize) {
-    if len == 0 {
-        return;
-    }
+unsafe fn fast_extend_from_ptr(vec: &mut Vec<u8>, sp: *const u8, len: usize, avail: usize) {
+    debug_assert!(len <= avail);
     debug_assert!(vec.len() + len + 16 <= vec.capacity());
-    // SAFETY: The caller supplies a readable source range and enough spare
-    // capacity for the destination, including the short-copy headroom.
+    // SAFETY: The caller supplies `avail` readable source bytes and enough
+    // spare capacity for the destination, including the 16-byte headroom.
     unsafe {
         let dst = vec.as_mut_ptr().add(vec.len());
+        if avail >= 16 {
+            copy_16(sp, dst);
+            let mut off = 16usize;
+            while off < len {
+                copy_16(sp.add(off.min(len - 16)), dst.add(off.min(len - 16)));
+                off += 16;
+            }
+            vec.set_len(vec.len() + len);
+            return;
+        }
+        if len == 0 {
+            return;
+        }
         if len >= 16 {
             let mut off = 0usize;
             while off + 16 <= len {
@@ -644,12 +664,21 @@ mod tests {
 
     #[test]
     fn fast_extend_from_slice_all_sizes() {
+        // `tail` bytes of source follow the copied run: with 16 or more the
+        // copy reads a fixed 16 bytes, with fewer it copies exactly.
         for len in 0..=64 {
-            let src: Vec<u8> = (0..len as u8).collect();
-            let mut dst = Vec::new();
-            let mut output = BlockOutput::new(&mut dst, len);
-            output.extend_literals_range(&src, 0, len).unwrap();
-            assert_eq!(dst, src, "len={len}");
+            for tail in [0, 1, 15, 16, 17, 40] {
+                for start in [0, 3] {
+                    let src: Vec<u8> = (0..(start + len + tail) as u8).collect();
+                    let mut dst = vec![0xEEu8; 5];
+                    {
+                        let mut output = BlockOutput::new(&mut dst, len);
+                        output.extend_literals_range(&src, start, len).unwrap();
+                    }
+                    assert_eq!(dst[..5], [0xEE; 5]);
+                    assert_eq!(dst[5..], src[start..start + len], "len={len} tail={tail}");
+                }
+            }
         }
     }
 
@@ -843,19 +872,21 @@ mod kani_proofs {
 
     // -- Primitive: fast_extend_from_ptr --
 
-    /// All copy tiers (1, 2, 3, 4..7, 8..15, 16+) stay within source
-    /// and destination bounds given the documented precondition
-    /// (len + 16 bytes of spare capacity).
+    /// All copy tiers (unconditional 16-byte, 1, 2, 3, 4..7, 8..15, 16+)
+    /// stay within source and destination bounds given the documented
+    /// precondition (len <= avail readable bytes, len + 16 bytes of spare
+    /// capacity).
     #[kani::proof]
-    #[kani::unwind(5)] // 64/16 = 4 iterations max in the 16-byte loop
+    #[kani::unwind(6)] // 64/16 = 4 iterations max in the 16-byte loops
     fn fast_extend_from_ptr_no_oob() {
         let src = [0u8; 64];
         let len: usize = kani::any();
-        kani::assume(len >= 1 && len <= 64);
+        let avail: usize = kani::any();
+        kani::assume(len <= avail && avail <= 64);
 
         let mut vec = Vec::with_capacity(len + 16);
         unsafe {
-            fast_extend_from_ptr(&mut vec, src.as_ptr(), len);
+            fast_extend_from_ptr(&mut vec, src.as_ptr(), len, avail);
         }
         assert_eq!(vec.len(), len);
     }

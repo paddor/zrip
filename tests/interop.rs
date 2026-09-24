@@ -38,6 +38,57 @@ fn roundtrip_all_levels_random_c_cross_validate() {
     }
 }
 
+/// Literals whose optimal Huffman tree is deeper than 11 bits: a few very
+/// common symbols and a tail of rare ones, in pseudo-random order.
+#[test]
+fn roundtrip_deep_huffman_tree_c_cross_validate() {
+    let mut cumulative = Vec::new();
+    let (mut a, mut b, mut total) = (1u32, 1u32, 0u32);
+    for _ in 0..20 {
+        total += a;
+        cumulative.push(total);
+        (a, b) = (b, a + b);
+    }
+    let original: Vec<u8> = (0..200_000u32)
+        .map(|i| {
+            let r = i.wrapping_mul(KNUTH).rotate_left(7) % total;
+            cumulative.iter().position(|&c| r < c).unwrap() as u8 + b'a'
+        })
+        .collect();
+    for level in [-8, -7, -5, -1, 1, 3, 4] {
+        let compressed = zrip::compress(&original, level).unwrap();
+        let c_decompressed = zstd::decode_all(&compressed[..])
+            .unwrap_or_else(|e| panic!("level {level} C decompress: {e}"));
+        assert_eq!(c_decompressed, original, "level {level} C roundtrip");
+        assert_eq!(zrip::decompress(&compressed).unwrap(), original);
+    }
+}
+
+/// Literals that Huffman-code well but contain almost no repeats: blocks
+/// without sequences must still be compressed, not stored raw.
+#[test]
+fn literals_only_blocks_compress_and_c_decodes() {
+    let original: Vec<u8> = (0..65_536u32)
+        .map(|i| {
+            let r = i.wrapping_mul(KNUTH).rotate_left(13).wrapping_mul(KNUTH);
+            // Skewed toward low symbols: about 5 bits of entropy per byte.
+            ((r >> 26) & (r >> 20) & 63) as u8 + b' '
+        })
+        .collect();
+    for level in [-7, -6, -5, -1, 1, 3] {
+        let compressed = zrip::compress(&original, level).unwrap();
+        assert!(
+            compressed.len() * 10 < original.len() * 9,
+            "level {level}: {} bytes from {}",
+            compressed.len(),
+            original.len()
+        );
+        let c_decompressed = zstd::decode_all(&compressed[..]).unwrap();
+        assert_eq!(c_decompressed, original, "level {level} C roundtrip");
+        assert_eq!(zrip::decompress(&compressed).unwrap(), original);
+    }
+}
+
 #[test]
 fn roundtrip_zeros_c_cross_validate() {
     let original = vec![0u8; 100_000];

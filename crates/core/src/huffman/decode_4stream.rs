@@ -1,8 +1,8 @@
 use crate::bitstream::primitives as bitstream_primitives;
 use crate::bitstream::reader_reverse::ReverseBitReader;
 use crate::error::DecompressError;
-use crate::huffman::HuffmanDecodeEntry;
 use crate::huffman::primitives as huffman_primitives;
+use crate::huffman::{DECODE_TABLE_SIZE, HuffmanDecodeEntry};
 
 #[cfg(all(target_arch = "x86_64", not(feature = "paranoid")))]
 #[target_feature(enable = "bmi2")]
@@ -156,48 +156,54 @@ pub(super) fn decode_4_streams_core(
         }};
     }
 
-    while o1_idx + 5 <= seg1_end
-        && o2_idx + 5 <= seg2_end
-        && o3_idx + 5 <= seg3_end
-        && o4_idx + 5 <= seg4_end
-        && p1_idx >= fast1_limit
-        && p2_idx >= fast2_limit
-        && p3_idx >= fast3_limit
-        && p4_idx >= fast4_limit
-        && can_refill_fast(bc1, p1_idx, r1.data.len())
-        && can_refill_fast(bc2, p2_idx, r2.data.len())
-        && can_refill_fast(bc3, p3_idx, r3.data.len())
-        && can_refill_fast(bc4, p4_idx, r4.data.len())
-    {
-        refill!(c1, bc1, p1_idx, r1.data);
-        refill!(c2, bc2, p2_idx, r2.data);
-        refill!(c3, bc3, p3_idx, r3.data);
-        refill!(c4, bc4, p4_idx, r4.data);
+    // A fixed-size table indexed with a mask needs no bounds checks.
+    let fixed: &[HuffmanDecodeEntry; DECODE_TABLE_SIZE] = table
+        .first_chunk()
+        .ok_or(DecompressError::BadHuffmanStream)?;
+    const INDEX_MASK: usize = DECODE_TABLE_SIZE - 1;
 
-        decode_one!(c1, bc1, out1, o1_idx);
-        decode_one!(c2, bc2, out2, o2_idx);
-        decode_one!(c3, bc3, out3, o3_idx);
-        decode_one!(c4, bc4, out4, o4_idx);
+    macro_rules! decode_five {
+        ($c:expr, $bc:expr, $output:expr, $o_idx:expr) => {{
+            let mut syms = [0u8; 5];
+            for s in &mut syms {
+                let idx = (($c << ($bc & 63)) >> (64 - tl)) as usize;
+                let e = fixed[idx & INDEX_MASK];
+                *s = e.symbol;
+                $bc += e.num_bits as u32;
+            }
+            $output[$o_idx..$o_idx + 5].copy_from_slice(&syms);
+            $o_idx += 5;
+        }};
+    }
 
-        decode_one!(c1, bc1, out1, o1_idx);
-        decode_one!(c2, bc2, out2, o2_idx);
-        decode_one!(c3, bc3, out3, o3_idx);
-        decode_one!(c4, bc4, out4, o4_idx);
+    // Rounds a stream can run without further checks. A round refills (the
+    // pointer moves back at most 7 bytes: fewer than 64 bits were consumed)
+    // and decodes five symbols (at most 55 bits with table_log <= 11).
+    #[inline(always)]
+    fn safe_rounds(o_idx: usize, end: usize, p_idx: usize, limit: usize) -> usize {
+        let by_output = end.saturating_sub(o_idx) / 5;
+        let by_input = p_idx.saturating_sub(limit) / 7;
+        by_output.min(by_input)
+    }
 
-        decode_one!(c1, bc1, out1, o1_idx);
-        decode_one!(c2, bc2, out2, o2_idx);
-        decode_one!(c3, bc3, out3, o3_idx);
-        decode_one!(c4, bc4, out4, o4_idx);
-
-        decode_one!(c1, bc1, out1, o1_idx);
-        decode_one!(c2, bc2, out2, o2_idx);
-        decode_one!(c3, bc3, out3, o3_idx);
-        decode_one!(c4, bc4, out4, o4_idx);
-
-        decode_one!(c1, bc1, out1, o1_idx);
-        decode_one!(c2, bc2, out2, o2_idx);
-        decode_one!(c3, bc3, out3, o3_idx);
-        decode_one!(c4, bc4, out4, o4_idx);
+    loop {
+        let rounds = safe_rounds(o1_idx, seg1_end, p1_idx, fast1_limit)
+            .min(safe_rounds(o2_idx, seg2_end, p2_idx, fast2_limit))
+            .min(safe_rounds(o3_idx, seg3_end, p3_idx, fast3_limit))
+            .min(safe_rounds(o4_idx, seg4_end, p4_idx, fast4_limit));
+        if rounds == 0 {
+            break;
+        }
+        for _ in 0..rounds {
+            refill!(c1, bc1, p1_idx, r1.data);
+            refill!(c2, bc2, p2_idx, r2.data);
+            refill!(c3, bc3, p3_idx, r3.data);
+            refill!(c4, bc4, p4_idx, r4.data);
+            decode_five!(c1, bc1, out1, o1_idx);
+            decode_five!(c2, bc2, out2, o2_idx);
+            decode_five!(c3, bc3, out3, o3_idx);
+            decode_five!(c4, bc4, out4, o4_idx);
+        }
     }
 
     macro_rules! finish_fast {

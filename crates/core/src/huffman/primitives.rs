@@ -27,10 +27,13 @@ pub(crate) fn huf_output_write(output: &mut [u8], pos: usize, val: u8) {
     output[pos] = val;
 }
 
+/// Forward bit-output buffer for Huffman streams.
+///
+/// The vector is zero-filled to the reserved size up front, so every write is
+/// a plain in-bounds slice store. `finish` truncates it to the stream length.
 #[cfg(feature = "alloc")]
 pub(crate) struct BitstreamScratch<'a> {
     buf: &'a mut Vec<u8>,
-    initialized: usize,
 }
 
 #[cfg(feature = "alloc")]
@@ -38,83 +41,37 @@ impl<'a> BitstreamScratch<'a> {
     #[inline(always)]
     pub(crate) fn new(buf: &'a mut Vec<u8>, reserve: usize) -> Self {
         buf.clear();
-        buf.reserve(reserve);
-        Self {
-            buf,
-            initialized: 0,
-        }
+        buf.resize(reserve, 0);
+        Self { buf }
     }
 
     #[inline(always)]
     pub(crate) fn flush(&mut self, pos: usize, bits: u64) {
-        let needed = pos + 8;
-        self.ensure_capacity(needed);
-
-        #[cfg(not(feature = "paranoid"))]
-        {
-            // SAFETY: ensure_capacity proves the 8-byte write fits in the Vec
-            // allocation. initialized tracks the largest written range before
-            // finish exposes bytes through the Vec length.
-            unsafe {
-                (self.buf.as_mut_ptr().add(pos) as *mut u64).write_unaligned(bits.to_le());
-            }
+        match self.buf.get_mut(pos..pos + 8) {
+            Some(dst) => dst.copy_from_slice(&bits.to_le_bytes()),
+            None => self.grow_and_flush(pos, bits),
         }
+    }
 
-        #[cfg(feature = "paranoid")]
-        {
-            if self.buf.len() < needed {
-                self.buf.resize(needed, 0);
-            }
-            self.buf[pos..needed].copy_from_slice(&bits.to_le_bytes());
-        }
-
-        self.initialized = self.initialized.max(needed);
+    #[cold]
+    #[inline(never)]
+    fn grow_and_flush(&mut self, pos: usize, bits: u64) {
+        let needed = (pos + 8).max(self.buf.len() * 2);
+        self.buf.resize(needed, 0);
+        self.buf[pos..pos + 8].copy_from_slice(&bits.to_le_bytes());
     }
 
     #[inline(always)]
     pub(crate) fn write_byte(&mut self, pos: usize, val: u8) {
-        let needed = pos + 1;
-        self.ensure_capacity(needed);
-
-        #[cfg(not(feature = "paranoid"))]
-        {
-            // SAFETY: ensure_capacity proves the byte write fits in the Vec
-            // allocation. initialized tracks the byte before finish exposes it.
-            unsafe { *self.buf.as_mut_ptr().add(pos) = val }
+        if pos >= self.buf.len() {
+            self.buf.resize(pos + 1, 0);
         }
-
-        #[cfg(feature = "paranoid")]
-        {
-            if self.buf.len() < needed {
-                self.buf.resize(needed, 0);
-            }
-            self.buf[pos] = val;
-        }
-
-        self.initialized = self.initialized.max(needed);
+        self.buf[pos] = val;
     }
 
     #[inline(always)]
     pub(crate) fn finish(&mut self, len: usize) {
-        assert!(len <= self.initialized);
-
-        #[cfg(not(feature = "paranoid"))]
-        {
-            // SAFETY: flush and write_byte initialized every byte range that
-            // callers expose. finish refuses to expose bytes beyond that range.
-            unsafe { self.buf.set_len(len) }
-        }
-
-        #[cfg(feature = "paranoid")]
-        {
-            self.buf.truncate(len);
-        }
-    }
-
-    #[inline(always)]
-    fn ensure_capacity(&mut self, needed: usize) {
-        if needed > self.buf.capacity() {
-            self.buf.reserve(needed - self.buf.capacity());
-        }
+        assert!(len <= self.buf.len());
+        self.buf.truncate(len);
     }
 }

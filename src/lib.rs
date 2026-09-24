@@ -21,7 +21,7 @@
 //!
 //! | Level | Strategy | Notes |
 //! |-------|----------|-------|
-//! | -8 | Fast | Always raw literals, closest to LZ4 speed |
+//! | -8 | Fast | zrip-only, faster than L-7 at a slightly lower ratio |
 //! | -7..=-1 | Fast | Fastest encode, lowest ratio |
 //! | 0 | | Library default (currently level 1) |
 //! | 1..=2 | Fast | Good balance for network transfers |

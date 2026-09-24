@@ -4,7 +4,7 @@
 12-file Silesia: Pipeline @100 MB/s geomean, L-7..L4 (ruzstd L1)
 </text>
 <text x="350" y="40" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
-Linux VM on a 2018 Mac Mini, Intel Core i7-8700B @ 3.20GHz, 12 cores, performance governor, turbo off
+Linux VM on a 2018 Mac Mini, Intel Core i7-8700B @ 3.20GHz, performance governor, turbo off
 </text>
 <text x="22" y="188" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#E6EDF3" font-weight="bold" transform="rotate(270, 22, 188)">
 seconds / GB
@@ -28,15 +28,15 @@ seconds / GB
 <text x="151" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 C zstd
 </text>
-<rect x="223" y="281" width="80" height="32" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="223" y="250" width="80" height="31" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="223" y="239" width="80" height="11" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="223" y="286" width="80" height="27" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="223" y="257" width="80" height="29" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="223" y="246" width="80" height="11" opacity="1" fill="#F87171" stroke="none"/>
 <text x="263" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 zrip
 </text>
-<rect x="335" y="270" width="80" height="43" opacity="1" fill="#F472B6" stroke="none"/>
-<rect x="335" y="238" width="80" height="32" opacity="1" fill="#C05A92" stroke="none"/>
-<rect x="335" y="225" width="80" height="13" opacity="1" fill="#F472B6" stroke="none"/>
+<rect x="335" y="283" width="80" height="30" opacity="1" fill="#F472B6" stroke="none"/>
+<rect x="335" y="253" width="80" height="30" opacity="1" fill="#C05A92" stroke="none"/>
+<rect x="335" y="241" width="80" height="12" opacity="1" fill="#F472B6" stroke="none"/>
 <text x="375" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 zrip paranoid
 </text>

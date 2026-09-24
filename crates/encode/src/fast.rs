@@ -142,6 +142,15 @@ pub(crate) fn compress_fast_block(
             hash_table,
             sequences,
         ),
+        (6, _) => compress_fast_block_mls6(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
         (5..7, 13) => compress_fast_block_h13_mls5(
             src,
             block_start,
@@ -151,7 +160,7 @@ pub(crate) fn compress_fast_block(
             hash_table,
             sequences,
         ),
-        (5..7, _) => compress_fast_block_impl::<0, 5>(
+        (5..7, _) => compress_fast_block_mls5(
             src,
             block_start,
             block_end,
@@ -160,7 +169,7 @@ pub(crate) fn compress_fast_block(
             hash_table,
             sequences,
         ),
-        _ => compress_fast_block_impl::<0, 4>(
+        _ => compress_fast_block_mls4(
             src,
             block_start,
             block_end,
@@ -170,6 +179,70 @@ pub(crate) fn compress_fast_block(
             sequences,
         ),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compress_fast_block_mls5(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    simd_body!(compress_fast_block_impl::<0, 5>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compress_fast_block_mls4(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    simd_body!(compress_fast_block_impl::<0, 4>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_fast_block_mls6(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    simd_body!(compress_fast_block_impl::<0, 6>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -183,7 +256,7 @@ fn compress_fast_block_h14_mls4(
     hash_table: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_fast_block_impl::<14, 4>(
+    simd_body!(compress_fast_block_impl::<14, 4>(
         src,
         block_start,
         block_end,
@@ -191,7 +264,7 @@ fn compress_fast_block_h14_mls4(
         rep_offsets,
         hash_table,
         sequences,
-    );
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -205,7 +278,7 @@ fn compress_fast_block_h15_mls4(
     hash_table: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_fast_block_impl::<15, 4>(
+    simd_body!(compress_fast_block_impl::<15, 4>(
         src,
         block_start,
         block_end,
@@ -213,7 +286,7 @@ fn compress_fast_block_h15_mls4(
         rep_offsets,
         hash_table,
         sequences,
-    );
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -227,7 +300,7 @@ fn compress_fast_block_h16_mls4(
     hash_table: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_fast_block_impl::<16, 4>(
+    simd_body!(compress_fast_block_impl::<16, 4>(
         src,
         block_start,
         block_end,
@@ -235,7 +308,7 @@ fn compress_fast_block_h16_mls4(
         rep_offsets,
         hash_table,
         sequences,
-    );
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -249,7 +322,7 @@ fn compress_fast_block_h17_mls4(
     hash_table: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_fast_block_impl::<17, 4>(
+    simd_body!(compress_fast_block_impl::<17, 4>(
         src,
         block_start,
         block_end,
@@ -257,7 +330,7 @@ fn compress_fast_block_h17_mls4(
         rep_offsets,
         hash_table,
         sequences,
-    );
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -271,7 +344,7 @@ fn compress_fast_block_h13_mls5(
     hash_table: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_fast_block_impl::<13, 5>(
+    simd_body!(compress_fast_block_impl::<13, 5>(
         src,
         block_start,
         block_end,
@@ -279,7 +352,7 @@ fn compress_fast_block_h13_mls5(
         rep_offsets,
         hash_table,
         sequences,
-    );
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -293,7 +366,7 @@ fn compress_fast_block_mls7(
     hash_table: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_fast_block_impl::<0, 7>(
+    simd_body!(compress_fast_block_impl::<0, 7>(
         src,
         block_start,
         block_end,
@@ -301,7 +374,7 @@ fn compress_fast_block_mls7(
         rep_offsets,
         hash_table,
         sequences,
-    );
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -315,7 +388,7 @@ fn compress_fast_block_h14_mls7(
     hash_table: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_fast_block_impl::<14, 7>(
+    simd_body!(compress_fast_block_impl::<14, 7>(
         src,
         block_start,
         block_end,
@@ -323,7 +396,7 @@ fn compress_fast_block_h14_mls7(
         rep_offsets,
         hash_table,
         sequences,
-    );
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -337,7 +410,7 @@ fn compress_fast_block_h15_mls7(
     hash_table: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    compress_fast_block_impl::<15, 7>(
+    simd_body!(compress_fast_block_impl::<15, 7>(
         src,
         block_start,
         block_end,
@@ -345,7 +418,7 @@ fn compress_fast_block_h15_mls7(
         rep_offsets,
         hash_table,
         sequences,
-    );
+    ));
 }
 
 /// C zstd-style 4-cursor match finder (port of ZSTD_compressBlock_fast_noDict_generic).
@@ -394,10 +467,6 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
         1usize << params.window_log
     };
 
-    let probe_interval = (block_size / 4).max(4096).min(block_size);
-    let mut probe_limit = block_start + probe_interval;
-    let mut total_match_bytes: usize = 0;
-
     let mut rep1 = rep_offsets[0] as usize;
     let mut rep2 = rep_offsets[1] as usize;
     let mut anchor = block_start;
@@ -441,7 +510,6 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
                     hash_store!(hash_table, h1, ip1 as u32);
                     let back = ip2 - ip0;
                     let mlen = count_match!(src, ip2 + 4, ip2 - rep1 + 4, block_end) + 4 + back;
-                    total_match_bytes += mlen;
                     let lit_len = (ip0 - anchor) as u32;
                     sequences.push(Sequence {
                         literal_length: lit_len,
@@ -478,19 +546,17 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
                 let h1 = hash_pos::<HASH_LOG, MLS>(src, ip1, hash_log);
                 hash_store!(hash_table, h1, ip1 as u32);
                 let fill_pos = ip0;
-                let mut back = 0usize;
-                while ip0 > anchor + back
-                    && match_idx > back + block_start
-                    && src[ip0 - back - 1] == src[match_idx - back - 1]
-                {
-                    back += 1;
-                }
+                let back = count_back(
+                    src,
+                    ip0,
+                    match_idx,
+                    (ip0 - anchor).min(match_idx.saturating_sub(block_start)),
+                );
                 let match_start = ip0 - back;
                 let offset = (match_start - (match_idx - back)) as u32;
                 let mlen = count_match!(src, ip0 + confirm, match_idx + confirm, block_end)
                     + confirm
                     + back;
-                total_match_bytes += mlen;
                 let lit_len = (match_start - anchor) as u32;
                 sequences.push(Sequence {
                     literal_length: lit_len,
@@ -544,19 +610,17 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
                     hash_store!(hash_table, h_ip2, ip1 as u32);
                 }
                 let fill_pos = ip0;
-                let mut back = 0usize;
-                while ip0 > anchor + back
-                    && match_idx > back + block_start
-                    && src[ip0 - back - 1] == src[match_idx - back - 1]
-                {
-                    back += 1;
-                }
+                let back = count_back(
+                    src,
+                    ip0,
+                    match_idx,
+                    (ip0 - anchor).min(match_idx.saturating_sub(block_start)),
+                );
                 let match_start = ip0 - back;
                 let offset = (match_start - (match_idx - back)) as u32;
                 let mlen = count_match!(src, ip0 + confirm, match_idx + confirm, block_end)
                     + confirm
                     + back;
-                total_match_bytes += mlen;
                 let lit_len = (match_start - anchor) as u32;
                 sequences.push(Sequence {
                     literal_length: lit_len,
@@ -599,15 +663,6 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
             #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
             primitives::prefetch_ht(hash_table, h_next);
 
-            if ip0 >= probe_limit {
-                let scanned = ip0 - block_start;
-                if total_match_bytes * 6 < scanned {
-                    sequences.clear();
-                    return;
-                }
-                probe_limit = probe_limit.saturating_add(probe_interval).min(block_end);
-            }
-
             if unlikely(ip2 + 1 >= ilimit) {
                 break;
             }
@@ -615,6 +670,33 @@ fn compress_fast_block_impl<const HASH_LOG: u32, const MLS: usize>(
 
         break;
     }
+}
+
+/// Counts equal bytes backward from `a` and `b` (exclusive), up to `max`.
+///
+/// Compares eight bytes per step and counts the equal prefix with
+/// `leading_zeros`, so the common short extension costs one well-predicted
+/// branch instead of a loop exit per byte.
+#[inline(always)]
+pub(crate) fn count_back(src: &[u8], a: usize, b: usize, max: usize) -> usize {
+    debug_assert!(b < a && a <= src.len());
+    let mut back = 0usize;
+    while back < max {
+        let pa = a - back;
+        let pb = b - back;
+        if pb < 8 {
+            while back < max && src[a - back - 1] == src[b - back - 1] {
+                back += 1;
+            }
+            return back;
+        }
+        let diff = rd64!(src, pa - 8) ^ rd64!(src, pb - 8);
+        if diff != 0 {
+            return (back + (diff.leading_zeros() / 8) as usize).min(max);
+        }
+        back += 8;
+    }
+    max
 }
 
 /// Post-match rep2 loop (C zstd style): only check rep_offset2, swap on match.
@@ -1132,6 +1214,14 @@ fn hash5_const<const HASH_LOG: u32>(value: u64, hash_log: u32) -> usize {
     (((value << 24).wrapping_mul(PRIME64_1)) >> (64 - hl)) as usize
 }
 
+const PRIME6: u64 = 227_718_039_650_203;
+
+#[inline(always)]
+fn hash6_const<const HASH_LOG: u32>(value: u64, hash_log: u32) -> usize {
+    let hl = if HASH_LOG != 0 { HASH_LOG } else { hash_log };
+    (((value << 16).wrapping_mul(PRIME6)) >> (64 - hl)) as usize
+}
+
 const PRIME7: u64 = 58_295_818_150_454_627;
 
 #[inline(always)]
@@ -1144,6 +1234,8 @@ fn hash7_const<const HASH_LOG: u32>(value: u64, hash_log: u32) -> usize {
 fn hash_pos<const HASH_LOG: u32, const MLS: usize>(src: &[u8], pos: usize, hash_log: u32) -> usize {
     if MLS >= 7 {
         hash7_const::<HASH_LOG>(rd64!(src, pos), hash_log)
+    } else if MLS == 6 {
+        hash6_const::<HASH_LOG>(rd64!(src, pos), hash_log)
     } else if MLS >= 5 {
         hash5_const::<HASH_LOG>(rd64!(src, pos), hash_log)
     } else {

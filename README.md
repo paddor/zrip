@@ -12,8 +12,8 @@ See the [benchmarks below](#performance).
 
 **Negative levels (-8 through -1).** Unlocks zstd's fastest compression tiers,
 useful when throughput matters more than ratio. L-8 is zrip's own addition
-beyond C zstd's range: raw literals only, no Huffman table build, approaching
-LZ4-class encode speed while still producing standard zstd frames.
+beyond C zstd's range: a faster L-7 that skips ahead more aggressively where
+it finds no matches.
 
 **Memory safety.** Unsafe is minimized and confined to small, auditable
 primitives modules. The `paranoid` feature eliminates all remaining unsafe.
@@ -217,9 +217,8 @@ work for better ratios while staying in the Fast/DFast range.
 
 Level 0 maps to the library default, currently level 1.
 
-L-8 is zrip-specific. Its purpose is to get as close to LZ4 encode speed as
-possible while still producing standard zstd frames. It does that by forcing
-raw literal blocks and using predefined sequence tables.
+L-8 is zrip-specific. It is L-7 with a larger match-search step and faster
+skip acceleration: it encodes faster than L-7 at a slightly lower ratio.
 
 The decoder is level-independent and supports standard zstd frames produced
 by all zstd compression levels. See [DESIGN.md](DESIGN.md) for exact encoder

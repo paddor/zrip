@@ -10,13 +10,17 @@ Unsafe decode support lives in `decode/src/fast_vec.rs` and
 uses `fearless_simd::dispatch!` in `lib.rs` (no manual `unsafe` dispatch calls).
 No `unsafe` is exposed in the public API.
 
-**Encoder:** unsafe is confined to `encode/src/primitives.rs` (16 blocks):
-`get_unchecked`, `read_unaligned`, `set_len`, `count_match_raw`, `prefetch`.
+**Encoder:** unsafe is confined to `encode/src/primitives.rs`:
+`get_unchecked`, `read_unaligned`, `count_match_raw`, `prefetch`.
 Callers prove bounds at block level. Every block has a `debug_assert!` guard.
+Runtime AVX2/BMI2 dispatch goes through `fearless_simd` (no manual unsafe).
+The sequence and Huffman bit writers are safe: they write into
+pre-initialized buffers.
 
-**Core:** unsafe is confined to `primitives.rs` in `bitstream/`, `huffman/`,
-`xxhash/`: `#[inline(always)]` wrappers around `get_unchecked`, `read_unaligned`,
-`set_len`. Same pattern as encoder.
+**Core:** unsafe is confined to `primitives.rs` in `bitstream/` and `xxhash/`
+(`#[inline(always)]` wrappers around `read_unaligned`) and to the BMI2
+`#[target_feature]` wrappers in `huffman/decode_4stream.rs`. Same pattern as
+encoder.
 
 ## `paranoid` feature
 
@@ -27,7 +31,6 @@ the encoder and core primitives:
 | Category | Default | Paranoid |
 |:---------|:--------|:---------|
 | Encoder indexing | `get_unchecked`, `read_unaligned` | Direct indexing, `from_le_bytes` |
-| Encoder Vec length | `set_len` | `resize` |
 | Decoder SIMD dispatch | `fearless_simd::dispatch!` | Same (no unsafe needed) |
 | Decoder wild-copy | 16-byte unaligned load/store | `extend_from_slice`, `extend_from_within` |
 | Huffman BMI2 dispatch | `#[target_feature]` wrapper | Gated out; generic call |
