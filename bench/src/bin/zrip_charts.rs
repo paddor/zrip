@@ -262,7 +262,7 @@ impl Config {
                 ),
                 codec(
                     "structured-zstd",
-                    "structured-zstd v0.0.49 (unsafe)",
+                    "structured-zstd v0.0.55 (unsafe)",
                     0xf59e0b,
                     0xc47d08,
                 ),

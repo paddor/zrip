@@ -40,9 +40,9 @@ zrip
 <text x="375" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 zrip paranoid
 </text>
-<rect x="447" y="277" width="80" height="36" opacity="1" fill="#F59E0B" stroke="none"/>
-<rect x="447" y="245" width="80" height="32" opacity="1" fill="#C47D08" stroke="none"/>
-<rect x="447" y="236" width="80" height="9" opacity="1" fill="#F59E0B" stroke="none"/>
+<rect x="447" y="284" width="80" height="29" opacity="1" fill="#F59E0B" stroke="none"/>
+<rect x="447" y="252" width="80" height="32" opacity="1" fill="#C47D08" stroke="none"/>
+<rect x="447" y="244" width="80" height="8" opacity="1" fill="#F59E0B" stroke="none"/>
 <text x="487" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 structured-zstd
 </text>
@@ -66,7 +66,7 @@ zrip paranoid (safe SIMD, no unsafe)
 </text>
 <rect x="385" y="359" width="12" height="12" opacity="1" fill="#F59E0B" stroke="none"/>
 <text x="403" y="365" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-structured-zstd v0.0.49 (unsafe)
+structured-zstd v0.0.55 (unsafe)
 </text>
 <rect x="385" y="379" width="12" height="12" opacity="1" fill="#4ADE80" stroke="none"/>
 <text x="403" y="385" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
