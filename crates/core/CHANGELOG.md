@@ -31,6 +31,8 @@
 - `parse_fse_table_description_into` reads each field from a 64-bit window
   instead of calling `read_bits`, and counts runs of zero-probability
   repeat codes in one step.
+- Decode the last symbols of a Huffman stream with one shift, lookup, and
+  add each, instead of a refill and exact bit count per symbol.
 
 ## [0.10.1] - 2026-09-10
 

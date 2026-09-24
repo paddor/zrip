@@ -64,6 +64,12 @@
   place, Huffman weights decode four per refill, and Huffman table setup no
   longer branches on zero weights. Decoding 512 B to 2 KiB slices of C zstd
   L3 output is 1.15x to 1.8x faster.
+- Faster decoding of blocks that carry their own FSE tables, common from
+  1 KiB up. FSE decode tables spread without per-symbol branches, table
+  descriptions parse from a bit window, cached sequence tables copy only
+  their used entries, and the last symbols of each Huffman stream decode
+  without per-symbol refills. Decoding 1 to 2 KiB slices of C zstd L3
+  output is 1.24x to 1.30x faster, 512 B slices 1.07x to 1.09x.
 
 ## [0.8.8] - 2026-09-10
 
