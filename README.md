@@ -12,8 +12,8 @@ See the [benchmarks below](#performance).
 
 **Negative levels (-8 through -1).** Unlocks zstd's fastest compression tiers,
 useful when throughput matters more than ratio. L-8 is zrip's own addition
-beyond C zstd's range: raw literals only, no Huffman table build, approaching
-LZ4-class encode speed while still producing standard zstd frames.
+beyond C zstd's range: a faster L-7 that skips ahead more aggressively where
+it finds no matches.
 
 **Memory safety.** Unsafe is minimized and confined to small, auditable
 primitives modules. The `paranoid` feature eliminates all remaining unsafe.
@@ -47,16 +47,9 @@ compiled to WASM.
 ![small input decode throughput](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/small_decode.svg)
 </details>
 
-<details>
-<summary>aarch64 (Apple M5)</summary>
-
-![aarch64 pipeline summary](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/summary.svg)
-![aarch64 per-file pipeline](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/pipeline.svg)
-![aarch64 encode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/scatter.svg)
-![aarch64 per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/matrix.svg)
-![small input encode throughput](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/small_encode.svg)
-![small input decode throughput](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/small_decode.svg)
-</details>
+No current aarch64 charts. If you have an aarch64 machine, run the benchmark
+and chart commands from [`DEVELOPMENT.md`](DEVELOPMENT.md) and send a PR with
+`doc/charts/aarch64/`.
 
 <details>
 <summary>wasm32 (wasmtime)</summary>
@@ -85,9 +78,11 @@ let compressed = ctx.compress(input)?;
 let mut dec = zrip::DecompressContext::new();
 let original = dec.decompress(&compressed)?;
 
-// Reuse decoder workspace while retaining ownership of each output buffer.
+// Reuse context state while writing into caller-owned buffers.
+let mut frame = vec![0u8; zrip::compress_bound(input.len())];
+let n = ctx.compress_into(input, &mut frame)?;
 let mut owned = Vec::new();
-dec.decompress_into(&compressed, &mut owned)?;
+dec.decompress_into(&frame[..n], &mut owned)?;
 ```
 
 ### Streaming
@@ -221,9 +216,8 @@ work for better ratios while staying in the Fast/DFast range.
 
 Level 0 maps to the library default, currently level 1.
 
-L-8 is zrip-specific. Its purpose is to get as close to LZ4 encode speed as
-possible while still producing standard zstd frames. It does that by forcing
-raw literal blocks and using predefined sequence tables.
+L-8 is zrip-specific. It is L-7 with a larger match-search step and faster
+skip acceleration: it encodes faster than L-7 at a slightly lower ratio.
 
 The decoder is level-independent and supports standard zstd frames produced
 by all zstd compression levels. See [DESIGN.md](DESIGN.md) for exact encoder

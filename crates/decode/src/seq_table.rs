@@ -26,6 +26,14 @@ impl Clone for SeqTable {
             data: self.data,
         }
     }
+
+    /// Copies only the initialized entries. Decoding reads no others, and a
+    /// small table uses a fraction of the capacity.
+    fn clone_from(&mut self, source: &Self) {
+        let n = source.initialized;
+        self.data[..n].copy_from_slice(&source.data[..n]);
+        self.initialized = n;
+    }
 }
 
 impl SeqTable {
@@ -48,8 +56,8 @@ impl SeqTable {
     pub(crate) unsafe fn get(&self, idx: usize) -> FseSeqDecodeEntry {
         debug_assert!(idx < self.initialized);
         // SAFETY: The FSE state machine bounds idx to [0, 1 << accuracy_log).
-        // promote_* initializes all entries in that range. set_single is used
-        // only for RLE tables, whose state is always zero.
+        // promote_* and fill_* initialize all entries in that range.
+        // set_single is used only for RLE tables, whose state is always zero.
         unsafe { self.data[idx].assume_init() }
     }
 
@@ -58,6 +66,50 @@ impl SeqTable {
     pub(crate) fn get(&self, idx: usize) -> FseSeqDecodeEntry {
         debug_assert!(idx < self.initialized);
         self.data[idx]
+    }
+
+    /// Rewrites the first `fse.len()` entries in place from a decode table,
+    /// with `extra` mapping each symbol to its extra bits and baseline. Avoids
+    /// building and moving a whole new table per block.
+    #[inline(always)]
+    fn fill(&mut self, fse: &[FseDecodeEntry], extra: impl Fn(u8) -> (u8, u32)) {
+        debug_assert!(fse.len() <= FSE_SEQ_TABLE_CAPACITY);
+        let mut written = 0;
+        for (slot, e) in self.data.iter_mut().zip(fse) {
+            let (extra_bits, baseline_value) = extra(e.symbol);
+            let entry = FseSeqDecodeEntry {
+                base_line: e.base_line,
+                num_bits: e.num_bits,
+                extra_bits,
+                baseline_value,
+            };
+            #[cfg(not(feature = "paranoid"))]
+            {
+                *slot = MaybeUninit::new(entry);
+            }
+            #[cfg(feature = "paranoid")]
+            {
+                *slot = entry;
+            }
+            written += 1;
+        }
+        self.initialized = written;
+    }
+
+    pub(crate) fn fill_ll(&mut self, fse: &[FseDecodeEntry]) {
+        self.fill(fse, |s| {
+            (LL_BITS_TABLE[s as usize], LL_BASELINE_TABLE[s as usize])
+        });
+    }
+
+    pub(crate) fn fill_ml(&mut self, fse: &[FseDecodeEntry]) {
+        self.fill(fse, |s| {
+            (ML_BITS_TABLE[s as usize], ML_BASELINE_TABLE[s as usize])
+        });
+    }
+
+    pub(crate) fn fill_of(&mut self, fse: &[FseDecodeEntry]) {
+        self.fill(fse, |s| (s, 1u32 << s));
     }
 
     #[cfg(not(feature = "paranoid"))]

@@ -38,6 +38,57 @@ fn roundtrip_all_levels_random_c_cross_validate() {
     }
 }
 
+/// Literals whose optimal Huffman tree is deeper than 11 bits: a few very
+/// common symbols and a tail of rare ones, in pseudo-random order.
+#[test]
+fn roundtrip_deep_huffman_tree_c_cross_validate() {
+    let mut cumulative = Vec::new();
+    let (mut a, mut b, mut total) = (1u32, 1u32, 0u32);
+    for _ in 0..20 {
+        total += a;
+        cumulative.push(total);
+        (a, b) = (b, a + b);
+    }
+    let original: Vec<u8> = (0..200_000u32)
+        .map(|i| {
+            let r = i.wrapping_mul(KNUTH).rotate_left(7) % total;
+            cumulative.iter().position(|&c| r < c).unwrap() as u8 + b'a'
+        })
+        .collect();
+    for level in [-8, -7, -5, -1, 1, 3, 4] {
+        let compressed = zrip::compress(&original, level).unwrap();
+        let c_decompressed = zstd::decode_all(&compressed[..])
+            .unwrap_or_else(|e| panic!("level {level} C decompress: {e}"));
+        assert_eq!(c_decompressed, original, "level {level} C roundtrip");
+        assert_eq!(zrip::decompress(&compressed).unwrap(), original);
+    }
+}
+
+/// Literals that Huffman-code well but contain almost no repeats: blocks
+/// without sequences must still be compressed, not stored raw.
+#[test]
+fn literals_only_blocks_compress_and_c_decodes() {
+    let original: Vec<u8> = (0..65_536u32)
+        .map(|i| {
+            let r = i.wrapping_mul(KNUTH).rotate_left(13).wrapping_mul(KNUTH);
+            // Skewed toward low symbols: about 5 bits of entropy per byte.
+            ((r >> 26) & (r >> 20) & 63) as u8 + b' '
+        })
+        .collect();
+    for level in [-7, -6, -5, -1, 1, 3] {
+        let compressed = zrip::compress(&original, level).unwrap();
+        assert!(
+            compressed.len() * 10 < original.len() * 9,
+            "level {level}: {} bytes from {}",
+            compressed.len(),
+            original.len()
+        );
+        let c_decompressed = zstd::decode_all(&compressed[..]).unwrap();
+        assert_eq!(c_decompressed, original, "level {level} C roundtrip");
+        assert_eq!(zrip::decompress(&compressed).unwrap(), original);
+    }
+}
+
 #[test]
 fn roundtrip_zeros_c_cross_validate() {
     let original = vec![0u8; 100_000];
@@ -1277,6 +1328,67 @@ fn prepared_dict_deterministic_output() {
 
             let zrip_dec = zrip::decompress_with_dict(&first, &dict).unwrap();
             assert_eq!(&zrip_dec, sample, "L{level} zrip decompress failed");
+        }
+    }
+}
+
+#[test]
+fn prepared_dict_compress_into_matches_compress() {
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let c_dict = zstd::dict::DecoderDictionary::copy(&dict_data);
+    // Small samples take the attached or per-call prefix path; the large
+    // input restores the prepared hash table snapshot.
+    let large: Vec<u8> = samples
+        .iter()
+        .flatten()
+        .copied()
+        .cycle()
+        .take(300_000)
+        .collect();
+
+    for level in [1, 3] {
+        let mut ctx = zrip::CompressContext::with_dict(level, dict.clone()).unwrap();
+        let mut ctx_into = zrip::CompressContext::with_dict(level, dict.clone()).unwrap();
+        for input in samples[..20].iter().map(Vec::as_slice).chain([&large[..]]) {
+            let expected = ctx.compress(input).unwrap().to_vec();
+            let mut buf = vec![0u8; zrip::compress_bound(input.len())];
+            let n = ctx_into.compress_into(input, &mut buf).unwrap();
+            assert_eq!(&buf[..n], &expected[..], "L{level} len {}", input.len());
+            assert_eq!(zrip::decompress_with_dict(&buf[..n], &dict).unwrap(), input);
+
+            let mut decoder = zstd::Decoder::with_prepared_dictionary(&buf[..n], &c_dict).unwrap();
+            let mut out = Vec::new();
+            std::io::Read::read_to_end(&mut decoder, &mut out).unwrap();
+            assert_eq!(out, input, "L{level} C decompress");
+        }
+    }
+}
+
+#[test]
+fn prepared_dict_small_then_large_input() {
+    // A small input takes the per-call prefix path, which resizes the hash
+    // tables. A following large input must still restore the full snapshot.
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let large: Vec<u8> = samples
+        .iter()
+        .flatten()
+        .copied()
+        .cycle()
+        .take(300_000)
+        .collect();
+
+    for level in [1, 2, 3, 4] {
+        let mut ctx = zrip::CompressContext::with_dict(level, dict.clone()).unwrap();
+        for input in [&samples[0][..], &large, &samples[1], &large] {
+            let compressed = ctx.compress(input).unwrap().to_vec();
+            assert_eq!(
+                zrip::decompress_with_dict(&compressed, &dict).unwrap(),
+                input,
+                "L{level} len {}",
+                input.len()
+            );
         }
     }
 }

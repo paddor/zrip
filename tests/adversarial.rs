@@ -341,7 +341,7 @@ const FIXTURE_PATH: &str = "tests/fixtures/corpus_dict_roundtrip.bin";
 
 #[cfg(feature = "dict_builder")]
 fn collect_fuzz_corpus_plaintexts() -> Vec<Vec<u8>> {
-    let corpus_dir = std::path::Path::new("fuzz/corpus/fuzz_corrupt_decompress");
+    let corpus_dir = std::path::Path::new("fuzz/corpus/zrip_fuzz_corrupt_decompress");
     if !corpus_dir.exists() {
         return Vec::new();
     }

@@ -111,7 +111,7 @@ Proves decoder and encoder bounds safety via bounded model checking.
 Requires [Kani](https://model-checking.github.io/kani/)
 (`cargo install --locked kani-verifier && cargo kani setup`).
 
-Eighteen proof harnesses across two crates:
+Sixteen proof harnesses across two crates:
 
 - **Decoder** (`crates/decode/src/fast_vec.rs`, 11 harnesses): one arithmetic
   proof that `BlockOutput::new` reserves sufficient capacity for all wildcopy
@@ -120,10 +120,9 @@ Eighteen proof harnesses across two crates:
   `wild_copy_match_16plus_unchecked`, and `wild_copy_match_single_unchecked`
   (three dispatch paths).
 
-- **Encoder** (`crates/encode/src/primitives.rs`, 7 harnesses): `rd32`,
-  `rd64`, `hash_load`, `hash_store`, `count_match` (8-byte fast loop + byte
-  tail), and two `BitstreamScratch` proofs (`flush`/`write_byte` + `finish`
-  never exposes uninitialized bytes via `set_len`).
+- **Encoder** (`crates/encode/src/primitives.rs`, 5 harnesses): `rd32`,
+  `rd64`, `hash_load`, `hash_store`, and `count_match` (8-byte fast loop +
+  byte tail).
 
 ```sh
 # decoder (~2 min)
@@ -147,8 +146,8 @@ Fuzz targets live in `fuzz/fuzz_targets/`. Round-trip targets cross-validate
 against C zstd. Corruption targets feed mutated compressed data to the decoder.
 
 ```bash
-cargo +nightly fuzz run roundtrip_frame -- -max_len=65536
-cargo +nightly fuzz run c_compress_zrip_decompress
+cargo +nightly fuzz run zrip_fuzz_roundtrip_frame -- -max_len=65536
+cargo +nightly fuzz run zrip_fuzz_c_compress_zrip_decompress
 ```
 
 ## Pre-release Miri + fuzz audit
@@ -191,7 +190,7 @@ If you have an adversarial corpus of small/malformed zstd files (e.g. from
 prior fuzzing campaigns), seed them into the corrupt_decompress target:
 
 ```bash
-cargo +nightly fuzz run fuzz_corrupt_decompress /path/to/adversarial/corpus \
+cargo +nightly fuzz run zrip_fuzz_corrupt_decompress /path/to/adversarial/corpus \
   -- -max_total_time=10800 -jobs=2
 ```
 
@@ -316,6 +315,18 @@ The chart tool reads `.chart_hw` from the current dir or parent dir. Env vars
 local detection.
 
 ### Small-input benchmark + chart workflow
+
+Each small input is up to 64 distinct consecutive slices of one size, and
+each timed pass walks all of them. Repeating one slice lets the branch
+predictor learn it and distorts results. `small_decode.svg` draws each
+implementation decoding C zstd's L3 frames (thick) and its own L3 output
+(thin, from the small encode rows). The paranoid line needs a paranoid small
+encode run at L3:
+
+```bash
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release \
+  --features paranoid -- --small-only --levels 3 --impl zrip
+```
 
 `small_encode.svg` only includes zrip, C zstd, and structured-zstd (no
 paranoid). Default `--small-only` benchmarks zrip only:

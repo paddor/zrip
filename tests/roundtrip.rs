@@ -472,6 +472,59 @@ fn compress_context_can_omit_content_checksum() {
     assert_eq!(zrip::decompress(&compressed).unwrap(), data);
 }
 
+#[cfg(feature = "std")]
+#[test]
+fn compress_context_compress_into_matches_compress() {
+    let text = b"caller-owned output buffers for compressed frames ".repeat(40);
+    #[cfg(not(miri))]
+    let large: Vec<u8> = text.iter().cycle().take(300_000).copied().collect();
+    let mut inputs: Vec<&[u8]> = vec![b"", b"x", &text];
+    #[cfg(not(miri))]
+    inputs.push(&large);
+
+    for level in [-8, -1, 1, 3, 4] {
+        let mut ctx = zrip::CompressContext::new(level).unwrap();
+        let mut ctx_into = zrip::CompressContext::new(level).unwrap();
+        for input in &inputs {
+            let expected = ctx.compress(input).unwrap().to_vec();
+            let mut buf = vec![0u8; zrip::compress_bound(input.len())];
+            let n = ctx_into.compress_into(input, &mut buf).unwrap();
+            assert_eq!(&buf[..n], &expected[..], "L{level} len {}", input.len());
+            assert_eq!(zrip::decompress(&buf[..n]).unwrap(), *input);
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn compress_context_compress_into_writes_at_slice_start() {
+    let data = b"frame written into the middle of a larger buffer".repeat(20);
+    let mut ctx = zrip::CompressContext::new(1).unwrap();
+    let mut buf = vec![0xAAu8; 16 + zrip::compress_bound(data.len()) + 16];
+    let n = ctx.compress_into(&data, &mut buf[16..]).unwrap();
+    assert!(buf[..16].iter().all(|&b| b == 0xAA));
+    assert!(buf[16 + n..].iter().all(|&b| b == 0xAA));
+    assert_eq!(zrip::decompress(&buf[16..16 + n]).unwrap(), data);
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn compress_context_compress_into_rejects_small_output() {
+    let data = b"not enough room for this frame".repeat(10);
+    let mut ctx = zrip::CompressContext::new(1).unwrap();
+    let frame_len = ctx.compress(&data).unwrap().len();
+
+    let mut short = vec![0u8; frame_len - 1];
+    assert!(matches!(
+        ctx.compress_into(&data, &mut short),
+        Err(zrip::CompressError::OutputTooSmall)
+    ));
+
+    let mut exact = vec![0u8; frame_len];
+    assert_eq!(ctx.compress_into(&data, &mut exact).unwrap(), frame_len);
+    assert_eq!(zrip::decompress(&exact).unwrap(), data);
+}
+
 #[cfg(all(feature = "std", not(miri)))]
 #[test]
 fn decompress_context_borrows_large_output_for_reuse() {

@@ -11,9 +11,9 @@ paranoid = ["zrip/paranoid"]
 zrip = { path = "..", features = ["dict_builder", "ldm"] }
 zstd = "0.13"
 zstd-safe = "7"
-lz4rip = "0.10.1"
+lz4rip = "0.11.7"
 ruzstd = "0.8"
-structured-zstd = "0.0.49"
+structured-zstd = "0.0.55"
 libc = "0.2"
 plotters = { version = "0.3", default-features = false, features = ["svg_backend", "line_series"] }
 serde = { version = "1", features = ["derive"] }
@@ -24,7 +24,9 @@ sha2 = "0.10"
 name = "zrip_bench"
 
 [[example]]
-name = "ruzstd_compare"
+name = "zrip_ruzstd_compare"
+path = "examples/ruzstd_compare.rs"
 
 [[example]]
-name = "bench_streaming_dict"
+name = "zrip_bench_streaming_dict"
+path = "examples/bench_streaming_dict.rs"

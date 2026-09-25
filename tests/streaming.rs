@@ -1014,18 +1014,19 @@ mod ldm {
     fn streaming_ldm_cross_block_improves_ratio() {
         use std::io::Write;
 
-        let mut data = Vec::with_capacity(4 * BLOCK);
-        let block = b"long distance match target block with distinctive content. ";
-        for _ in 0..1024 {
-            data.extend_from_slice(block);
-        }
-        let filler: Vec<u8> = (0..2 * BLOCK as u32)
-            .map(|i| ((i.wrapping_mul(KNUTH)) >> 24) as u8)
+        // A block that only matches itself, far apart, separated by filler
+        // that compresses but never repeats the block. The filler keeps the
+        // regular hash table busy, so only LDM finds the second copy.
+        let target: Vec<u8> = (0..BLOCK as u32)
+            .map(|i| (i.wrapping_mul(KNUTH).rotate_left(11) >> 24) as u8)
             .collect();
+        let filler: Vec<u8> = (0..8 * BLOCK as u32)
+            .map(|i| b'a' + ((i / 7) ^ (i / 131)).wrapping_mul(KNUTH).rotate_left(5) as u8 % 16)
+            .collect();
+        let mut data = Vec::with_capacity(10 * BLOCK);
+        data.extend_from_slice(&target);
         data.extend_from_slice(&filler);
-        for _ in 0..1024 {
-            data.extend_from_slice(block);
-        }
+        data.extend_from_slice(&target);
 
         let opts_no_ldm = zrip::Options::default().window_log(24);
         let compressed_no_ldm = zrip::compress_opts(&data, 1, &opts_no_ldm).unwrap();

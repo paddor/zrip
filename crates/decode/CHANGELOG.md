@@ -4,6 +4,14 @@
 
 - Add caller-owned output methods to `DecompressContext`, retaining reusable
   decoder workspace without requiring decoded buffers to be copied.
+- Upgrade `fearless_simd` to 1.0.
+- Copy literal runs with a fixed 16-byte copy when enough source remains,
+  including a safe variant for `paranoid` builds.
+- Fill custom LL/ML/OF sequence tables in place instead of building and
+  moving a new table per block.
+- Copy only the used entries of sequence tables when caching them or
+  restoring predefined and dictionary tables, and refresh the table cache
+  in place instead of allocating a new one per block.
 
 ## [0.8.7] - 2026-09-10
 

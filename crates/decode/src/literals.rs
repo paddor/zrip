@@ -169,8 +169,6 @@ pub(crate) fn decode_literals_ws(
                         &ws.huf_weights,
                         &mut ws.huf_table,
                         &mut ws.huf_all_weights,
-                        &mut ws.huf_rank_count,
-                        &mut ws.huf_rank_start,
                     )?;
                     ws.huf_last_weights.clear();
                     ws.huf_last_weights.extend_from_slice(&ws.huf_weights);

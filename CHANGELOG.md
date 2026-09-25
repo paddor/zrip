@@ -6,6 +6,85 @@
 
 - Added caller-owned output methods to `DecompressContext` for pipelines that
   need decoded buffers to outlive the next context call without copying.
+- Added `CompressContext::compress_into`, which writes a frame into a
+  caller-owned slice while reusing the context's tables.
+
+### Fixed
+
+- `CompressContext::with_dict` no longer panics when an input that restores
+  the prepared hash table snapshot follows one that took the per-call
+  dictionary path, such as a small then a large input at L3.
+- `compress_bound` now covers frames with a dictionary ID and an 8-byte
+  content size.
+- Huffman literal compression no longer silently falls back to raw literals.
+  Code lengths are limited to 11 bits instead of rejecting deeper trees, and
+  literals with byte values above 128 use FSE-compressed Huffman weights.
+  Compressed output is up to 23% smaller on Silesia text at negative levels.
+- Reuse of the previous block's Huffman table is now chosen by estimated size
+  against a fresh table, not only against raw literals.
+- Blocks without usable matches are Huffman-coded as literal-only blocks
+  instead of being stored raw.
+- A block that falls back to raw storage no longer leaves its Huffman table
+  available for reuse by the next block, which could reference a table the
+  decoder never received.
+- Huffman literal headers with more than 255 explicit weights are rejected,
+  as in C zstd.
+
+### Changed
+
+- The encoder selects AVX2/BMI2 code paths at runtime through
+  `fearless_simd`. Builds without `target-cpu=native` now run the match
+  finders and block encoder with BMI2 on supporting CPUs. Upgraded
+  `fearless_simd` to 1.0.
+- Faster encoding: word-wise backward match extension, fixed-width literal
+  copies, and a Huffman encoder that writes four symbols per flush.
+- The encoder's bit writers no longer use `unsafe`.
+- Faster decoding: literal runs copy a fixed 16 bytes when the source allows
+  it (no length-dependent branches), and the 4-stream Huffman decoder runs a
+  precomputed number of check-free rounds. Up to 25% faster on text and
+  literal-heavy input, 14-20% in `paranoid` builds.
+- Retuned the fast levels now that Huffman literals work. L-8 to L-1 hash
+  6 bytes instead of 5, L1 and L2 hash 6 bytes with larger tables and more
+  aggressive skip acceleration. Geomean over 14 Silesia and web files:
+  L-8 to L2 encode 25-50% faster, L-7 to L2 compress 6-17% smaller, L-8
+  compresses 1.3% larger.
+- L-8 is now L-7 with a larger step and faster skip acceleration. It keeps
+  Huffman literals and no longer gives up on blocks with few matches.
+  Geomean over Silesia: 508 MB/s at ratio 2.02, against L-7 at 468 MB/s
+  and 2.06. The old L-8 reached 576 MB/s at 1.75.
+- Small inputs on the negative levels skip Huffman literals up to a
+  per-level size: 2 KiB at L-1, growing 1.5x or 1.33x per level to 24 KiB
+  at L-8. At 2 KiB and below every negative level skips Huffman, for hot
+  loops over small messages.
+- On those inputs the negative levels search for matches more densely
+  (smaller step, 5-byte minimum match), so they still compress: on a 2 KiB
+  slice of dickens, 1.08 at L-8, 1.13 at L-7, up to 1.31 at L-1.
+- Inputs in that raw-literal range skip the incompressibility sampling. It
+  cost about as much as their match search. L-8 encodes 1-2 KiB text inputs
+  about 2x faster.
+- `force_raw_literals` parameters no longer give up on blocks with few
+  matches.
+- The streaming encoder no longer switches to raw literals because a flushed
+  block is small.
+- Faster Huffman table setup for small blocks: Huffman weights use FSE table
+  log 5 only, as C zstd does, and the literal entropy check reuses the
+  literal histogram.
+- L-8 to L-1 keep dense literals raw (sampled entropy above 6.25 bits per
+  byte). Low-compressibility input encodes at over 500 MiB/s on these
+  levels.
+- Faster decoding of small blocks. Custom FSE sequence tables are built in
+  place, Huffman weights decode four per refill, and Huffman table setup no
+  longer branches on zero weights. Decoding 512 B to 2 KiB slices of C zstd
+  L3 output is 1.15x to 1.8x faster.
+- Faster decoding of blocks that carry their own FSE tables, common from
+  1 KiB up. FSE decode tables spread without per-symbol branches, table
+  descriptions parse from a bit window, cached sequence tables copy only
+  their used entries, and the last symbols of each Huffman stream decode
+  without per-symbol refills. Decoding 1 to 2 KiB slices of C zstd L3
+  output is 1.24x to 1.30x faster, 512 B slices 1.07x to 1.09x.
+- Benchmark charts compare against lz4rip 0.11.7, `small_decode.svg` covers
+  512 B to 1 MiB like `small_encode.svg`, and the outdated aarch64 charts are
+  removed.
 
 ## [0.8.8] - 2026-09-10
 

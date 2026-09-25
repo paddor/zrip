@@ -56,8 +56,6 @@ pub(crate) struct BlockDecodeWorkspace {
     pub huf_table_log: u8,
     pub huf_valid: bool,
     pub huf_all_weights: Vec<u8>,
-    pub huf_rank_count: Vec<u32>,
-    pub huf_rank_start: Vec<u32>,
     pub huf_weights: Vec<u8>,
     pub huf_last_weights: Vec<u8>,
     pub huf_last_weights_valid: bool,
@@ -83,8 +81,6 @@ impl BlockDecodeWorkspace {
             huf_table_log: 0,
             huf_valid: false,
             huf_all_weights: Vec::new(),
-            huf_rank_count: Vec::new(),
-            huf_rank_start: Vec::new(),
             huf_weights: Vec::new(),
             huf_last_weights: Vec::new(),
             huf_last_weights_valid: false,
@@ -439,7 +435,7 @@ fn initial_sequence_state(
     dict: Option<&zrip_core::dict::Dictionary>,
 ) -> [u32; 3] {
     if let Some(ref cached) = ws.cached_dict_tables {
-        *tables = (**cached).clone();
+        tables.clone_from(cached);
         ws.seq_table_cache_tables_current = false;
         ws.cached_dict_rep
     } else if let Some(d) = dict {

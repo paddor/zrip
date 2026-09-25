@@ -219,7 +219,7 @@ impl<W: Write> FrameEncoder<W> {
 
         self.block_out.clear();
         self.block_out.reserve(chunk.len() + 32);
-        if crate::block_looks_incompressible(&chunk) {
+        if crate::skip_match_search(&self.params, chunk.len(), &chunk) {
             block_encoder::encode_raw_block(&chunk, last, &mut self.block_out)
                 .map_err(io::Error::other)?;
         } else {
@@ -317,7 +317,7 @@ impl<W: Write> FrameEncoder<W> {
                     last,
                     &mut self.block_out,
                     &mut self.workspace,
-                    strategy::use_custom_sequence_tables(&self.params, chunk.len()),
+                    strategy::block_policy(&self.params, chunk.len()),
                 )
                 .map_err(io::Error::other)?;
             }
