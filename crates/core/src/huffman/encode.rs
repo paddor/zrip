@@ -159,7 +159,7 @@ impl HuffmanEncodeTable {
 
     /// The serialized Huffman tree description (weights header).
     pub fn weights_description(&self) -> &[u8] {
-        debug_assert!(!self.description.is_empty());
+        debug_assert_ne!(self.description.len(), 0);
         &self.description
     }
 
