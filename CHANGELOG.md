@@ -7,6 +7,14 @@
 - `DecompressContext` is available with the `alloc` feature in `no_std`
   builds. It no longer requires `std`.
 
+### Fixed
+
+- `DecompressContext` and `FrameDecoder` no longer decode a frame with stale
+  sequence tables from the previous frame. After a failed frame, a reused
+  context could accept a malformed frame or reject a valid one, and
+  `FrameDecoder` could reject valid concatenated frames whose first block
+  repeats the previous frame's table header.
+
 ## [0.8.9] - 2026-09-25
 
 ### Added

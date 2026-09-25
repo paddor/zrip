@@ -4,6 +4,10 @@
 
 - Make `DecompressContext` available with the `alloc` feature. It no longer
   requires `std`.
+- Mark the live sequence tables as no longer matching the table cache
+  whenever they are replaced: when a failed frame dropped them and when the
+  streaming decoder starts or resets a frame. Stale tables had made a reused
+  context accept malformed frames and reject valid ones.
 
 ## [0.8.8] - 2026-09-25
 

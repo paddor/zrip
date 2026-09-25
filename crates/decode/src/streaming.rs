@@ -138,6 +138,7 @@ impl<R: Read> FrameDecoder<R> {
         self.output_pos = 0;
         self.rep_offsets = [1, 4, 8];
         self.seq_tables = SequenceDecodeTables::new_default();
+        self.ws.seq_tables_replaced();
         self.ws.reset_huffman_state();
         self.hasher = None;
         self.content_checksum = false;
@@ -325,6 +326,7 @@ impl<R: Read> FrameDecoder<R> {
                 st.ll_set = true;
             }
             self.seq_tables = st;
+            self.ws.seq_tables_replaced();
             self.ws.reset_huffman_state();
             if let Some((t, l)) = d.huf_table() {
                 self.ws.huf_table.clear();
@@ -335,6 +337,7 @@ impl<R: Read> FrameDecoder<R> {
         } else {
             self.rep_offsets = [1, 4, 8];
             self.seq_tables = SequenceDecodeTables::new_default();
+            self.ws.seq_tables_replaced();
             self.ws.reset_huffman_state();
         }
 
