@@ -187,7 +187,7 @@ pub fn compress_bound(input_len: usize) -> usize {
         .saturating_add(22)
 }
 
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 pub use zrip_decode::context::DecompressContext;
 #[cfg(feature = "std")]
 pub use zrip_decode::streaming::FrameDecoder;

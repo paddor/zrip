@@ -525,7 +525,7 @@ fn compress_context_compress_into_rejects_small_output() {
     assert_eq!(zrip::decompress(&exact).unwrap(), data);
 }
 
-#[cfg(all(feature = "std", not(miri)))]
+#[cfg(not(miri))]
 #[test]
 fn decompress_context_borrows_large_output_for_reuse() {
     let data = vec![0x42u8; 600 * 1024];
@@ -549,7 +549,6 @@ fn decompress_refuses_output_exceeding_max_raw_block() {
     assert_eq!(ok, data);
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn decompress_with_limit_rejects_oversized_output() {
     let mut frame = vec![
@@ -582,7 +581,6 @@ fn decompress_with_limit_rejects_oversized_concatenated_output() {
     );
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn decompress_context_with_limit_rejects_oversized_concatenated_output() {
     let data_a = vec![b'a'; 100];

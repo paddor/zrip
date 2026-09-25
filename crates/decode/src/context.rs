@@ -12,7 +12,8 @@ use zrip_core::error::DecompressError;
 /// Reusable decompression context that amortizes buffer allocations.
 ///
 /// Holds internal buffers (output, Huffman/FSE workspace) across calls.
-/// Useful when decompressing many small frames in a loop.
+/// Useful when decompressing many small frames in a loop. Needs only the
+/// `alloc` feature, so it also works in `no_std` builds.
 ///
 /// ```no_run
 /// let data = b"repeated decompression".repeat(100);
