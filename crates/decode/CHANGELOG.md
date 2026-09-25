@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Make `DecompressContext` available with the `alloc` feature. It no longer
+  requires `std`.
+
 ## [0.8.8] - 2026-09-25
 
 - Add caller-owned output methods to `DecompressContext`, retaining reusable

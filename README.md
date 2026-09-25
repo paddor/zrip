@@ -183,9 +183,9 @@ let dict = train_dict_fastcover(&samples, 16384, FastCoverParams::default());
 
 | Feature        | Default | Description                                   |
 |:---------------|:-------:|:----------------------------------------------|
-| `std`          | yes     | Enables `CompressContext`, `DecompressContext` |
+| `std`          | yes     | Enables `CompressContext`, `FrameEncoder`, `FrameDecoder` |
 | `frame`        | yes     | Frame header parsing and writing; implies `std` |
-| `alloc`        | yes     | `no_std` + heap via `alloc` crate              |
+| `alloc`        | yes     | `no_std` + heap via `alloc` crate; includes `DecompressContext` |
 | `ldm`          | yes     | Long distance matching for large-window compression |
 | `dict_builder` | no      | COVER/FastCOVER dictionary training            |
 | `simd`         | yes     | `fearless_simd` runtime dispatch (AVX2+BMI2, NEON, SIMD128) |

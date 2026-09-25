@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `DecompressContext` is available with the `alloc` feature in `no_std`
+  builds. It no longer requires `std`.
+
 ## [0.8.9] - 2026-09-25
 
 ### Added

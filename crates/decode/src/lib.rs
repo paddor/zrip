@@ -21,7 +21,7 @@ macro_rules! paranoid_unsafe_call {
 }
 
 pub(crate) mod block_decoder;
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 pub mod context;
 pub(crate) mod exec;
 pub(crate) mod fast_vec;
@@ -43,7 +43,7 @@ use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequenc
 use zrip_core::block::{BlockType, parse_block_header};
 use zrip_core::error::DecompressError;
 use zrip_core::frame::MAX_WINDOW_SIZE;
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 use zrip_core::frame::header::parse_frame_header_after_magic;
 use zrip_core::frame::header::{FrameHeader, parse_frame_header};
 use zrip_core::huffman::HuffmanDecodeEntry;
@@ -103,7 +103,7 @@ impl BlockDecodeWorkspace {
         self.huf_valid = false;
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "alloc")]
     pub(crate) fn cache_dict(&mut self, dict: &zrip_core::dict::Dictionary) {
         let mut st = SequenceDecodeTables::new_default();
         if let Some((t, l)) = dict.of_table() {
@@ -233,7 +233,7 @@ pub(crate) fn decompress_frame(
     decompress_frame_with_header(input, output, max_output, dict, ws, header)
 }
 
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 pub(crate) fn decompress_frame_after_magic(
     input: &[u8],
     output: &mut Vec<u8>,
