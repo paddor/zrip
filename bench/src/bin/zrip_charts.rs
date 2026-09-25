@@ -264,7 +264,7 @@ impl Config {
                 codec("ruzstd", "ruzstd v0.8.3 (safe)", 0x4ade80, 0x3aaf60),
                 codec(
                     "lz4rip",
-                    "lz4rip 0.8.5 (encapsulated unsafe, Rust, LZ4)",
+                    "lz4rip v0.11.7 (encapsulated unsafe, Rust, LZ4)",
                     0xc084fc,
                     0x9966cc,
                 ),

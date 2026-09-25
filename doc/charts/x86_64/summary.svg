@@ -29,13 +29,13 @@ seconds / GB
 C zstd
 </text>
 <rect x="223" y="286" width="80" height="27" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="223" y="257" width="80" height="29" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="223" y="246" width="80" height="11" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="223" y="256" width="80" height="30" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="223" y="246" width="80" height="10" opacity="1" fill="#F87171" stroke="none"/>
 <text x="263" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 zrip
 </text>
-<rect x="335" y="283" width="80" height="30" opacity="1" fill="#F472B6" stroke="none"/>
-<rect x="335" y="253" width="80" height="30" opacity="1" fill="#C05A92" stroke="none"/>
+<rect x="335" y="282" width="80" height="31" opacity="1" fill="#F472B6" stroke="none"/>
+<rect x="335" y="253" width="80" height="29" opacity="1" fill="#C05A92" stroke="none"/>
 <rect x="335" y="241" width="80" height="12" opacity="1" fill="#F472B6" stroke="none"/>
 <text x="375" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 zrip paranoid

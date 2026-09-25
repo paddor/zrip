@@ -82,6 +82,9 @@
   their used entries, and the last symbols of each Huffman stream decode
   without per-symbol refills. Decoding 1 to 2 KiB slices of C zstd L3
   output is 1.24x to 1.30x faster, 512 B slices 1.07x to 1.09x.
+- Benchmark charts compare against lz4rip 0.11.7, `small_decode.svg` covers
+  512 B to 1 MiB like `small_encode.svg`, and the outdated aarch64 charts are
+  removed.
 
 ## [0.8.8] - 2026-09-10
 
