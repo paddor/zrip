@@ -175,12 +175,16 @@ pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usiz
     zrip_encode::compress_into(input, output, level)
 }
 
+/// Worst-case frame size for `input_len` bytes of input, with or without a
+/// dictionary.
 #[must_use]
 pub fn compress_bound(input_len: usize) -> usize {
     let num_blocks = input_len / zrip_core::frame::MAX_BLOCK_SIZE + 1;
+    // Magic (4), frame header descriptor (1), window descriptor (1),
+    // dictionary ID (4), content size (8), checksum (4).
     input_len
         .saturating_add(num_blocks.saturating_mul(3))
-        .saturating_add(18)
+        .saturating_add(22)
 }
 
 #[cfg(feature = "std")]

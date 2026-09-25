@@ -78,9 +78,11 @@ let compressed = ctx.compress(input)?;
 let mut dec = zrip::DecompressContext::new();
 let original = dec.decompress(&compressed)?;
 
-// Reuse decoder workspace while retaining ownership of each output buffer.
+// Reuse context state while writing into caller-owned buffers.
+let mut frame = vec![0u8; zrip::compress_bound(input.len())];
+let n = ctx.compress_into(input, &mut frame)?;
 let mut owned = Vec::new();
-dec.decompress_into(&compressed, &mut owned)?;
+dec.decompress_into(&frame[..n], &mut owned)?;
 ```
 
 ### Streaming

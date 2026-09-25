@@ -1333,6 +1333,67 @@ fn prepared_dict_deterministic_output() {
 }
 
 #[test]
+fn prepared_dict_compress_into_matches_compress() {
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let c_dict = zstd::dict::DecoderDictionary::copy(&dict_data);
+    // Small samples take the attached or per-call prefix path; the large
+    // input restores the prepared hash table snapshot.
+    let large: Vec<u8> = samples
+        .iter()
+        .flatten()
+        .copied()
+        .cycle()
+        .take(300_000)
+        .collect();
+
+    for level in [1, 3] {
+        let mut ctx = zrip::CompressContext::with_dict(level, dict.clone()).unwrap();
+        let mut ctx_into = zrip::CompressContext::with_dict(level, dict.clone()).unwrap();
+        for input in samples[..20].iter().map(Vec::as_slice).chain([&large[..]]) {
+            let expected = ctx.compress(input).unwrap().to_vec();
+            let mut buf = vec![0u8; zrip::compress_bound(input.len())];
+            let n = ctx_into.compress_into(input, &mut buf).unwrap();
+            assert_eq!(&buf[..n], &expected[..], "L{level} len {}", input.len());
+            assert_eq!(zrip::decompress_with_dict(&buf[..n], &dict).unwrap(), input);
+
+            let mut decoder = zstd::Decoder::with_prepared_dictionary(&buf[..n], &c_dict).unwrap();
+            let mut out = Vec::new();
+            std::io::Read::read_to_end(&mut decoder, &mut out).unwrap();
+            assert_eq!(out, input, "L{level} C decompress");
+        }
+    }
+}
+
+#[test]
+fn prepared_dict_small_then_large_input() {
+    // A small input takes the per-call prefix path, which resizes the hash
+    // tables. A following large input must still restore the full snapshot.
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let large: Vec<u8> = samples
+        .iter()
+        .flatten()
+        .copied()
+        .cycle()
+        .take(300_000)
+        .collect();
+
+    for level in [1, 2, 3, 4] {
+        let mut ctx = zrip::CompressContext::with_dict(level, dict.clone()).unwrap();
+        for input in [&samples[0][..], &large, &samples[1], &large] {
+            let compressed = ctx.compress(input).unwrap().to_vec();
+            assert_eq!(
+                zrip::decompress_with_dict(&compressed, &dict).unwrap(),
+                input,
+                "L{level} len {}",
+                input.len()
+            );
+        }
+    }
+}
+
+#[test]
 fn prepared_dict_matches_oneshot() {
     let (samples, dict_data) = make_dict_samples();
     let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();

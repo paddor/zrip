@@ -6,9 +6,16 @@
 
 - Added caller-owned output methods to `DecompressContext` for pipelines that
   need decoded buffers to outlive the next context call without copying.
+- Added `CompressContext::compress_into`, which writes a frame into a
+  caller-owned slice while reusing the context's tables.
 
 ### Fixed
 
+- `CompressContext::with_dict` no longer panics when an input that restores
+  the prepared hash table snapshot follows one that took the per-call
+  dictionary path, such as a small then a large input at L3.
+- `compress_bound` now covers frames with a dictionary ID and an 8-byte
+  content size.
 - Huffman literal compression no longer silently falls back to raw literals.
   Code lengths are limited to 11 bits instead of rejecting deeper trees, and
   literals with byte values above 128 use FSE-compressed Huffman weights.

@@ -6,6 +6,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::block_encoder::{self, BlockEncodeWorkspace};
+use crate::output::{OutputSink, SliceSink};
 use crate::strategy::{self, LevelParams, Strategy};
 use crate::{dfast, fast, skip_match_search, write_frame_header_with_checksum};
 use zrip_core::Sequence;
@@ -211,8 +212,40 @@ impl CompressContext {
 
     /// Compresses `input` using the context's level and optional dictionary.
     pub fn compress(&mut self, input: &[u8]) -> Result<Cow<'_, [u8]>, CompressError> {
+        let mut output = core::mem::take(&mut self.output);
+        output.clear();
+        let result = self.compress_to(input, &mut output);
+        self.output = output;
+        result?;
+        Ok(self.take_or_borrow_output())
+    }
+
+    /// Compresses `input` into a caller-owned buffer while reusing this
+    /// context's hash tables, workspace, and dictionary.
+    ///
+    /// Writes one frame to the start of `output` and returns its length.
+    /// Unlike [`Self::compress`], the result can outlive the next use of this
+    /// context without copying. `zrip::compress_bound(input.len())` bytes are
+    /// always enough. Returns [`CompressError::OutputTooSmall`] if the frame
+    /// does not fit; `output` then holds a partial frame.
+    pub fn compress_into(
+        &mut self,
+        input: &[u8],
+        output: &mut [u8],
+    ) -> Result<usize, CompressError> {
+        let mut sink = SliceSink::new(output);
+        self.compress_to(input, &mut sink)?;
+        Ok(sink.pos())
+    }
+
+    /// Writes one frame for `input` to `output`.
+    fn compress_to<S: OutputSink>(
+        &mut self,
+        input: &[u8],
+        output: &mut S,
+    ) -> Result<(), CompressError> {
         if self.prepared.is_some() {
-            return self.compress_with_prepared(input);
+            return self.compress_with_prepared(input, output);
         }
         let params = strategy::level_params_for_size(self.level, input.len())
             .expect("level validated at construction");
@@ -226,12 +259,11 @@ impl CompressContext {
             &mut self.hash_long,
             &mut self.dict_hash,
             &mut self.sequences,
-            &mut self.output,
+            output,
             &mut self.workspace,
             &mut self.combined,
             self.content_checksum,
-        )?;
-        Ok(self.take_or_borrow_output())
+        )
     }
 
     /// Compresses `input` using an ad-hoc dictionary (overrides the stored one).
@@ -255,6 +287,7 @@ impl CompressContext {
         self.workspace.prev_huffman = dict
             .huf_table()
             .and_then(|(dt, tl)| HuffmanEncodeTable::from_decode_table(dt, tl));
+        self.output.clear();
         compress_core(
             input,
             params,
@@ -273,7 +306,11 @@ impl CompressContext {
         Ok(self.take_or_borrow_output())
     }
 
-    fn compress_with_prepared(&mut self, input: &[u8]) -> Result<Cow<'_, [u8]>, CompressError> {
+    fn compress_with_prepared<S: OutputSink>(
+        &mut self,
+        input: &[u8],
+        output: &mut S,
+    ) -> Result<(), CompressError> {
         let prep = self.prepared.as_ref().unwrap();
         let total_window = prep.prefix_len + input.len();
         let params = strategy::level_params_for_size(self.level, total_window)
@@ -296,16 +333,20 @@ impl CompressContext {
                 }
             };
             if !snapshot_matches {
-                return self.compress_with_dict_fallback(input, dict_id, prefix_len);
+                return self.compress_with_dict_fallback(input, dict_id, prefix_len, output);
             }
         }
 
         {
             let prep = self.prepared.as_mut().unwrap();
             if !use_attached {
-                self.hash_table.copy_from_slice(&prep.hash_snapshot);
+                // The per-call prefix path resizes these tables for its own
+                // parameter tier, so restore length and contents together.
+                self.hash_table.clear();
+                self.hash_table.extend_from_slice(&prep.hash_snapshot);
                 if !prep.hash_long_snapshot.is_empty() {
-                    self.hash_long.copy_from_slice(&prep.hash_long_snapshot);
+                    self.hash_long.clear();
+                    self.hash_long.extend_from_slice(&prep.hash_long_snapshot);
                 }
             }
             prep.combined.truncate(prep.prefix_len);
@@ -329,10 +370,9 @@ impl CompressContext {
         self.workspace.prev_of = prep.of_table.clone();
         self.workspace.prev_ml = prep.ml_table.clone();
 
-        self.output.clear();
-        self.output.reserve(input.len() + 32);
+        output.reserve(input.len() + 32);
         write_frame_header_with_checksum(
-            &mut self.output,
+            output,
             input.len(),
             Some(dict_id),
             params.window_log,
@@ -340,7 +380,7 @@ impl CompressContext {
         )?;
 
         if input.is_empty() {
-            block_encoder::encode_raw_block(&[], true, &mut self.output)?;
+            block_encoder::encode_raw_block(&[], true, output)?;
         } else if use_attached {
             let input_hash_log = if input.len() >= 2 {
                 let src_log = 32 - ((input.len() as u32) - 1).leading_zeros();
@@ -373,7 +413,7 @@ impl CompressContext {
                     &self.sequences,
                     &mut rep_offsets,
                     true,
-                    &mut self.output,
+                    output,
                     &mut self.workspace,
                 )?;
             } else {
@@ -382,7 +422,7 @@ impl CompressContext {
                     &self.sequences,
                     &mut rep_offsets,
                     true,
-                    &mut self.output,
+                    output,
                     &mut self.workspace,
                     strategy::block_policy(&params, input.len()),
                 )?;
@@ -423,7 +463,7 @@ impl CompressContext {
                         &self.sequences,
                         &mut rep_offsets,
                         true,
-                        &mut self.output,
+                        output,
                         &mut self.workspace,
                     )?;
                 } else {
@@ -432,7 +472,7 @@ impl CompressContext {
                         &self.sequences,
                         &mut rep_offsets,
                         true,
-                        &mut self.output,
+                        output,
                         &mut self.workspace,
                         strategy::block_policy(&params, input.len()),
                     )?;
@@ -473,7 +513,7 @@ impl CompressContext {
                             &self.sequences,
                             &mut rep_offsets,
                             is_last,
-                            &mut self.output,
+                            output,
                             &mut self.workspace,
                         )?;
                     } else {
@@ -482,7 +522,7 @@ impl CompressContext {
                             &self.sequences,
                             &mut rep_offsets,
                             is_last,
-                            &mut self.output,
+                            output,
                             &mut self.workspace,
                             strategy::block_policy(&params, input.len()),
                         )?;
@@ -495,18 +535,19 @@ impl CompressContext {
         if self.content_checksum {
             let hash = xxh64(input, 0);
             let checksum = (hash & 0xFFFF_FFFF) as u32;
-            self.output.extend_from_slice(&checksum.to_le_bytes());
+            output.extend_from_slice(&checksum.to_le_bytes())?;
         }
 
-        Ok(self.take_or_borrow_output())
+        Ok(())
     }
 
-    fn compress_with_dict_fallback(
+    fn compress_with_dict_fallback<S: OutputSink>(
         &mut self,
         input: &[u8],
         dict_id: u32,
         prefix_len: usize,
-    ) -> Result<Cow<'_, [u8]>, CompressError> {
+        output: &mut S,
+    ) -> Result<(), CompressError> {
         let prep = self.prepared.as_ref().unwrap();
         let rep_offsets = prep.rep_offsets;
         let prefix = &prep.combined[..prefix_len];
@@ -528,12 +569,11 @@ impl CompressContext {
             &mut self.hash_long,
             &mut self.dict_hash,
             &mut self.sequences,
-            &mut self.output,
+            output,
             &mut self.workspace,
             &mut self.combined,
             self.content_checksum,
-        )?;
-        Ok(self.take_or_borrow_output())
+        )
     }
 
     fn take_or_borrow_output(&mut self) -> Cow<'_, [u8]> {
@@ -546,7 +586,7 @@ impl CompressContext {
 }
 
 #[allow(clippy::too_many_arguments, clippy::unnecessary_wraps)]
-fn compress_core(
+fn compress_core<S: OutputSink>(
     input: &[u8],
     params: LevelParams,
     dict_id: Option<u32>,
@@ -556,7 +596,7 @@ fn compress_core(
     hash_long: &mut Vec<u32>,
     dict_hash: &mut Vec<u32>,
     sequences: &mut Vec<Sequence>,
-    output: &mut Vec<u8>,
+    output: &mut S,
     workspace: &mut BlockEncodeWorkspace,
     combined: &mut Vec<u8>,
     content_checksum: bool,
@@ -574,7 +614,6 @@ fn compress_core(
         workspace.prev_ml = None;
     }
 
-    output.clear();
     output.reserve(input.len() + 32);
     write_frame_header_with_checksum(
         output,
@@ -824,7 +863,7 @@ fn compress_core(
     if content_checksum {
         let hash = xxh64(input, 0);
         let checksum = (hash & 0xFFFF_FFFF) as u32;
-        output.extend_from_slice(&checksum.to_le_bytes());
+        output.extend_from_slice(&checksum.to_le_bytes())?;
     }
 
     Ok(())

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Add `CompressContext::compress_into` for caller-owned output slices.
+- Fix a panic in `CompressContext` with a prepared dictionary when a
+  snapshot-restoring input follows one that resized the hash tables.
 - Add the `simd` feature (default): runtime AVX2/BMI2 dispatch through
   `fearless_simd` 1.0.
 - Choose Huffman table reuse by estimated size.
