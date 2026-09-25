@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-09-25
+
 ### Added
 
 - Added caller-owned output methods to `DecompressContext` for pipelines that
@@ -85,6 +87,9 @@
 - Benchmark charts compare against lz4rip 0.11.7, `small_decode.svg` covers
   512 B to 1 MiB like `small_encode.svg`, and the outdated aarch64 charts are
   removed.
+- Bump `zrip-core` to `0.11.0`, `zrip-encode` to `0.9.0`, and `zrip-decode`
+  to `0.8.8`.
+- Bump `@paddor/zrip` to `0.5.9` on JSR and npm.
 
 ## [0.8.8] - 2026-09-10
 

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-09-25
+
 - Add caller-owned output methods to `DecompressContext`, retaining reusable
   decoder workspace without requiring decoded buffers to be copied.
 - Upgrade `fearless_simd` to 1.0.
@@ -12,6 +14,7 @@
 - Copy only the used entries of sequence tables when caching them or
   restoring predefined and dictionary tables, and refresh the table cache
   in place instead of allocating a new one per block.
+- Update `zrip-core` to `0.11.0`.
 
 ## [0.8.7] - 2026-09-10
 
