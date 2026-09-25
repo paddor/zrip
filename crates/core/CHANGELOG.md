@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-25
+
 - Length-limit Huffman codes to `MAX_BITS` instead of returning `None` for
   deep trees.
 - Write FSE-compressed Huffman weights, allowing tables for byte values above

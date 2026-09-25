@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-25
+
 - Add `CompressContext::compress_into` for caller-owned output slices.
 - Fix a panic in `CompressContext` with a prepared dictionary when a
   snapshot-restoring input follows one that resized the hash tables.
@@ -24,6 +26,7 @@
   2 KiB at L-1 to 24 KiB at L-8. The negative levels use a denser match
   search on them. These inputs skip the incompressibility sampling.
 - Remove the few-matches bail-out from the fast match finder.
+- Update `zrip-core` to `0.11.0`.
 
 ## [0.8.7] - 2026-09-10
 
