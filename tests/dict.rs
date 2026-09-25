@@ -564,3 +564,34 @@ fn streaming_decoder_dict_mismatch() {
         assert_eq!(err2.kind(), std::io::ErrorKind::InvalidData);
     }
 }
+
+/// Consecutive dictionary frames whose first compressed blocks share a
+/// sequence table header must each decode with their own tables.
+#[cfg(all(feature = "dict_builder", not(miri)))]
+#[test]
+fn frame_decoder_dict_repeated_identical_frames() {
+    use std::io::Read;
+    let record = |i: u32| {
+        format!(
+            r#"{{"id":{i},"name":"user_{i}","score":{},"active":{}}}"#,
+            i.wrapping_mul(2_654_435_761) % 100_000,
+            i.is_multiple_of(3)
+        )
+        .into_bytes()
+    };
+    let samples: Vec<Vec<u8>> = (0..200).map(record).collect();
+    let sample_refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
+    let dict = zrip::dict::train_dict_fastcover(
+        &sample_refs,
+        4096,
+        zrip::dict::fastcover::FastCoverParams::default(),
+    );
+
+    let data: Vec<u8> = (1000..2500).flat_map(record).collect();
+    let frame = zrip::compress_with_dict(&data, 1, &dict).unwrap();
+    let stream = [frame.as_slice(), frame.as_slice(), frame.as_slice()].concat();
+    let mut decoder = zrip::FrameDecoder::with_dict(stream.as_slice(), dict);
+    let mut output = Vec::new();
+    decoder.read_to_end(&mut output).unwrap();
+    assert!(output == data.repeat(3));
+}

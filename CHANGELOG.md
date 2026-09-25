@@ -14,6 +14,9 @@
   context could accept a malformed frame or reject a valid one, and
   `FrameDecoder` could reject valid concatenated frames whose first block
   repeats the previous frame's table header.
+- `FrameDecoder` with a dictionary no longer reuses the previous frame's
+  cached Huffman header after installing the dictionary's table, which made
+  valid concatenated dictionary frames fail with `BadHuffmanStream`.
 
 ## [0.8.9] - 2026-09-25
 

@@ -103,6 +103,13 @@ impl BlockDecodeWorkspace {
         self.huf_valid = false;
     }
 
+    /// Records that `huf_table` was replaced, so the cached Huffman header and
+    /// weights no longer describe it.
+    pub(crate) fn huffman_table_replaced(&mut self) {
+        self.huf_last_weights_valid = false;
+        self.huf_last_header_valid = false;
+    }
+
     /// Records that the live sequence tables were replaced and no longer
     /// match `seq_table_cache`, so the next cache hit copies the cached
     /// tables instead of only their repeat flags.
@@ -301,8 +308,7 @@ fn decompress_frame_with_header(
         ws.huf_table.extend_from_slice(t);
         ws.huf_table_log = l;
         ws.huf_valid = true;
-        ws.huf_last_weights_valid = false;
-        ws.huf_last_header_valid = false;
+        ws.huffman_table_replaced();
     } else if let Some(d) = dict
         && let Some((t, l)) = d.huf_table()
     {
@@ -310,8 +316,7 @@ fn decompress_frame_with_header(
         ws.huf_table.extend_from_slice(t);
         ws.huf_table_log = l;
         ws.huf_valid = true;
-        ws.huf_last_weights_valid = false;
-        ws.huf_last_header_valid = false;
+        ws.huffman_table_replaced();
     }
 
     let mut hasher = if header.content_checksum {

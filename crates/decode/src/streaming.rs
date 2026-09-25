@@ -333,6 +333,7 @@ impl<R: Read> FrameDecoder<R> {
                 self.ws.huf_table.extend_from_slice(t);
                 self.ws.huf_table_log = l;
                 self.ws.huf_valid = true;
+                self.ws.huffman_table_replaced();
             }
         } else {
             self.rep_offsets = [1, 4, 8];
