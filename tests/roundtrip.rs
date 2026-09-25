@@ -911,7 +911,7 @@ fn xxh64_checksum_roundtrip() {
 
 /// A frame that fails before its sequence tables are read must not change
 /// how a reused context decodes the next valid frame.
-#[cfg(all(feature = "std", not(miri)))]
+#[cfg(not(miri))]
 #[test]
 fn decompress_context_recovers_after_a_corrupt_frame() {
     let data: Vec<u8> = (0..1500u32)
