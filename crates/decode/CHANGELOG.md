@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Add caller-owned output methods to `DecompressContext`, retaining reusable
+  decoder workspace without requiring decoded buffers to be copied.
+
 ## [0.8.7] - 2026-09-10
 
 - Correct `FrameDecoder` skippable-frame lengths and reject truncated payloads.
