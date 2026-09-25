@@ -50,17 +50,12 @@ const SMALL_PREFIXES: &[&str] = &["dickens", "nci", "xml", "x-ray"];
 const SMALL_SUFFIXES: &[&str] = &[
     "_512", "_1k", "_2k", "_4k", "_8k", "_16k", "_32k", "_64k", "_128k", "_256k", "_512k", "_1m",
 ];
-const SMALL_DECODE_SUFFIXES: &[&str] = &[
-    "_512", "_1k", "_2k", "_4k", "_8k", "_16k", "_32k", "_64k", "_128k",
-];
 const SMALL_SIZES: &[usize] = &[
     512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576,
 ];
-const SMALL_DECODE_SIZES: &[usize] = &[512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072];
 const SIZE_LABELS: &[&str] = &[
     "512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1M",
 ];
-const SIZE_DECODE_LABELS: &[&str] = &["512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K"];
 
 const SCATTER_LOG_X_MIN: f64 = 1.477; // 10^1.477 ~= 30 MB/s
 const SCATTER_LOG_X_MAX: f64 = 4.0; // 10^4 = 10000 MB/s
@@ -603,7 +598,7 @@ fn load_small_decode_data(
             let mut latest = BTreeMap::new();
             for row in rows {
                 if row.level == small_decode_level(&codec)
-                    && is_small_name(&row.input, SMALL_DECODE_SUFFIXES)
+                    && is_small_name(&row.input, SMALL_SUFFIXES)
                 {
                     latest.insert(row.input.clone(), row);
                 }
@@ -2180,7 +2175,7 @@ fn draw_small_encode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
 
 fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
     let (data, common) = load_small_decode_data(cfg, &cfg.small_decode_codecs);
-    let small_inputs = small_names(SMALL_DECODE_SUFFIXES);
+    let small_inputs = small_names(SMALL_SUFFIXES);
     require_named_rows(
         &data,
         &cfg.small_decode_codecs,
@@ -2238,7 +2233,7 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
         let mut panel_max: f64 = 0.0;
         for codec in &cfg.small_decode_codecs {
             let rows = data.get(*codec).cloned().unwrap_or_default();
-            for suffix in SMALL_DECODE_SUFFIXES {
+            for suffix in SMALL_SUFFIXES {
                 let name = format!("{prefix}{suffix}");
                 for v in [get_decode_mbs(&rows, &name), own_mbs(codec, &name)]
                     .into_iter()
@@ -2260,7 +2255,7 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
         let map_x = |size: usize| {
             x_left
                 + ((size as f64).log10() - 400.0_f64.log10())
-                    / (200_000.0_f64.log10() - 400.0_f64.log10())
+                    / (1_200_000.0_f64.log10() - 400.0_f64.log10())
                     * (x_right - x_left)
         };
         let map_y = |mbs: f64| {
@@ -2274,8 +2269,8 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
             p_top,
             p_bot,
             map_x,
-            SMALL_DECODE_SIZES,
-            SIZE_DECODE_LABELS,
+            SMALL_SIZES,
+            SIZE_LABELS,
         )?;
         for tick in log_ticks(y_min, y_max) {
             let y = map_y(tick);
@@ -2301,12 +2296,12 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
             let Some(style) = cfg.style(codec) else {
                 continue;
             };
-            let pts = SMALL_DECODE_SUFFIXES
+            let pts = SMALL_SUFFIXES
                 .iter()
                 .enumerate()
                 .filter_map(|(i, suffix)| {
                     get_decode_mbs(&rows, &format!("{prefix}{suffix}"))
-                        .map(|mbs| (map_x(SMALL_DECODE_SIZES[i]), map_y(mbs)))
+                        .map(|mbs| (map_x(SMALL_SIZES[i]), map_y(mbs)))
                 })
                 .collect::<Vec<_>>();
             polyline(&area, &pts, style.color, 2, 1.0, false)?;
@@ -2314,12 +2309,12 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
                 dot(&area, x, y, 3, style.color)?;
             }
             if own_codecs.contains(codec) {
-                let pts = SMALL_DECODE_SUFFIXES
+                let pts = SMALL_SUFFIXES
                     .iter()
                     .enumerate()
                     .filter_map(|(i, suffix)| {
                         own_mbs(codec, &format!("{prefix}{suffix}"))
-                            .map(|mbs| (map_x(SMALL_DECODE_SIZES[i]), map_y(mbs)))
+                            .map(|mbs| (map_x(SMALL_SIZES[i]), map_y(mbs)))
                     })
                     .collect::<Vec<_>>();
                 polyline(&area, &pts, style.color, 1, 0.6, false)?;

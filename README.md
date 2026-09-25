@@ -47,16 +47,9 @@ compiled to WASM.
 ![small input decode throughput](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/small_decode.svg)
 </details>
 
-<details>
-<summary>aarch64 (Apple M5)</summary>
-
-![aarch64 pipeline summary](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/summary.svg)
-![aarch64 per-file pipeline](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/pipeline.svg)
-![aarch64 encode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/scatter.svg)
-![aarch64 per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/matrix.svg)
-![small input encode throughput](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/small_encode.svg)
-![small input decode throughput](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/small_decode.svg)
-</details>
+No current aarch64 charts. If you have an aarch64 machine, run the benchmark
+and chart commands from [`DEVELOPMENT.md`](DEVELOPMENT.md) and send a PR with
+`doc/charts/aarch64/`.
 
 <details>
 <summary>wasm32 (wasmtime)</summary>
