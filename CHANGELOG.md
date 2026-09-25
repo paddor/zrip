@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added caller-owned output methods to `DecompressContext` for pipelines that
+  need decoded buffers to outlive the next context call without copying.
+
 ### Fixed
 
 - Huffman literal compression no longer silently falls back to raw literals.

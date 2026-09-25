@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add caller-owned output methods to `DecompressContext`, retaining reusable
+  decoder workspace without requiring decoded buffers to be copied.
 - Upgrade `fearless_simd` to 1.0.
 - Copy literal runs with a fixed 16-byte copy when enough source remains,
   including a safe variant for `paranoid` builds.
