@@ -28,6 +28,11 @@ path = "fuzz_targets/corrupt_decompress.rs"
 doc = false
 
 [[bin]]
+name = "zrip_fuzz_context_reuse"
+path = "fuzz_targets/context_reuse.rs"
+doc = false
+
+[[bin]]
 name = "zrip_fuzz_c_compress_zrip_decompress"
 path = "fuzz_targets/c_compress_zrip_decompress.rs"
 doc = false

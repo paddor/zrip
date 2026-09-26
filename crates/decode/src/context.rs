@@ -197,6 +197,34 @@ mod tests {
         out.push((raw >> 16) as u8);
     }
 
+    /// A malformed frame without its magic, found by fuzzing ozlrip. Its
+    /// first decode fails with `InvalidOffset`.
+    const MALFORMED_FRAME_AFTER_MAGIC: [u8; 47] = [
+        0x00, 0x00, 0x0a, 0x43, 0x00, 0x00, 0x7c, 0x00, 0x00, 0xd5, 0x31, 0xd7, 0xb1, 0x00, 0x04,
+        0x00, 0x00, 0xd7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x16, 0x00, 0x24,
+        0x00, 0x00, 0x35, 0x01, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x7c, 0x00, 0x00, 0x11, 0x00,
+        0xd7, 0x09,
+    ];
+
+    #[test]
+    fn failed_frame_does_not_change_the_next_decode() {
+        let fresh = DecompressContext::new()
+            .decompress_after_magic_into(&MALFORMED_FRAME_AFTER_MAGIC, &mut Vec::new(), usize::MAX)
+            .unwrap_err();
+
+        let mut ctx = DecompressContext::new();
+        for attempt in 0..3 {
+            let err = ctx
+                .decompress_after_magic_into(
+                    &MALFORMED_FRAME_AFTER_MAGIC,
+                    &mut Vec::new(),
+                    usize::MAX,
+                )
+                .unwrap_err();
+            assert_eq!(err, fresh, "attempt {attempt}");
+        }
+    }
+
     #[test]
     fn decompress_after_magic_into_appends_output() {
         let mut frame = Vec::new();

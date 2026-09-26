@@ -103,6 +103,20 @@ impl BlockDecodeWorkspace {
         self.huf_valid = false;
     }
 
+    /// Records that `huf_table` was replaced, so the cached Huffman header and
+    /// weights no longer describe it.
+    pub(crate) fn huffman_table_replaced(&mut self) {
+        self.huf_last_weights_valid = false;
+        self.huf_last_header_valid = false;
+    }
+
+    /// Records that the live sequence tables were replaced and no longer
+    /// match `seq_table_cache`, so the next cache hit copies the cached
+    /// tables instead of only their repeat flags.
+    pub(crate) fn seq_tables_replaced(&mut self) {
+        self.seq_table_cache_tables_current = false;
+    }
+
     #[cfg(feature = "alloc")]
     pub(crate) fn cache_dict(&mut self, dict: &zrip_core::dict::Dictionary) {
         let mut st = SequenceDecodeTables::new_default();
@@ -294,8 +308,7 @@ fn decompress_frame_with_header(
         ws.huf_table.extend_from_slice(t);
         ws.huf_table_log = l;
         ws.huf_valid = true;
-        ws.huf_last_weights_valid = false;
-        ws.huf_last_header_valid = false;
+        ws.huffman_table_replaced();
     } else if let Some(d) = dict
         && let Some((t, l)) = d.huf_table()
     {
@@ -303,8 +316,7 @@ fn decompress_frame_with_header(
         ws.huf_table.extend_from_slice(t);
         ws.huf_table_log = l;
         ws.huf_valid = true;
-        ws.huf_last_weights_valid = false;
-        ws.huf_last_header_valid = false;
+        ws.huffman_table_replaced();
     }
 
     let mut hasher = if header.content_checksum {
@@ -359,10 +371,12 @@ fn decompress_frame_with_header(
                     return Err(DecompressError::InputExhausted);
                 }
                 if seq_tables.is_none() {
-                    let mut initial_tables = ws
-                        .seq_tables
-                        .take()
-                        .unwrap_or_else(|| Box::new(SequenceDecodeTables::new_default()));
+                    // A frame that failed after taking the tables dropped
+                    // them; fresh tables do not match the table cache.
+                    let mut initial_tables = ws.seq_tables.take().unwrap_or_else(|| {
+                        ws.seq_tables_replaced();
+                        Box::new(SequenceDecodeTables::new_default())
+                    });
                     let initial_rep_offsets =
                         initial_sequence_state(initial_tables.as_mut(), ws, dict);
                     seq_tables = Some(initial_tables);
@@ -436,11 +450,11 @@ fn initial_sequence_state(
 ) -> [u32; 3] {
     if let Some(ref cached) = ws.cached_dict_tables {
         tables.clone_from(cached);
-        ws.seq_table_cache_tables_current = false;
+        ws.seq_tables_replaced();
         ws.cached_dict_rep
     } else if let Some(d) = dict {
         tables.reset_default();
-        ws.seq_table_cache_tables_current = false;
+        ws.seq_tables_replaced();
         if let Some((t, l)) = d.of_table() {
             tables.of_table = crate::seq_table::SeqTable::promote_of(t);
             tables.of_accuracy = l;

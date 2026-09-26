@@ -266,6 +266,58 @@ fn frame_decoder_multiframe() {
     assert_eq!(output, expected);
 }
 
+/// Text whose sequences use FSE-compressed tables rather than the
+/// predefined ones.
+fn varied_text(lines: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    for i in 0..lines {
+        let value = i.wrapping_mul(2_654_435_761) % 100_000;
+        out.extend_from_slice(
+            format!(
+                "record {i}: sensor {} reads {value} at offset {}\n",
+                i % 37,
+                i * 13
+            )
+            .as_bytes(),
+        );
+    }
+    out
+}
+
+/// Consecutive frames whose first compressed blocks share a sequence table
+/// header must each decode with their own tables.
+#[cfg(not(miri))]
+#[test]
+fn frame_decoder_repeated_identical_frames() {
+    use std::io::Read;
+    let data = varied_text(1500);
+    for level in [1, 3] {
+        let frame = zrip::compress(&data, level).unwrap();
+        let stream = [frame.as_slice(), frame.as_slice(), frame.as_slice()].concat();
+        let mut decoder = zrip::FrameDecoder::new(&stream[..]);
+        let mut output = Vec::new();
+        decoder.read_to_end(&mut output).unwrap();
+        assert!(output == data.repeat(3), "level {level}");
+    }
+}
+
+/// `FrameDecoder::reset` must not carry sequence table state into the next
+/// frame.
+#[cfg(not(miri))]
+#[test]
+fn frame_decoder_reset_decodes_the_same_frame_again() {
+    use std::io::Read;
+    let data = varied_text(1500);
+    let frame = zrip::compress(&data, 1).unwrap();
+    let mut decoder = zrip::FrameDecoder::new(frame.as_slice());
+    for round in 0..3 {
+        let mut output = Vec::new();
+        decoder.read_to_end(&mut output).unwrap();
+        assert!(output == data, "round {round}");
+        decoder.reset(frame.as_slice());
+    }
+}
+
 #[cfg(not(miri))]
 #[test]
 fn frame_decoder_with_checksum() {

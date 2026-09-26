@@ -908,3 +908,34 @@ fn xxh64_checksum_roundtrip() {
     let decompressed = zrip::decompress(&compressed).unwrap();
     assert_eq!(decompressed, data);
 }
+
+/// A frame that fails before its sequence tables are read must not change
+/// how a reused context decodes the next valid frame.
+#[cfg(not(miri))]
+#[test]
+fn decompress_context_recovers_after_a_corrupt_frame() {
+    let data: Vec<u8> = (0..1500u32)
+        .flat_map(|i| {
+            format!(
+                "record {i}: sensor {} reads {} at offset {}\n",
+                i % 37,
+                i.wrapping_mul(2_654_435_761) % 100_000,
+                i * 13
+            )
+            .into_bytes()
+        })
+        .collect();
+    let frame = zrip::compress(&data, 1).unwrap();
+    let mut corrupt = frame.clone();
+    // Lands in the first block's literals section.
+    corrupt[12] ^= 1;
+
+    let mut ctx = zrip::DecompressContext::new();
+    for round in 0..3 {
+        let mut output = Vec::new();
+        ctx.decompress_into(&frame, &mut output).unwrap();
+        assert!(output == data, "round {round}");
+        let err = ctx.decompress_into(&corrupt, &mut Vec::new()).unwrap_err();
+        assert_eq!(err, zrip::DecompressError::CorruptLiterals);
+    }
+}
