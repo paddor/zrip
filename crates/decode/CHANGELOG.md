@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-09-26
+
 - Make `DecompressContext` available with the `alloc` feature. It no longer
   requires `std`.
 - Mark the live sequence tables as no longer matching the table cache

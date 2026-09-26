@@ -2,10 +2,13 @@
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-09-26
+
 ### Changed
 
 - `DecompressContext` is available with the `alloc` feature in `no_std`
   builds. It no longer requires `std`.
+- Bump the JSR and npm packages to `0.5.10`.
 
 ### Fixed
 
