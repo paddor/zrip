@@ -1,6 +1,6 @@
 [package]
 name = "zrip-decode"
-version = "0.8.8"
+version = "0.8.9"
 edition = "2024"
 rust-version = "1.89"
 description = "zstd decoder for zrip (internal crate)"
