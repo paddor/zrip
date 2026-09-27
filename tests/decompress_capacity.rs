@@ -1,6 +1,10 @@
 //! A frame that declares its content size decodes into one allocation of that
 //! size plus the block writer's slack.
 
+// These tests encode and decode megabyte inputs and call C zstd, which Miri
+// cannot run. Miri covers the same decode paths through smaller frames.
+#![cfg(not(miri))]
+
 use zrip::DecompressError;
 
 /// Spare bytes the block writer keeps past the end of its output.
