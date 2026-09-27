@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.11] - 2026-09-27
+
 ### Changed
 
 - A frame that declares its content size may not write past it. A raw or
@@ -9,6 +11,7 @@
   is copied. A compressed block past it fails with `CorruptSequences`, as it
   already did for the caller's output limit. Both used to fail with
   `FrameSizeMismatch` after the last block.
+- Bump the JSR and npm packages to `0.5.11`.
 
 ### Fixed
 

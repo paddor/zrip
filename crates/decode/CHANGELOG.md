@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-09-27
+
 - Use a frame's declared content size as its output limit. Up to 128 MiB,
   the output is allocated once at that size plus 64 bytes instead of
   doubling near the end of the frame. A compressed block past the declared
