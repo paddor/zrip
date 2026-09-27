@@ -96,6 +96,10 @@ name = "zrip_compress_into_alloc"
 path = "tests/compress_into_alloc.rs"
 
 [[test]]
+name = "zrip_decompress_capacity"
+path = "tests/decompress_capacity.rs"
+
+[[test]]
 name = "zrip_dict"
 path = "tests/dict.rs"
 

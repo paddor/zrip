@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Use a frame's declared content size as its output limit. Up to 128 MiB,
+  the output is allocated once at that size plus 64 bytes instead of
+  doubling near the end of the frame. A compressed block past the declared
+  size fails with `CorruptSequences`, and a raw or RLE block with
+  `FrameSizeMismatch`.
+
 ## [0.8.9] - 2026-09-26
 
 - Make `DecompressContext` available with the `alloc` feature. It no longer
