@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Changed
+
+- A frame that declares its content size may not write past it. A raw or
+  RLE block past the declared size fails with `FrameSizeMismatch` before it
+  is copied. A compressed block past it fails with `CorruptSequences`, as it
+  already did for the caller's output limit. Both used to fail with
+  `FrameSizeMismatch` after the last block.
+
+### Fixed
+
+- A frame that declares a content size of up to 128 MiB decodes into one
+  allocation of that size plus 64 bytes. Each block reserved 128 KiB past
+  its start, so near the end of the frame the output doubled and was
+  copied: a 1 MB frame decoded into a 2 MB buffer and a 2 KB frame into a
+  128 KiB buffer. This affected `decompress`, `decompress_into` and a
+  `DecompressContext` decoding into a new `Vec`.
+
 ## [0.8.10] - 2026-09-26
 
 ### Changed

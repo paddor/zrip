@@ -38,6 +38,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::exec::{SequenceOutputScope, decode_execute_sequences, decode_execute_single_sequence};
+use crate::fast_vec::WILDCOPY_OVERLENGTH;
 use crate::literals::decode_literals_ws;
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
 use zrip_core::block::{BlockType, parse_block_header};
@@ -287,13 +288,21 @@ fn decompress_frame_with_header(
         }
     }
 
-    if let Some(fcs) = header.frame_content_size {
-        if max_output < usize::MAX && fcs as usize > max_output {
-            return Err(DecompressError::OutputTooSmall);
+    // A frame may not write more than it declares, so its declared size is
+    // its output limit. Each block then reserves at most the bytes still to
+    // come, and the reservation up front covers the whole frame.
+    let (max_output, overrun) = match header.frame_content_size {
+        Some(fcs) => {
+            let fcs = usize::try_from(fcs)
+                .ok()
+                .filter(|&fcs| fcs <= max_output)
+                .ok_or(DecompressError::OutputTooSmall)?;
+            let hint = fcs.min(MAX_WINDOW_SIZE as usize);
+            output.reserve(hint + WILDCOPY_OVERLENGTH);
+            (fcs, DecompressError::FrameSizeMismatch)
         }
-        let hint = (fcs as usize).min(MAX_WINDOW_SIZE as usize);
-        output.reserve(hint + 32);
-    }
+        None => (max_output, DecompressError::OutputTooSmall),
+    };
 
     let mut offset = header.header_size;
     let output_start = output.len();
@@ -350,7 +359,7 @@ fn decompress_frame_with_header(
                     return Err(DecompressError::InputExhausted);
                 }
                 if output.len() - output_start + block_size > max_output {
-                    return Err(DecompressError::OutputTooSmall);
+                    return Err(overrun);
                 }
                 output.extend_from_slice(&input[offset..offset + block_size]);
                 offset += block_size;
@@ -360,7 +369,7 @@ fn decompress_frame_with_header(
                     return Err(DecompressError::InputExhausted);
                 }
                 if output.len() - output_start + block_size > max_output {
-                    return Err(DecompressError::OutputTooSmall);
+                    return Err(overrun);
                 }
                 let byte = input[offset];
                 output.resize(output.len() + block_size, byte);
@@ -394,7 +403,14 @@ fn decompress_frame_with_header(
                     &mut rep_offsets,
                     ws,
                     dict_history,
-                )?;
+                )
+                .map_err(|err| {
+                    if err == DecompressError::OutputTooSmall {
+                        overrun.clone()
+                    } else {
+                        err
+                    }
+                })?;
                 offset += block_size;
             }
         }

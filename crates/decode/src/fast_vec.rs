@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use zrip_core::error::DecompressError;
 use zrip_core::hint::unlikely;
 
-const WILDCOPY_OVERLENGTH: usize = 64;
+pub(crate) const WILDCOPY_OVERLENGTH: usize = 64;
 
 pub(crate) struct BlockOutput<'a> {
     vec: &'a mut Vec<u8>,
