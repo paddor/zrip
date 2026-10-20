@@ -160,7 +160,3 @@ redundant_closure_for_method_calls = "allow"
 enum_glob_use = "allow"
 module_name_repetitions = "allow"
 needless_pass_by_value = "allow"
-
-[profile.release]
-lto = "thin"
-codegen-units = 1
