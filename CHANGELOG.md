@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The workspace release profile uses Cargo's defaults, without LTO, so the
+  profiling examples build zrip the way applications do.
+
 ## [0.8.13] - 2026-10-20
 
 ### Added
