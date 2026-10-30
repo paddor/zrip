@@ -398,7 +398,11 @@ impl<R: Read> FrameDecoder<R> {
 
         if self.window_size > 0 {
             self.decode_history.extend_from_slice(&self.output_buf);
-            if self.decode_history.len() > self.window_size {
+            // Trim lazily so the `memmove` happens once per window of output.
+            // Dictionary content stays reachable until a full window is produced.
+            if self.frame_bytes >= self.window_size
+                && self.decode_history.len() > self.window_size * 2
+            {
                 let start = self.decode_history.len() - self.window_size;
                 self.decode_history.copy_within(start.., 0);
                 self.decode_history.truncate(self.window_size);
@@ -427,7 +431,15 @@ impl<R: Read> FrameDecoder<R> {
     }
 
     fn decode_compressed_block(&mut self, block_size: usize) -> io::Result<()> {
-        let history: &[u8] = &self.decode_history;
+        // The `decode_history` may retain up to 2x the window, so expose only the last
+        // `window_size` bytes. Until the frame has produced a full window, the
+        // dictionary is still reachable and the whole `decode_history` is visible.
+        let history_start = if self.frame_bytes >= self.window_size {
+            self.decode_history.len().saturating_sub(self.window_size)
+        } else {
+            0
+        };
+        let history: &[u8] = &self.decode_history[history_start..];
         let block_data = &self.read_buf[..block_size];
 
         let (lit_consumed, lits_at) = decode_literals_ws(block_data, &mut self.ws)
