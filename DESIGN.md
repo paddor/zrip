@@ -135,8 +135,9 @@ window log and LDM. `reset()` starts a new frame and keeps all buffers.
 
 ### Long distance matching (`ldm.rs`)
 
-For windows beyond the level default, up to 128 MiB. A gear rolling hash
-picks split points, about one position in `2^hash_rate_log`. Each split
+For windows beyond the level default, up to 128 MiB, the default with LDM on.
+A gear rolling hash picks split points, about one position in
+`2^hash_rate_log`. Each split
 stores position and checksum in a bucketed table (up to 2^20 entries, 16 per
 bucket) and probes for a confirmed match of 64 bytes or more. The regular
 Fast or DFast finder fills the gaps between LDM matches. The output is plain

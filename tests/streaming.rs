@@ -1131,6 +1131,50 @@ mod ldm {
     }
 
     #[test]
+    fn default_window_handles_tiny_inputs() {
+        // Inputs shorter than LDM's 64-byte minimum match skip its table.
+        let opts = zrip::Options::default().ldm(true);
+        let data = letters(128, 7);
+        for level in [-7, 1, 3, 4] {
+            for len in 0..=data.len() {
+                let input = &data[..len];
+                let compressed = zrip::compress_opts(input, level, &opts).unwrap();
+                assert_eq!(zrip::decompress(&compressed).unwrap(), input);
+                assert_eq!(zstd::decode_all(&compressed[..]).unwrap(), input);
+            }
+        }
+    }
+
+    #[test]
+    fn streaming_default_window_reaches_past_level_window() {
+        use std::io::Write;
+        // L1's own window is 512 KiB, so only the LDM default reaches a repeat
+        // 1 MiB back.
+        let part = letters(1 << 20, 5);
+        let data = [&part[..], &part].concat();
+
+        let mut encoder = zrip::FrameEncoder::new(Vec::new(), 1).unwrap();
+        encoder.write_all(&data).unwrap();
+        let no_ldm = encoder.finish().unwrap();
+
+        let opts = zrip::Options::default().ldm(true);
+        let mut encoder = zrip::FrameEncoder::with_options(Vec::new(), 1, &opts).unwrap();
+        encoder.write_all(&data).unwrap();
+        let ldm = encoder.finish().unwrap();
+
+        let header = zrip::frame::header::parse_frame_header(&ldm).unwrap();
+        assert_eq!(header.window_size, 1 << 27);
+        assert!(
+            ldm.len() < no_ldm.len() * 3 / 4,
+            "LDM should find the repeat: ldm={} no_ldm={}",
+            ldm.len(),
+            no_ldm.len()
+        );
+        assert_eq!(zrip::decompress(&ldm).unwrap(), data);
+        assert_eq!(zstd::decode_all(&ldm[..]).unwrap(), data);
+    }
+
+    #[test]
     fn one_shot_ldm_reaches_whole_single_segment_window() {
         // A single-segment frame's window is its content size, whatever
         // `window_log` the match finder uses.

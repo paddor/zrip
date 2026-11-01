@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `Options::ldm(true)` without `window_log` uses a 128 MiB window, like
+  `zstd --long`, so streams find repeats past the level's window. One-shot
+  calls shrink it to the input. `FrameEncoder` frames always advertise
+  128 MiB, even short ones, and a long stream takes about 275 MiB to encode
+  and 130 MiB to decode. Set `window_log` for a smaller window.
+
+### Fixed
+
+- `compress_opts` with LDM sizes its hash table for the window after shrinking
+  that to the input. A 1 KiB input at `window_log` 24 allocated the full 8 MiB
+  table and took 261 µs instead of 8 µs.
+- `compress_opts` with `ldm(true)` and no `window_log` no longer panics in
+  debug builds on inputs of 2 to 16 bytes.
+
 ## [0.8.14] - 2026-10-31
 
 ### Changed

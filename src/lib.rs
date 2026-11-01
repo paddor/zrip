@@ -62,6 +62,9 @@
 //! # }
 //! ```
 //!
+//! Without `window_log`, LDM uses a 128 MiB window. One-shot calls shrink it to
+//! the input.
+//!
 //! # Buffer reuse
 //!
 //! For repeated compression/decompression, [`CompressContext`] and

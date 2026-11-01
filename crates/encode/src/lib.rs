@@ -276,11 +276,29 @@ pub fn compress_opts(
     level: i32,
     opts: &strategy::Options,
 ) -> Result<Vec<u8>, CompressError> {
-    let mut params = strategy::level_params_for_size(level, input.len())
+    let params = params_with_options(level, input.len(), opts)?;
+    compress_inner(input, &params)
+}
+
+/// Returns the parameters for a one-shot frame of `input_len` bytes.
+fn params_with_options(
+    level: i32,
+    input_len: usize,
+    opts: &strategy::Options,
+) -> Result<strategy::LevelParams, CompressError> {
+    let mut params = strategy::level_params_for_size(level, input_len)
         .ok_or(CompressError::InvalidLevel(level))?;
     strategy::apply_options(&mut params, opts);
-    clamp_params_to_src_size(&mut params, input.len());
-    compress_inner(input, &params)
+    clamp_params_to_src_size(&mut params, input_len);
+    // The window may have shrunk to the input, so size the LDM table for what
+    // is left. Inputs shorter than LDM's minimum match skip it.
+    #[cfg(feature = "ldm")]
+    if opts.ldm {
+        let window_log = params.window_log.max(strategy::WINDOW_LOG_MIN);
+        let ldm = strategy::LdmParams::default_for_window_log(window_log);
+        params.ldm_params = (input_len >= ldm.min_match_length as usize).then_some(ldm);
+    }
+    Ok(params)
 }
 
 #[allow(clippy::unnecessary_wraps)]
@@ -656,6 +674,42 @@ mod tests {
             let ldm = params.ldm_params.unwrap();
             assert!(ldm.hash_log >= ldm.bucket_size_log);
         }
+    }
+
+    #[cfg(feature = "ldm")]
+    #[test]
+    fn ldm_defaults_window_log_to_27() {
+        let mut params = strategy::level_params(3).unwrap();
+        strategy::apply_options(&mut params, &strategy::Options::default().ldm(true));
+        assert_eq!(params.window_log, 27);
+
+        let mut params = strategy::level_params(3).unwrap();
+        let opts = strategy::Options::default().window_log(22).ldm(true);
+        strategy::apply_options(&mut params, &opts);
+        assert_eq!(params.window_log, 22);
+    }
+
+    #[cfg(feature = "ldm")]
+    #[test]
+    fn ldm_table_follows_the_clamped_window() {
+        let table_log = |len: usize, opts: &strategy::Options| {
+            params_with_options(1, len, opts)
+                .unwrap()
+                .ldm_params
+                .map(|ldm| ldm.hash_log)
+        };
+
+        let bare = strategy::Options::default().ldm(true);
+        assert_eq!(table_log(1, &bare), None);
+        assert_eq!(table_log(63, &bare), None);
+        assert_eq!(table_log(64, &bare), Some(9));
+        assert_eq!(table_log(1 << 10, &bare), Some(9));
+        assert_eq!(table_log(1 << 20, &bare), Some(19));
+        assert_eq!(table_log(1 << 27, &bare), Some(20));
+
+        let explicit = strategy::Options::default().window_log(24).ldm(true);
+        assert_eq!(table_log(1 << 10, &explicit), Some(9));
+        assert_eq!(table_log(1 << 27, &explicit), Some(20));
     }
 
     /// Bytes from a skewed alphabet: about 3.5 bits of order-0 entropy per

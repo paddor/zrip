@@ -140,6 +140,8 @@ pub const HASH_LOG_MIN: u32 = 6;
 pub const HASH_LOG_MAX: u32 = 30;
 pub const WINDOW_LOG_MIN: u32 = 10;
 pub const WINDOW_LOG_MAX: u32 = 27;
+#[cfg(feature = "ldm")]
+const LDM_DEFAULT_WINDOW_LOG: u32 = 27;
 
 /// Largest input a negative level encodes with raw literals.
 ///
@@ -412,6 +414,8 @@ impl Options {
         self
     }
 
+    /// Enables long distance matching. Unless `window_log` is set, the window
+    /// defaults to 2^27 bytes. One-shot calls shrink it to the input.
     #[cfg(feature = "ldm")]
     #[must_use]
     pub fn ldm(mut self, enable: bool) -> Self {
@@ -426,6 +430,9 @@ pub fn apply_options(params: &mut LevelParams, opts: &Options) {
     }
     #[cfg(feature = "ldm")]
     if opts.ldm {
+        if opts.window_log.is_none() {
+            params.window_log = LDM_DEFAULT_WINDOW_LOG;
+        }
         params.ldm_params = Some(LdmParams::default_for_window_log(params.window_log));
     }
 }

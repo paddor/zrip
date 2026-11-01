@@ -121,13 +121,18 @@ enc.write_all(input)?;
 let compressed = enc.finish()?;
 ```
 
+`.ldm(true)` without `window_log` uses a 128 MiB window (`window_log` 27), like
+`zstd --long`. One-shot calls shrink it to the input. `FrameEncoder` does not
+know its input size, so its frames always advertise 128 MiB, even short ones,
+and decoders must allow that window. Set `window_log` for a smaller window.
+
 `window_log` controls the maximum match distance (24 = 16 MiB, 27 = 128 MiB).
 One-shot frames up to 128 MiB advertise their content size as the window, so
-there LDM can reach the whole input. The main cost is memory: the encoder allocates an 8 MiB LDM hash table plus
-a window buffer of `1 << window_log` bytes, and the decoder allocates a
-window buffer of the same size (declared in the frame header). At
-`window_log=27` that is ~136 MiB on each side. On data without long-range
-repeats, LDM adds overhead with no ratio benefit.
+there LDM can reach the whole input. The main cost is memory: the encoder
+allocates an LDM hash table of up to 8 MiB. `FrameEncoder` also buffers up to
+twice the window, and `FrameDecoder` keeps one window. On a long stream at
+`window_log=27` that is ~275 MiB to encode and ~130 MiB to decode. On data
+without long-range repeats, LDM adds overhead with no ratio benefit.
 
 ### Dictionary compression
 
