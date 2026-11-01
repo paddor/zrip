@@ -53,7 +53,7 @@ impl PreparedDict {
         combined.extend_from_slice(prefix);
 
         let attached_hash_log = if prefix_len >= 2 {
-            let src_log = 32 - ((prefix_len as u32) - 1).leading_zeros();
+            let src_log = strategy::src_log(prefix_len);
             (src_log + 1).clamp(
                 strategy::HASH_LOG_MIN,
                 params.hash_log.max(strategy::HASH_LOG_MIN),
@@ -465,7 +465,7 @@ impl CompressContext {
             block_encoder::encode_raw_block(&[], true, output)?;
         } else if use_attached {
             let input_hash_log = if input.len() >= 2 {
-                let src_log = 32 - ((input.len() as u32) - 1).leading_zeros();
+                let src_log = strategy::src_log(input.len());
                 params.hash_log.min(src_log).max(strategy::HASH_LOG_MIN)
             } else {
                 strategy::HASH_LOG_MIN

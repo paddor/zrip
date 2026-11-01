@@ -249,7 +249,7 @@ pub(crate) fn clamp_params_to_src_size(params: &mut strategy::LevelParams, src_l
         .window_log
         .clamp(strategy::WINDOW_LOG_MIN, strategy::WINDOW_LOG_MAX);
     if src_len >= 2 {
-        let src_log = 32 - ((src_len as u32) - 1).leading_zeros();
+        let src_log = strategy::src_log(src_len);
         params.hash_log = params.hash_log.min(src_log).max(strategy::HASH_LOG_MIN);
         params.chain_log = params.chain_log.min(src_log).max(strategy::HASH_LOG_MIN);
         params.window_log = params.window_log.min(src_log);
@@ -655,6 +655,30 @@ mod tests {
         assert_eq!(params.hash_log, strategy::HASH_LOG_MIN);
         assert_eq!(params.chain_log, strategy::HASH_LOG_MAX);
         assert_eq!(params.window_log, strategy::WINDOW_LOG_MAX);
+    }
+
+    #[test]
+    fn src_log_rounds_up() {
+        assert_eq!(strategy::src_log(2), 1);
+        assert_eq!(strategy::src_log(3), 2);
+        assert_eq!(strategy::src_log(1 << 10), 10);
+        assert_eq!(strategy::src_log((1 << 10) + 1), 11);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn inputs_past_4_gib_keep_the_level_params() {
+        let full = strategy::level_params(1).unwrap();
+        for len in [1usize << 32, (1 << 32) + 5, 5 << 32] {
+            let sized = strategy::level_params_for_size(1, len).unwrap();
+            assert_eq!(sized.window_log, full.window_log, "len {len}");
+            assert_eq!(sized.hash_log, full.hash_log, "len {len}");
+
+            let mut clamped = full;
+            clamp_params_to_src_size(&mut clamped, len);
+            assert_eq!(clamped.window_log, full.window_log, "len {len}");
+            assert_eq!(clamped.hash_log, full.hash_log, "len {len}");
+        }
     }
 
     #[test]

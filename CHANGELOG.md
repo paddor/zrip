@@ -17,6 +17,10 @@
   table and took 261 µs instead of 8 µs.
 - `compress_opts` with `ldm(true)` and no `window_log` no longer panics in
   debug builds on inputs of 2 to 16 bytes.
+- One-shot inputs just above a multiple of 4 GiB keep their level's window and
+  hash tables. The input size was cut to 32 bits, so 4 GiB + 5 bytes got
+  `window_log` 3 and 8-byte blocks. An input of exactly 4 GiB panicked in
+  debug builds.
 
 ## [0.8.14] - 2026-10-31
 
