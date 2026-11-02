@@ -447,9 +447,9 @@ impl<R: Read> FrameDecoder<R> {
     }
 
     fn decode_compressed_block(&mut self, block_size: usize) -> io::Result<()> {
-        // The `decode_history` may retain up to 2x the window, so expose only the last
-        // `window_size` bytes. Until the frame has produced a full window, the
-        // dictionary is still reachable and the whole `decode_history` is visible.
+        // `decode_history` can hold up to two windows, so expose only the last
+        // `window_size` bytes. Until the frame has produced a full window, all
+        // of it stays visible, so the whole dictionary is reachable.
         let history_start = if self.frame_bytes >= self.window_size {
             self.decode_history.len().saturating_sub(self.window_size)
         } else {
