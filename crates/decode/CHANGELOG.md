@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.13] - 2026-11-02
+
 - `FrameDecoder` keeps up to two windows of history and drops the older one
   when full, instead of trimming it after every block. A stream with a
   128 MiB window decodes at 2.5 GB/s instead of 24 MB/s, and holds about
