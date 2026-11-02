@@ -130,8 +130,8 @@ and decoders must allow that window. Set `window_log` for a smaller window.
 One-shot frames up to 128 MiB advertise their content size as the window, so
 there LDM can reach the whole input. The main cost is memory: the encoder
 allocates an LDM hash table of up to 8 MiB. `FrameEncoder` also buffers up to
-twice the window, and `FrameDecoder` keeps one window. On a long stream at
-`window_log=27` that is ~275 MiB to encode and ~130 MiB to decode. On data
+twice the window, and `FrameDecoder` keeps up to two windows. On a long stream
+at `window_log=27` that is ~275 MiB to encode and ~260 MiB to decode. On data
 without long-range repeats, LDM adds overhead with no ratio benefit.
 
 ### Dictionary compression

@@ -1151,6 +1151,58 @@ fn streaming_decoder_multiframe_seq_tables_reset() {
     assert_eq!(output, expected);
 }
 
+/// Pseudo-random bytes from xorshift64.
+fn noise(len: usize, seed: u64) -> Vec<u8> {
+    let mut x = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+    (0..len)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 32) as u8
+        })
+        .collect()
+}
+
+/// The data repeats at almost one window back, for many windows.
+/// `FrameDecoder` drops old history once per window, so matches have to
+/// reach across each drop. C's streaming encoder finds few of these matches
+/// at this window size, so the frame comes from the one-shot compressor.
+#[test]
+fn frame_decoder_c_matches_near_window_edge() {
+    use std::io::Read;
+    const WINDOW_LOG: u32 = 17;
+    let chunk_len = (1 << WINDOW_LOG) - 3000;
+    let mut chunk = noise(chunk_len, 1);
+    let mut data = Vec::new();
+    for i in 0..40 {
+        for j in 0..8 {
+            chunk[(i * 8 + j) * 104_729 % chunk_len] ^= 0xA5;
+        }
+        data.extend_from_slice(&chunk);
+    }
+
+    let mut compressor = zstd::bulk::Compressor::new(3).unwrap();
+    compressor
+        .set_parameter(zstd_safe::CParameter::WindowLog(WINDOW_LOG))
+        .unwrap();
+    let compressed = compressor.compress(&data).unwrap();
+    let header = zrip::frame::header::parse_frame_header(&compressed).unwrap();
+    assert_eq!(header.window_size, 1 << WINDOW_LOG);
+    assert!(
+        compressed.len() < data.len() / 8,
+        "C found no far matches: {} -> {}",
+        data.len(),
+        compressed.len()
+    );
+
+    let mut decoder = zrip::FrameDecoder::new(compressed.as_slice());
+    let mut out = Vec::new();
+    decoder.read_to_end(&mut out).unwrap();
+    assert_eq!(out.len(), data.len());
+    assert!(out == data, "content mismatch");
+}
+
 #[test]
 fn streaming_encoder_reset_c_zstd_interop() {
     use std::io::Write;
@@ -1654,6 +1706,43 @@ fn streaming_dict_multiblock_reset_c_cross_validate() {
         std::io::Read::read_to_end(&mut c_dec, &mut out).unwrap();
         assert_eq!(out, data);
     }
+}
+
+/// Until the frame has produced a full window, matches may reach any
+/// dictionary byte, even past the window (RFC 8878, section 5). Here the
+/// dictionary plus the first block exceed the window, and the second block
+/// copies bytes near the start of the dictionary.
+#[test]
+fn frame_decoder_c_dict_start_reachable_before_full_window() {
+    use std::io::{Read, Write};
+    const WINDOW_LOG: u32 = 18;
+    let (_, mut dict_data) = make_dict_samples();
+    let content_start = dict_data.len();
+    dict_data.extend_from_slice(&noise(200_000, 2));
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+
+    let mut data = noise(BLOCK, 3);
+    data.extend_from_slice(&dict_data[content_start..content_start + 60_000]);
+    data.extend_from_slice(&noise(20_000, 4));
+
+    let mut encoder = zstd::Encoder::with_dictionary(Vec::new(), 3, &dict_data).unwrap();
+    encoder.window_log(WINDOW_LOG).unwrap();
+    encoder.write_all(&data).unwrap();
+    let compressed = encoder.finish().unwrap();
+    let header = zrip::frame::header::parse_frame_header(&compressed).unwrap();
+    assert_eq!(header.window_size, 1 << WINDOW_LOG);
+    assert!(
+        compressed.len() < BLOCK + 40_000,
+        "C did not match the dictionary: {} -> {}",
+        data.len(),
+        compressed.len()
+    );
+
+    let mut decoder = zrip::FrameDecoder::with_dict(compressed.as_slice(), dict);
+    let mut out = Vec::new();
+    decoder.read_to_end(&mut out).unwrap();
+    assert_eq!(out.len(), data.len());
+    assert!(out == data, "content mismatch");
 }
 
 #[test]

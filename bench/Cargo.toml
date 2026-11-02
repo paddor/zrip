@@ -28,3 +28,7 @@ path = "examples/ruzstd_compare.rs"
 [[example]]
 name = "zrip_bench_streaming_dict"
 path = "examples/bench_streaming_dict.rs"
+
+[[example]]
+name = "zrip_bench_streaming_steady"
+path = "examples/bench_streaming_steady.rs"
