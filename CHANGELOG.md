@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.16] - 2026-11-02
+
 ### Changed
 
 - `FrameDecoder` keeps up to two windows of history and drops the older one
