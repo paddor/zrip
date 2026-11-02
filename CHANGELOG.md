@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `FrameDecoder` keeps up to two windows of history and drops the older one
+  when full, instead of trimming it after every block. A stream with a
+  128 MiB window decodes at 2.5 GB/s instead of 24 MB/s, and one with an
+  8 MiB window at 2.8 GB/s instead of 340 MB/s. A long stream with a 128 MiB
+  window now takes about 260 MiB to decode, not 130 MiB.
+
+### Fixed
+
+- `FrameDecoder` with a dictionary keeps the whole dictionary reachable
+  until the frame has produced a full window, as RFC 8878 allows. It dropped
+  the start of the dictionary early, so C zstd frames that copied from there
+  failed with `InvalidOffset`.
+
 ## [0.8.15] - 2026-11-02
 
 ### Changed
