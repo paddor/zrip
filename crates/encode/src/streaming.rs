@@ -7,6 +7,7 @@ use crate::dfast;
 use crate::fast;
 #[cfg(feature = "ldm")]
 use crate::ldm::LdmState;
+use crate::rebase::reduce_hash_table;
 use crate::strategy::{self, LevelParams, Strategy};
 use crate::write_frame_header_without_content_size;
 use zrip_core::Sequence;
@@ -353,16 +354,6 @@ fn alloc_hash_tables(params: &LevelParams) -> (Vec<u32>, Vec<u32>) {
             vec![0u32; 1usize << params.chain_log],
             vec![0u32; 1usize << params.hash_log],
         ),
-    }
-}
-
-fn reduce_hash_table(table: &mut [u32], shift: u32) {
-    for entry in table.iter_mut() {
-        if *entry < shift {
-            *entry = 0;
-        } else {
-            *entry -= shift;
-        }
     }
 }
 

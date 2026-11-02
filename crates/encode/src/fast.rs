@@ -75,6 +75,7 @@ pub(crate) fn compress_fast_block(
     hash_table: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
+    crate::rebase::debug_assert_fits(block_end, params.window_log);
     sequences.clear();
     let mls = params.min_match as usize;
     match (mls, params.hash_log) {

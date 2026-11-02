@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use crate::block_encoder::{self, BlockEncodeWorkspace};
 use crate::fast::AttachedDict;
 use crate::output::{OutputSink, SliceSink};
+use crate::rebase::{self, PositionBase};
 use crate::strategy::{self, LevelParams, Strategy};
 use crate::{dfast, fast, skip_match_search, write_frame_header_with_checksum};
 use zrip_core::Sequence;
@@ -566,16 +567,24 @@ impl CompressContext {
                     )?;
                 }
             } else {
+                let mut positions = PositionBase::new(params.window_log);
                 let mut offset = 0;
                 while offset < input.len() {
                     let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                     let is_last = offset + chunk_size >= input.len();
+                    let (start, end) = (prefix_len + offset, prefix_len + offset + chunk_size);
+                    if let Some(shift) = positions.advance(start, end) {
+                        rebase::reduce_hash_table(&mut self.hash_table, shift);
+                        rebase::reduce_hash_table(&mut self.hash_long, shift);
+                    }
+                    let base = positions.base();
+                    let src = &combined[base..];
                     match params.strategy {
                         Strategy::Fast => {
                             fast::compress_fast_block(
-                                combined,
-                                prefix_len + offset,
-                                prefix_len + offset + chunk_size,
+                                src,
+                                start - base,
+                                end - base,
                                 &params,
                                 &rep_offsets,
                                 &mut self.hash_table,
@@ -584,9 +593,9 @@ impl CompressContext {
                         }
                         Strategy::DFast => {
                             dfast::compress_dfast_block(
-                                combined,
-                                prefix_len + offset,
-                                prefix_len + offset + chunk_size,
+                                src,
+                                start - base,
+                                end - base,
                                 &params,
                                 &rep_offsets,
                                 &mut self.hash_table,
@@ -721,6 +730,7 @@ fn compress_core<S: OutputSink>(
         let has_prefix = !prefix.is_empty();
         let mut rep_offsets = init_rep_offsets;
         let mut offset = 0;
+        let mut positions = PositionBase::new(params.window_log);
 
         if hash_table.len() != hash_size {
             hash_table.resize(hash_size, 0);
@@ -779,10 +789,15 @@ fn compress_core<S: OutputSink>(
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let is_last = offset + chunk_size >= input.len();
+                        let (start, end) = (plen + offset, plen + offset + chunk_size);
+                        if let Some(shift) = positions.advance(start, end) {
+                            rebase::reduce_hash_table(hash_table, shift);
+                        }
+                        let base = positions.base();
                         fast::compress_fast_block(
-                            combined,
-                            plen + offset,
-                            plen + offset + chunk_size,
+                            &combined[base..],
+                            start - base,
+                            end - base,
                             &params,
                             &rep_offsets,
                             hash_table,
@@ -818,13 +833,17 @@ fn compress_core<S: OutputSink>(
                         let is_last = block_end >= input.len();
                         let block = &input[offset..block_end];
 
+                        if let Some(shift) = positions.advance(offset, block_end) {
+                            rebase::reduce_hash_table(hash_table, shift);
+                        }
                         if skip_match_search(&params, input.len(), block) {
                             block_encoder::encode_raw_block(block, is_last, output)?;
                         } else {
+                            let base = positions.base();
                             fast::compress_fast_block(
-                                input,
-                                offset,
-                                block_end,
+                                &input[base..],
+                                offset - base,
+                                block_end - base,
                                 &params,
                                 &rep_offsets,
                                 hash_table,
@@ -902,10 +921,16 @@ fn compress_core<S: OutputSink>(
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let is_last = offset + chunk_size >= input.len();
+                        let (start, end) = (plen + offset, plen + offset + chunk_size);
+                        if let Some(shift) = positions.advance(start, end) {
+                            rebase::reduce_hash_table(hash_table, shift);
+                            rebase::reduce_hash_table(hash_long, shift);
+                        }
+                        let base = positions.base();
                         dfast::compress_dfast_block(
-                            combined,
-                            plen + offset,
-                            plen + offset + chunk_size,
+                            &combined[base..],
+                            start - base,
+                            end - base,
                             &params,
                             &rep_offsets,
                             hash_table,
@@ -932,13 +957,18 @@ fn compress_core<S: OutputSink>(
                         let is_last = block_end >= input.len();
                         let block = &input[offset..block_end];
 
+                        if let Some(shift) = positions.advance(offset, block_end) {
+                            rebase::reduce_hash_table(hash_table, shift);
+                            rebase::reduce_hash_table(hash_long, shift);
+                        }
                         if skip_match_search(&params, input.len(), block) {
                             block_encoder::encode_raw_block(block, is_last, output)?;
                         } else {
+                            let base = positions.base();
                             dfast::compress_dfast_block(
-                                input,
-                                offset,
-                                block_end,
+                                &input[base..],
+                                offset - base,
+                                block_end - base,
                                 &params,
                                 &rep_offsets,
                                 hash_table,

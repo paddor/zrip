@@ -21,6 +21,11 @@
   hash tables. The input size was cut to 32 bits, so 4 GiB + 5 bytes got
   `window_log` 3 and 8-byte blocks. An input of exactly 4 GiB panicked in
   debug builds.
+- One-shot compression keeps finding matches past 4 GiB. Hash table positions
+  wrapped there, so the rest of the input lost nearly all matches: 4.5 GiB at
+  L4 gave ratio 13.65 instead of 159. Frames stayed valid. This hit every
+  one-shot path, including `CompressContext` and dictionaries. `FrameEncoder`
+  was not affected.
 
 ## [0.8.14] - 2026-10-31
 
