@@ -403,7 +403,7 @@ fn one_shot_keeps_matching_past_4_gib() {
         expected: &original,
     };
     std::io::copy(&mut decoder, &mut sink).unwrap();
-    assert!(sink.expected.is_empty());
+    assert_eq!(sink.expected.len(), 0, "decoded output is short");
 }
 
 #[test]
