@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.15] - 2026-11-02
+
 ### Changed
 
 - `Options::ldm(true)` without `window_log` uses a 128 MiB window, like

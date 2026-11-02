@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-11-02
+
+- `Options::ldm(true)` without `window_log` uses a 128 MiB window, like
+  `zstd --long`, so streams find repeats past the level's window. One-shot
+  calls shrink it to the input. `FrameEncoder` frames always advertise
+  128 MiB, even short ones. Set `window_log` for a smaller window.
+- `compress_opts` with LDM sizes its hash table for the window after shrinking
+  that to the input. A 1 KiB input at `window_log` 24 allocated the full 8 MiB
+  table.
+- `compress_opts` with `ldm(true)` and no `window_log` no longer panics in
+  debug builds on inputs of 2 to 16 bytes.
+- One-shot inputs just above a multiple of 4 GiB keep their level's window and
+  hash tables. The input size was cut to 32 bits, so 4 GiB + 5 bytes got
+  `window_log` 3 and 8-byte blocks.
+- One-shot compression keeps finding matches past 4 GiB. Hash table positions
+  wrapped there, so the rest of the input lost nearly all matches. Frames
+  stayed valid. `FrameEncoder` was not affected.
+
 ## [0.9.3] - 2026-10-31
 
 - Retune L-3, L-2, L-1, and L1 to search less in long literal runs. This
