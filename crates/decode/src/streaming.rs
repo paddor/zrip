@@ -397,16 +397,7 @@ impl<R: Read> FrameDecoder<R> {
         }
 
         if self.window_size > 0 {
-            self.decode_history.extend_from_slice(&self.output_buf);
-            // Trim lazily so the `memmove` happens once per window of output.
-            // Dictionary content stays reachable until a full window is produced.
-            if self.frame_bytes >= self.window_size
-                && self.decode_history.len() > self.window_size * 2
-            {
-                let start = self.decode_history.len() - self.window_size;
-                self.decode_history.copy_within(start.., 0);
-                self.decode_history.truncate(self.window_size);
-            }
+            self.append_history();
         }
 
         self.state = if last {
@@ -428,6 +419,31 @@ impl<R: Read> FrameDecoder<R> {
         };
 
         Ok(())
+    }
+
+    /// Appends the block in `output_buf` to `decode_history`.
+    ///
+    /// The history keeps up to two windows and then drops the older one, so
+    /// the `memmove` happens once per window of output, not once per block.
+    /// Dictionary content stays reachable until the frame has produced a full
+    /// window. Capacity grows like `Vec` but stops at the most the history can
+    /// hold. Plain doubling would reserve four windows.
+    fn append_history(&mut self) {
+        let window = self.window_size;
+        let history = &mut self.decode_history;
+        let needed = history.len() + self.output_buf.len();
+        if needed > history.capacity() {
+            let dict_len = self.dict.as_ref().map_or(0, |d| d.content().len());
+            let most = (2 * window).max(dict_len + window) + MAX_BLOCK_SIZE;
+            let target = (2 * history.capacity()).min(most).max(needed);
+            history.reserve_exact(target - history.len());
+        }
+        history.extend_from_slice(&self.output_buf);
+        if self.frame_bytes >= window && history.len() > 2 * window {
+            let start = history.len() - window;
+            history.copy_within(start.., 0);
+            history.truncate(window);
+        }
     }
 
     fn decode_compressed_block(&mut self, block_size: usize) -> io::Result<()> {
