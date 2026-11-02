@@ -80,6 +80,7 @@ pub(crate) fn compress_dfast_block(
     hash_long: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
+    crate::rebase::debug_assert_fits(block_end, params.window_log);
     // Constant table sizes let the compiler drop the bounds checks of table
     // accesses; other sizes take the generic path.
     macro_rules! dispatch {

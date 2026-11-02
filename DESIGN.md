@@ -36,6 +36,10 @@ compress -> level_params_for_size -> per 128 KiB block:
 `CompressContext` owns the hash tables, sequence buffer and block workspace,
 and reuses them across calls.
 
+Hash tables hold `u32` positions. When a block would pass that range, the
+block loops move the tables down to one window behind it (`rebase.rs`), and
+the finders search from there.
+
 ### Levels
 
 Parameters start from C zstd's `ZSTD_defaultCParameters`, except L-7 to L-4.

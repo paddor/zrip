@@ -351,6 +351,62 @@ fn large_plain_frame_header_has_bounded_window_and_c_decompresses() {
 }
 
 #[test]
+#[cfg(target_pointer_width = "64")]
+#[ignore = "allocates 4.5 GiB and needs --release to finish in reasonable time"]
+fn one_shot_keeps_matching_past_4_gib() {
+    struct CompareSink<'a> {
+        expected: &'a [u8],
+    }
+
+    impl std::io::Write for CompareSink<'_> {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let (head, tail) = self.expected.split_at(buf.len());
+            assert!(head == buf, "decoded bytes differ");
+            self.expected = tail;
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // Random 4 KiB slices of a small pool. Offsets keep changing, so the ratio
+    // depends on the hash tables, not on one long repcode run.
+    let size = 9usize << 29;
+    let mut x = 0x9E37_79B9_7F4A_7C15u64;
+    let mut next = move || {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        x
+    };
+    let pool: Vec<u8> = (0..256usize << 10)
+        .map(|_| b'a' + (next() >> 59) as u8)
+        .collect();
+    let mut original = Vec::with_capacity(size);
+    while original.len() < size {
+        let at = (next() as usize) % (pool.len() - 4096);
+        let n = 4096.min(size - original.len());
+        original.extend_from_slice(&pool[at..at + n]);
+    }
+
+    let mut compressed = vec![0u8; 256 << 20];
+    let written = zrip::compress_into(&original, &mut compressed, 4).unwrap();
+    assert!(
+        written < size / 100,
+        "the tail past 4 GiB should still match: {written} bytes"
+    );
+
+    let mut decoder = zstd::Decoder::new(&compressed[..written]).unwrap();
+    let mut sink = CompareSink {
+        expected: &original,
+    };
+    std::io::copy(&mut decoder, &mut sink).unwrap();
+    assert_eq!(sink.expected.len(), 0, "decoded output is short");
+}
+
+#[test]
 fn roundtrip_single_bytes_c_cross_validate() {
     for b in 0u8..=255 {
         let original = vec![b];

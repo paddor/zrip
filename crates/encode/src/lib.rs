@@ -43,6 +43,7 @@ pub(crate) mod fast;
 pub(crate) mod ldm;
 mod output;
 pub(crate) mod primitives;
+pub(crate) mod rebase;
 pub mod strategy;
 #[cfg(feature = "std")]
 pub mod streaming;
@@ -53,6 +54,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::output::{OutputSink, SliceSink};
+use crate::rebase::PositionBase;
 use crate::strategy::Strategy;
 use zrip_core::error::CompressError;
 use zrip_core::frame::{MAX_BLOCK_SIZE, MAX_WINDOW_SIZE, ZSTD_MAGIC};
@@ -249,7 +251,7 @@ pub(crate) fn clamp_params_to_src_size(params: &mut strategy::LevelParams, src_l
         .window_log
         .clamp(strategy::WINDOW_LOG_MIN, strategy::WINDOW_LOG_MAX);
     if src_len >= 2 {
-        let src_log = 32 - ((src_len as u32) - 1).leading_zeros();
+        let src_log = strategy::src_log(src_len);
         params.hash_log = params.hash_log.min(src_log).max(strategy::HASH_LOG_MIN);
         params.chain_log = params.chain_log.min(src_log).max(strategy::HASH_LOG_MIN);
         params.window_log = params.window_log.min(src_log);
@@ -327,6 +329,7 @@ fn compress_frame(
         let mut ldm_state = params.ldm_params.as_ref().map(ldm::LdmState::new);
         let window_size = frame_window_size(input.len(), params.window_log);
         let block_size = MAX_BLOCK_SIZE.min(window_size);
+        let mut positions = PositionBase::new(params.window_log);
 
         match params.strategy {
             Strategy::Fast => {
@@ -338,6 +341,17 @@ fn compress_frame(
                     let is_last = block_end >= input.len();
                     let block = &input[offset..block_end];
 
+                    if let Some(shift) = positions.advance(offset, block_end) {
+                        rebase::reduce_hash_table(&mut hash_table, shift);
+                        #[cfg(feature = "ldm")]
+                        if let Some(ref mut ldm) = ldm_state {
+                            ldm.reduce_positions(shift);
+                        }
+                    }
+                    let base = positions.base();
+                    let src = &input[base..];
+                    let (start, end) = (offset - base, block_end - base);
+
                     if skip_match_search(params, input.len(), block) {
                         block_encoder::encode_raw_block(block, is_last, output)?;
                     } else {
@@ -345,9 +359,9 @@ fn compress_frame(
                         let used_ldm = if let Some(ref mut ldm) = ldm_state {
                             let mut empty = Vec::new();
                             ldm.compress_block(
-                                input,
-                                offset,
-                                block_end,
+                                src,
+                                start,
+                                end,
                                 window_size,
                                 params,
                                 &rep_offsets,
@@ -364,9 +378,9 @@ fn compress_frame(
 
                         if !used_ldm {
                             fast::compress_fast_block(
-                                input,
-                                offset,
-                                block_end,
+                                src,
+                                start,
+                                end,
                                 params,
                                 &rep_offsets,
                                 &mut hash_table,
@@ -408,15 +422,27 @@ fn compress_frame(
                     let is_last = block_end >= input.len();
                     let block = &input[offset..block_end];
 
+                    if let Some(shift) = positions.advance(offset, block_end) {
+                        rebase::reduce_hash_table(&mut hash_short, shift);
+                        rebase::reduce_hash_table(&mut hash_long, shift);
+                        #[cfg(feature = "ldm")]
+                        if let Some(ref mut ldm) = ldm_state {
+                            ldm.reduce_positions(shift);
+                        }
+                    }
+                    let base = positions.base();
+                    let src = &input[base..];
+                    let (start, end) = (offset - base, block_end - base);
+
                     if skip_match_search(params, input.len(), block) {
                         block_encoder::encode_raw_block(block, is_last, output)?;
                     } else {
                         #[cfg(feature = "ldm")]
                         let used_ldm = if let Some(ref mut ldm) = ldm_state {
                             ldm.compress_block(
-                                input,
-                                offset,
-                                block_end,
+                                src,
+                                start,
+                                end,
                                 window_size,
                                 params,
                                 &rep_offsets,
@@ -433,9 +459,9 @@ fn compress_frame(
 
                         if !used_ldm {
                             dfast::compress_dfast_block(
-                                input,
-                                offset,
-                                block_end,
+                                src,
+                                start,
+                                end,
                                 params,
                                 &rep_offsets,
                                 &mut hash_short,
@@ -543,14 +569,20 @@ pub fn compress_with_dict(
                         params.min_match,
                         &mut hash_table,
                     );
+                    let mut positions = PositionBase::new(params.window_log);
                     let mut offset = 0;
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let is_last = offset + chunk_size >= input.len();
+                        let (start, end) = (plen + offset, plen + offset + chunk_size);
+                        if let Some(shift) = positions.advance(start, end) {
+                            rebase::reduce_hash_table(&mut hash_table, shift);
+                        }
+                        let base = positions.base();
                         fast::compress_fast_block(
-                            &combined,
-                            plen + offset,
-                            plen + offset + chunk_size,
+                            &combined[base..],
+                            start - base,
+                            end - base,
                             &params,
                             &rep_offsets,
                             &mut hash_table,
@@ -593,14 +625,21 @@ pub fn compress_with_dict(
                         &mut hash_short,
                         &mut hash_long,
                     );
+                    let mut positions = PositionBase::new(params.window_log);
                     let mut offset = 0;
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let is_last = offset + chunk_size >= input.len();
+                        let (start, end) = (plen + offset, plen + offset + chunk_size);
+                        if let Some(shift) = positions.advance(start, end) {
+                            rebase::reduce_hash_table(&mut hash_short, shift);
+                            rebase::reduce_hash_table(&mut hash_long, shift);
+                        }
+                        let base = positions.base();
                         dfast::compress_dfast_block(
-                            &combined,
-                            plen + offset,
-                            plen + offset + chunk_size,
+                            &combined[base..],
+                            start - base,
+                            end - base,
                             &params,
                             &rep_offsets,
                             &mut hash_short,
@@ -655,6 +694,30 @@ mod tests {
         assert_eq!(params.hash_log, strategy::HASH_LOG_MIN);
         assert_eq!(params.chain_log, strategy::HASH_LOG_MAX);
         assert_eq!(params.window_log, strategy::WINDOW_LOG_MAX);
+    }
+
+    #[test]
+    fn src_log_rounds_up() {
+        assert_eq!(strategy::src_log(2), 1);
+        assert_eq!(strategy::src_log(3), 2);
+        assert_eq!(strategy::src_log(1 << 10), 10);
+        assert_eq!(strategy::src_log((1 << 10) + 1), 11);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn inputs_past_4_gib_keep_the_level_params() {
+        let full = strategy::level_params(1).unwrap();
+        for len in [1usize << 32, (1 << 32) + 5, 5 << 32] {
+            let sized = strategy::level_params_for_size(1, len).unwrap();
+            assert_eq!(sized.window_log, full.window_log, "len {len}");
+            assert_eq!(sized.hash_log, full.hash_log, "len {len}");
+
+            let mut clamped = full;
+            clamp_params_to_src_size(&mut clamped, len);
+            assert_eq!(clamped.window_log, full.window_log, "len {len}");
+            assert_eq!(clamped.hash_log, full.hash_log, "len {len}");
+        }
     }
 
     #[test]

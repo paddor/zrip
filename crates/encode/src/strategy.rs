@@ -92,7 +92,7 @@ pub fn level_params_for_size(level: i32, src_len: usize) -> Option<LevelParams> 
     params.chain_log = params.chain_log.clamp(HASH_LOG_MIN, HASH_LOG_MAX);
     params.window_log = params.window_log.clamp(WINDOW_LOG_MIN, WINDOW_LOG_MAX);
     if (2..usize::MAX).contains(&src_len) {
-        let src_log = 32 - ((src_len as u32) - 1).leading_zeros();
+        let src_log = src_log(src_len);
         params.hash_log = params.hash_log.min(src_log).max(HASH_LOG_MIN);
         params.chain_log = params.chain_log.min(src_log).max(HASH_LOG_MIN);
         params.window_log = params.window_log.min(src_log);
@@ -106,6 +106,11 @@ pub fn level_params_for_size(level: i32, src_len: usize) -> Option<LevelParams> 
         }
     }
     Some(params)
+}
+
+/// Returns the bits that address `src_len` bytes: its log2, rounded up.
+pub(crate) fn src_log(src_len: usize) -> u32 {
+    usize::BITS - src_len.saturating_sub(1).leading_zeros()
 }
 
 /// Returns the compression parameters for `input_len` bytes after a
