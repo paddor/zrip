@@ -35,7 +35,7 @@ macro_rules! simd_body {
 
 pub mod adaptive;
 pub(crate) mod block_encoder;
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 pub mod context;
 pub(crate) mod dfast;
 pub(crate) mod fast;
