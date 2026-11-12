@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- The `context` module and `CompressContext` need only the `alloc` feature,
+  not `std`.
+
 ## [0.9.4] - 2026-11-02
 
 - `Options::ldm(true)` without `window_log` uses a 128 MiB window, like

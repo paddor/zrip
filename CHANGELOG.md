@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `CompressContext` needs only the `alloc` feature, not `std`. `no_std`
+  builds can reuse one context across calls instead of allocating a fresh
+  workspace for every one-shot call.
+
 ## [0.8.16] - 2026-11-02
 
 ### Changed
