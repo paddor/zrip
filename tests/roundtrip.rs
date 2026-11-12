@@ -417,7 +417,6 @@ fn checksum_validated_on_small_frame() {
 
 // ===== compress_context =====
 
-#[cfg(feature = "std")]
 #[test]
 fn compress_context_roundtrip() {
     let data = b"hello world, this is a test of the compress context API";
@@ -432,7 +431,6 @@ fn compress_context_roundtrip() {
     assert_eq!(&decompressed2, data2);
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn compress_context_can_omit_content_checksum() {
     let data = b"enclosing format already authenticates this payload".repeat(1_000);
@@ -450,7 +448,6 @@ fn compress_context_can_omit_content_checksum() {
     assert_eq!(zrip::decompress(&compressed).unwrap(), data);
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn compress_context_compress_into_matches_compress() {
     let text = b"caller-owned output buffers for compressed frames ".repeat(40);
@@ -471,7 +468,6 @@ fn compress_context_compress_into_matches_compress() {
     }
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn compress_context_compress_into_writes_at_slice_start() {
     let data = b"frame written into the middle of a larger buffer".repeat(20);
@@ -483,7 +479,6 @@ fn compress_context_compress_into_writes_at_slice_start() {
     assert_eq!(zrip::decompress(&buf[16..16 + n]).unwrap(), data);
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn compress_context_compress_into_rejects_small_output() {
     let data = b"not enough room for this frame".repeat(10);
@@ -902,7 +897,6 @@ fn decompress_context_recovers_after_a_corrupt_frame() {
     }
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn set_level_matches_a_fresh_context() {
     let text: Vec<u8> = (0..20_000)
