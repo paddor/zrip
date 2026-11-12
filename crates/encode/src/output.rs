@@ -11,7 +11,7 @@ pub(crate) trait OutputSink {
 
     /// Reserves room for at least `additional` more bytes, where the sink can
     /// grow.
-    #[cfg(feature = "std")]
+    #[cfg(feature = "alloc")]
     #[inline]
     fn reserve(&mut self, _additional: usize) {}
 }
@@ -30,7 +30,7 @@ impl OutputSink for Vec<u8> {
         Ok(())
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "alloc")]
     #[inline]
     fn reserve(&mut self, additional: usize) {
         Vec::reserve(self, additional);

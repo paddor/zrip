@@ -196,7 +196,7 @@ pub fn compress_bound(input_len: usize) -> usize {
 pub use zrip_decode::context::DecompressContext;
 #[cfg(feature = "std")]
 pub use zrip_decode::streaming::FrameDecoder;
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 pub use zrip_encode::context::CompressContext;
 #[cfg(feature = "std")]
 pub use zrip_encode::streaming::FrameEncoder;
