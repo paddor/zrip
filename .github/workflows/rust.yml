@@ -27,6 +27,7 @@ jobs:
       - run: cargo test -p zrip-core -p zrip-encode -p zrip-decode -p zrip --lib --tests
       - run: cargo test -p zrip-core -p zrip-encode -p zrip-decode -p zrip --lib --tests --features dict_builder
       - run: cargo check -p zrip-core -p zrip-encode -p zrip-decode -p zrip --no-default-features --features alloc
+      - run: cargo test -p zrip --no-default-features --features alloc --tests
 
   nightly:
     name: nightly
