@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.17] - 2026-11-12
+
 ### Changed
 
 - `CompressContext` needs only the `alloc` feature, not `std`. `no_std`

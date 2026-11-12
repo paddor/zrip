@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-11-12
+
 - The `context` module and `CompressContext` need only the `alloc` feature,
   not `std`.
 
