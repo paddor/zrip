@@ -53,6 +53,9 @@ pub fn find_frame_compressed_size(input: &[u8]) -> Result<usize, DecompressError
             Err(DecompressError::InputExhausted)
         };
     }
+    if magic != ZSTD_MAGIC {
+        return Err(DecompressError::BadMagic);
+    }
 
     // Size the header from its descriptor first, so a truncated header
     // reads as truncated input rather than a bad header.

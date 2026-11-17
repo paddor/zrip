@@ -23,6 +23,8 @@
 - `FrameEncoder` and `FrameDecoder` share their frame state with the push
   types. `FrameDecoder::with_limit` now reports a crossed limit as
   `OutputTooSmall` instead of `CorruptSequences`.
+- `FrameDecoder` rejects a bad magic number as soon as it reads it, instead
+  of reading the rest of a frame header first.
 - `FrameDecoder` decodes each block straight into its window history
   instead of a separate buffer, reserves a known content size up front, and
   builds the predefined sequence tables once per decoder instead of once per

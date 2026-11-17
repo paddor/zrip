@@ -11,6 +11,7 @@ use crate::frame_state::{
 use zrip_core::block::{BlockType, parse_block_header};
 use zrip_core::dict::Dictionary;
 use zrip_core::error::DecompressError;
+use zrip_core::frame::ZSTD_MAGIC;
 pub use zrip_core::push::{Progress, Status};
 
 #[derive(Clone, Copy)]
@@ -184,7 +185,9 @@ impl PushDecoder {
     /// Sets the largest frame window to accept, in place of the default
     /// 128 MiB. Larger windows fail with [`DecompressError::WindowTooLarge`].
     /// The decoder keeps up to two windows of history, so this caps its
-    /// memory. History grows only as output is produced.
+    /// memory. A frame header with a content size reserves that much
+    /// history up front, within the cap; otherwise history grows with
+    /// output.
     #[must_use]
     pub fn max_window(mut self, bytes: u64) -> Self {
         self.frame.set_max_window(bytes);
@@ -306,8 +309,10 @@ impl PushDecoder {
                 ]);
                 self.unit = if is_skippable_magic(magic) {
                     Unit::SkipSize
-                } else {
+                } else if magic == ZSTD_MAGIC {
                     Unit::Descriptor
+                } else {
+                    return Err(DecompressError::BadMagic);
                 };
             }
             Unit::Descriptor => {
