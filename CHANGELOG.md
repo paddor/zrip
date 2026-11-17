@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- `zrip::frame::find_frame_compressed_size`: size of the first frame in a
+  buffer, from the frame and block headers alone, like C zstd's
+  `ZSTD_findFrameCompressedSize`. Splits concatenated frames and checks that
+  a buffer holds exactly one frame without decoding it.
+
+### Fixed
+
+- One-shot decoding (`decompress*`, `DecompressContext`) no longer rejects
+  frames whose window exceeds 128 MiB. One-shot output is the history, so
+  the window never bounded its memory; `max_output` does. C zstd's
+  one-shot decoder accepts these frames too. `FrameDecoder` still caps the
+  window, since it keeps the history.
+
 ## [0.8.17] - 2026-11-12
 
 ### Changed

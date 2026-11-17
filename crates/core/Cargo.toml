@@ -20,3 +20,6 @@ nightly = []
 # No effect today: every build is safe Rust. Kept so existing feature lists
 # build, and to keep any future `unsafe` out of builds that enable it.
 paranoid = []
+
+[dev-dependencies]
+zrip = { path = "../.." }

@@ -1867,3 +1867,82 @@ fn checksum_validated_on_small_frame_c() {
     let decompressed = zrip::decompress(&compressed).unwrap();
     assert_eq!(&decompressed, data);
 }
+
+#[test]
+fn one_shot_decodes_windows_above_streaming_cap() {
+    use std::io::{Read, Write};
+    let original: Vec<u8> = (0u32..200_000)
+        .flat_map(|i| (i % 977).to_le_bytes())
+        .collect();
+    for window_log in [28, 30] {
+        let mut enc = zstd::stream::Encoder::new(Vec::new(), 3).unwrap();
+        enc.window_log(window_log).unwrap();
+        enc.write_all(&original).unwrap();
+        let frame = enc.finish().unwrap();
+        let header = zrip::frame::header::parse_frame_header(&frame).unwrap();
+        assert!(!header.single_segment);
+        assert_eq!(header.window_size, 1 << window_log);
+
+        assert_eq!(zrip::decompress(&frame).unwrap(), original);
+        assert_eq!(
+            zstd::bulk::decompress(&frame, original.len()).unwrap(),
+            original
+        );
+        let mut ctx = zrip::DecompressContext::new();
+        assert_eq!(&*ctx.decompress(&frame).unwrap(), &original[..]);
+        assert!(zrip::decompress_with_limit(&frame, original.len() - 1).is_err());
+
+        // Streaming keeps history, so it still caps the window.
+        let mut out = Vec::new();
+        assert!(
+            zrip::FrameDecoder::new(&frame[..])
+                .read_to_end(&mut out)
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn find_frame_compressed_size_matches_c() {
+    let data: Vec<u8> = (0u32..60_000)
+        .flat_map(|i| (i % 1311).to_le_bytes())
+        .collect();
+    let mut frames = Vec::new();
+    for level in [1, 3, 19] {
+        frames.push(zstd::bulk::compress(&data, level).unwrap());
+        let mut enc = zstd::stream::Encoder::new(Vec::new(), level).unwrap();
+        enc.include_checksum(true).unwrap();
+        std::io::Write::write_all(&mut enc, &data).unwrap();
+        frames.push(enc.finish().unwrap());
+    }
+    frames.push(zrip::compress(&data, 1).unwrap());
+    frames.push(zrip::compress(&[], 1).unwrap());
+    frames.push(zrip::compress(&vec![7u8; 300_000], 1).unwrap()); // RLE blocks
+    frames.push(vec![0x5A, 0x2A, 0x4D, 0x18, 3, 0, 0, 0, 1, 2, 3]); // skippable
+
+    let stream: Vec<u8> = frames.concat();
+    let mut pos = 0;
+    for frame in &frames {
+        let c = zstd_safe::find_frame_compressed_size(&stream[pos..]).unwrap();
+        assert_eq!(
+            zrip::frame::find_frame_compressed_size(&stream[pos..]),
+            Ok(c)
+        );
+        assert_eq!(c, frame.len());
+        pos += c;
+    }
+
+    for frame in &frames {
+        for cut in 0..frame.len() {
+            assert_eq!(
+                zrip::frame::find_frame_compressed_size(&frame[..cut]),
+                Err(zrip::DecompressError::InputExhausted),
+                "cut={cut}"
+            );
+        }
+    }
+    assert_eq!(
+        zrip::frame::find_frame_compressed_size(b"not a zstd frame"),
+        Err(zrip::DecompressError::BadMagic)
+    );
+}
