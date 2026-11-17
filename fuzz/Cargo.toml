@@ -101,3 +101,13 @@ doc = false
 name = "zrip_fuzz_corrupt_streaming_dict"
 path = "fuzz_targets/corrupt_streaming_dict.rs"
 doc = false
+
+[[bin]]
+name = "zrip_fuzz_push_roundtrip"
+path = "fuzz_targets/push_roundtrip.rs"
+doc = false
+
+[[bin]]
+name = "zrip_fuzz_push_decode"
+path = "fuzz_targets/push_decode.rs"
+doc = false

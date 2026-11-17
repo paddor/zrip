@@ -2,19 +2,10 @@
 
 use std::io::{self, Write};
 
-use crate::block_encoder::{self, BlockEncodeWorkspace};
-use crate::dfast;
-use crate::fast;
-#[cfg(feature = "ldm")]
-use crate::ldm::LdmState;
-use crate::rebase::reduce_hash_table;
-use crate::strategy::{self, LevelParams, Strategy};
-use crate::write_frame_header_without_content_size;
-use zrip_core::Sequence;
+use crate::frame_state::EncodeState;
+use crate::strategy::{self, LevelParams};
 use zrip_core::dict::Dictionary;
 use zrip_core::error::CompressError;
-use zrip_core::frame::MAX_BLOCK_SIZE;
-use zrip_core::xxhash::Xxh64State;
 
 #[derive(Clone, Copy)]
 enum EncoderState {
@@ -49,22 +40,10 @@ enum EncoderState {
 /// ```
 pub struct FrameEncoder<W: Write> {
     inner: W,
-    params: LevelParams,
-    buffer: Vec<u8>,
-    rep_offsets: [u32; 3],
-    hasher: Xxh64State,
+    frame: EncodeState,
     header_written: bool,
     state: EncoderState,
-    workspace: BlockEncodeWorkspace,
-    dict: Option<Dictionary>,
-    first_block: bool,
-    hash_table: Vec<u32>,
-    hash_long: Vec<u32>,
-    sequences: Vec<Sequence>,
     block_out: Vec<u8>,
-    window_buf: Vec<u8>,
-    #[cfg(feature = "ldm")]
-    ldm_state: Option<LdmState>,
 }
 
 impl<W: Write> FrameEncoder<W> {
@@ -98,35 +77,12 @@ impl<W: Write> FrameEncoder<W> {
         params: LevelParams,
         dict: Option<Dictionary>,
     ) -> Result<Self, CompressError> {
-        let (hash_table, hash_long) = alloc_hash_tables(&params);
-        let (rep_offsets, first_block) = match &dict {
-            Some(d) => (*d.rep_offsets(), true),
-            None => ([1, 4, 8], false),
-        };
-        let mut window_buf = Vec::new();
-        if let Some(ref d) = dict {
-            window_buf.extend_from_slice(d.content());
-        }
-        #[cfg(feature = "ldm")]
-        let ldm_state = params.ldm_params.as_ref().map(LdmState::new);
         Ok(Self {
             inner: writer,
-            params,
-            buffer: Vec::new(),
-            rep_offsets,
-            hasher: Xxh64State::new(0),
+            frame: EncodeState::new(params, dict),
             header_written: false,
             state: EncoderState::Ready,
-            workspace: BlockEncodeWorkspace::new(),
-            dict,
-            first_block,
-            hash_table,
-            hash_long,
-            sequences: Vec::new(),
             block_out: Vec::new(),
-            window_buf,
-            #[cfg(feature = "ldm")]
-            ldm_state,
         })
     }
 
@@ -146,21 +102,7 @@ impl<W: Write> FrameEncoder<W> {
         let old = core::mem::replace(&mut self.inner, new_writer);
         self.header_written = false;
         self.state = EncoderState::Ready;
-        self.first_block = self.dict.is_some();
-        self.rep_offsets = match &self.dict {
-            Some(d) => *d.rep_offsets(),
-            None => [1, 4, 8],
-        };
-        self.hasher = Xxh64State::new(0);
-        self.workspace.prev_huffman = None;
-        self.window_buf.clear();
-        if let Some(ref d) = self.dict {
-            self.window_buf.extend_from_slice(d.content());
-        }
-        #[cfg(feature = "ldm")]
-        if let Some(ref mut ldm) = self.ldm_state {
-            ldm.reset();
-        }
+        self.frame.reset();
         Ok(old)
     }
 
@@ -177,183 +119,32 @@ impl<W: Write> FrameEncoder<W> {
             self.write_header()?;
         }
 
-        self.flush_block(true)?;
-
-        let hash = self.hasher.finish();
-        let checksum = (hash & 0xFFFF_FFFF) as u32;
-        self.inner.write_all(&checksum.to_le_bytes())?;
+        self.block_out.clear();
+        self.frame
+            .encode_block(true, &mut self.block_out)
+            .map_err(io::Error::other)?;
+        self.frame.write_checksum(&mut self.block_out);
+        self.inner.write_all(&self.block_out)?;
         self.state = EncoderState::Finished;
         Ok(())
     }
 
     fn write_header(&mut self) -> io::Result<()> {
         self.block_out.clear();
-        write_frame_header_without_content_size(
-            &mut self.block_out,
-            self.dict.as_ref().map(Dictionary::id),
-            self.params.window_log,
-        )
-        .map_err(io::Error::other)?;
+        self.frame
+            .write_header(&mut self.block_out)
+            .map_err(io::Error::other)?;
         self.inner.write_all(&self.block_out)?;
         self.header_written = true;
         Ok(())
     }
 
-    fn flush_block(&mut self, last: bool) -> io::Result<()> {
-        if self.buffer.is_empty() && last {
-            self.block_out.clear();
-            block_encoder::encode_raw_block(&[], true, &mut self.block_out)
-                .map_err(io::Error::other)?;
-            self.inner.write_all(&self.block_out)?;
-            return Ok(());
-        }
-
-        if self.buffer.is_empty() {
-            return Ok(());
-        }
-
-        let chunk = core::mem::take(&mut self.buffer);
-        let seed_dict = self.first_block && self.dict.is_some();
-
-        let plen = self.window_buf.len();
-        self.window_buf.extend_from_slice(&chunk);
-
+    fn flush_block(&mut self) -> io::Result<()> {
         self.block_out.clear();
-        self.block_out.reserve(chunk.len() + 32);
-        if crate::skip_match_search(&self.params, chunk.len(), &chunk) {
-            block_encoder::encode_raw_block(&chunk, last, &mut self.block_out)
-                .map_err(io::Error::other)?;
-        } else {
-            if seed_dict {
-                match self.params.strategy {
-                    Strategy::Fast => {
-                        fast::prefill_hash_table(
-                            &self.window_buf,
-                            plen,
-                            self.params.hash_log,
-                            self.params.min_match,
-                            &mut self.hash_table,
-                        );
-                    }
-                    Strategy::DFast => {
-                        dfast::prefill_hash_tables(
-                            &self.window_buf,
-                            plen,
-                            self.params.hash_log,
-                            self.params.chain_log,
-                            self.params.min_match,
-                            &mut self.hash_table,
-                            &mut self.hash_long,
-                        );
-                    }
-                }
-            } else if plen == 0 {
-                self.hash_table.fill(0);
-                if !self.hash_long.is_empty() {
-                    self.hash_long.fill(0);
-                }
-            }
-
-            #[cfg(feature = "ldm")]
-            let used_ldm = if let Some(ref mut ldm) = self.ldm_state {
-                ldm.compress_block(
-                    &self.window_buf,
-                    plen,
-                    self.window_buf.len(),
-                    1usize << self.params.window_log,
-                    &self.params,
-                    &self.rep_offsets,
-                    &mut self.hash_table,
-                    &mut self.hash_long,
-                    &mut self.sequences,
-                );
-                true
-            } else {
-                false
-            };
-            #[cfg(not(feature = "ldm"))]
-            let used_ldm = false;
-
-            if !used_ldm {
-                match self.params.strategy {
-                    Strategy::Fast => {
-                        fast::compress_fast_block(
-                            &self.window_buf,
-                            plen,
-                            self.window_buf.len(),
-                            &self.params,
-                            &self.rep_offsets,
-                            &mut self.hash_table,
-                            &mut self.sequences,
-                        );
-                    }
-                    Strategy::DFast => {
-                        dfast::compress_dfast_block(
-                            &self.window_buf,
-                            plen,
-                            self.window_buf.len(),
-                            &self.params,
-                            &self.rep_offsets,
-                            &mut self.hash_table,
-                            &mut self.hash_long,
-                            &mut self.sequences,
-                        );
-                    }
-                }
-            }
-
-            if self.params.force_raw_literals {
-                block_encoder::encode_compressed_block_raw(
-                    &chunk,
-                    &self.sequences,
-                    &mut self.rep_offsets,
-                    last,
-                    &mut self.block_out,
-                    &mut self.workspace,
-                )
-                .map_err(io::Error::other)?;
-            } else {
-                block_encoder::encode_compressed_block(
-                    &chunk,
-                    &self.sequences,
-                    &mut self.rep_offsets,
-                    last,
-                    &mut self.block_out,
-                    &mut self.workspace,
-                    strategy::block_policy(&self.params, chunk.len()),
-                )
-                .map_err(io::Error::other)?;
-            }
-        }
-
-        let window_size = 1usize << self.params.window_log;
-        if self.window_buf.len() > window_size * 2 {
-            let shift = self.window_buf.len() - window_size;
-            reduce_hash_table(&mut self.hash_table, shift as u32);
-            if !self.hash_long.is_empty() {
-                reduce_hash_table(&mut self.hash_long, shift as u32);
-            }
-            #[cfg(feature = "ldm")]
-            if let Some(ref mut ldm) = self.ldm_state {
-                ldm.reduce_positions(shift as u32);
-            }
-            self.window_buf.copy_within(shift.., 0);
-            self.window_buf.truncate(window_size);
-        }
-
-        self.first_block = false;
-        self.inner.write_all(&self.block_out)?;
-        Ok(())
-    }
-}
-
-fn alloc_hash_tables(params: &LevelParams) -> (Vec<u32>, Vec<u32>) {
-    match params.strategy {
-        Strategy::Fast => (vec![0u32; 1usize << params.hash_log], Vec::new()),
-        Strategy::DFast => (
-            vec![0u32; 1usize << params.chain_log],
-            vec![0u32; 1usize << params.hash_log],
-        ),
+        self.frame
+            .encode_block(false, &mut self.block_out)
+            .map_err(io::Error::other)?;
+        self.inner.write_all(&self.block_out)
     }
 }
 
@@ -372,18 +163,12 @@ impl<W: Write> Write for FrameEncoder<W> {
             self.write_header()?;
         }
 
-        self.hasher.update(buf);
-
-        let block_size = MAX_BLOCK_SIZE.min(1usize << self.params.window_log);
+        let block_size = self.frame.block_size();
         let mut consumed = 0;
         while consumed < buf.len() {
-            let space = block_size - self.buffer.len();
-            let n = space.min(buf.len() - consumed);
-            self.buffer.extend_from_slice(&buf[consumed..consumed + n]);
-            consumed += n;
-
-            if self.buffer.len() >= block_size {
-                self.flush_block(false)?;
+            consumed += self.frame.take_input(&buf[consumed..]);
+            if self.frame.buffered() >= block_size {
+                self.flush_block()?;
             }
         }
 
@@ -397,8 +182,8 @@ impl<W: Write> Write for FrameEncoder<W> {
         }
         let state = self.state;
         self.state = EncoderState::Failed;
-        if !self.buffer.is_empty() {
-            self.flush_block(false)?;
+        if self.frame.buffered() > 0 {
+            self.flush_block()?;
         }
         self.inner.flush()?;
         self.state = state;

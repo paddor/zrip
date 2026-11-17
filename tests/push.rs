@@ -1,0 +1,455 @@
+// Push encoder/decoder tests, cross-checked against C zstd.
+#![cfg(feature = "std")]
+
+use zrip::push::{EndOp, Progress, PushDecoder, PushEncoder, Status};
+use zrip::{DecompressError, Dictionary};
+
+/// Text-like data with repeats near and far, plus incompressible stretches.
+fn mixed(len: usize, seed: u32) -> Vec<u8> {
+    let words: [&[u8]; 8] = [
+        b"alpha ",
+        b"beta ",
+        b"gamma ",
+        b"delta ",
+        b"{\"id\":",
+        b"\"name\":",
+        b"0123",
+        b"\n",
+    ];
+    let mut out = Vec::with_capacity(len);
+    let mut x = seed | 1;
+    while out.len() < len {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        if x.is_multiple_of(16) {
+            out.extend((0..64).map(|i| (x >> (i % 24)) as u8 ^ i as u8));
+        } else {
+            out.extend_from_slice(words[(x % 8) as usize]);
+        }
+    }
+    out.truncate(len);
+    out
+}
+
+/// Encodes with input chunks of `in_chunk` and output buffers of `out_buf`.
+fn push_encode(enc: &mut PushEncoder, data: &[u8], in_chunk: usize, out_buf: usize) -> Vec<u8> {
+    let mut frame = Vec::new();
+    let mut buf = vec![0u8; out_buf];
+    for chunk in data.chunks(in_chunk.max(1)) {
+        let mut input = chunk;
+        loop {
+            let p = enc.encode(input, &mut buf, EndOp::Continue).unwrap();
+            frame.extend_from_slice(&buf[..p.produced]);
+            input = &input[p.consumed..];
+            if p.status == Status::NeedsInput {
+                assert_eq!(input, &[] as &[u8]);
+                break;
+            }
+            assert_eq!(p.status, Status::NeedsOutput);
+        }
+    }
+    loop {
+        let p = enc.encode(&[], &mut buf, EndOp::End).unwrap();
+        frame.extend_from_slice(&buf[..p.produced]);
+        if p.status == Status::Finished {
+            break;
+        }
+        assert_eq!(p.status, Status::NeedsOutput);
+    }
+    frame
+}
+
+/// Decodes with input chunks of `in_chunk` and output buffers of `out_buf`.
+/// Returns the output and how many frames ended.
+fn push_decode(
+    dec: &mut PushDecoder,
+    data: &[u8],
+    in_chunk: usize,
+    out_buf: usize,
+) -> Result<(Vec<u8>, usize), DecompressError> {
+    let mut out = Vec::new();
+    let mut frames = 0;
+    let mut buf = vec![0u8; out_buf];
+    for chunk in data.chunks(in_chunk.max(1)) {
+        let mut input = chunk;
+        loop {
+            let p: Progress = dec.decode(input, &mut buf)?;
+            out.extend_from_slice(&buf[..p.produced]);
+            input = &input[p.consumed..];
+            match p.status {
+                Status::NeedsInput => {
+                    assert_eq!(input, &[] as &[u8]);
+                    break;
+                }
+                Status::Finished => frames += 1,
+                Status::NeedsOutput => assert_eq!(p.produced, out_buf),
+            }
+        }
+    }
+    loop {
+        let p = dec.decode(&[], &mut buf)?;
+        out.extend_from_slice(&buf[..p.produced]);
+        match p.status {
+            Status::NeedsInput => break,
+            Status::Finished => frames += 1,
+            Status::NeedsOutput => {}
+        }
+    }
+    dec.finish()?;
+    Ok((out, frames))
+}
+
+#[test]
+fn encode_roundtrip_chunk_and_buffer_sizes() {
+    let data = mixed(300_000, 7);
+    for level in [-7, -1, 1, 3, 4] {
+        let mut enc = PushEncoder::new(level).unwrap();
+        for (in_chunk, out_buf) in [(1 << 20, 1 << 20), (1, 4096), (4096, 1), (7, 13)] {
+            let frame = push_encode(&mut enc, &data, in_chunk, out_buf);
+            assert_eq!(
+                zstd::decode_all(&frame[..]).unwrap(),
+                data,
+                "L{level} in={in_chunk} out={out_buf}"
+            );
+            assert_eq!(zrip::decompress(&frame).unwrap(), data);
+        }
+    }
+}
+
+#[test]
+fn encode_sizes_around_block_boundaries() {
+    let block = zrip::frame::MAX_BLOCK_SIZE;
+    let mut enc = PushEncoder::new(1).unwrap();
+    for len in [0, 1, block - 1, block, block + 1, 2 * block, 2 * block + 5] {
+        let data = mixed(len, len as u32);
+        for in_chunk in [1 << 20, block, 1000] {
+            let frame = push_encode(&mut enc, &data, in_chunk, 1 << 20);
+            assert_eq!(zstd::decode_all(&frame[..]).unwrap(), data, "len={len}");
+        }
+    }
+}
+
+#[test]
+fn encode_to_vec_matches_bounded_encode() {
+    let data = mixed(400_000, 3);
+    let mut a = PushEncoder::new(3).unwrap();
+    let mut b = PushEncoder::new(3).unwrap();
+    let bounded = push_encode(&mut a, &data, 5000, 333);
+    let mut to_vec = Vec::new();
+    for chunk in data.chunks(5000) {
+        b.encode_to_vec(chunk, &mut to_vec, EndOp::Continue)
+            .unwrap();
+    }
+    b.encode_to_vec(&[], &mut to_vec, EndOp::End).unwrap();
+    assert_eq!(bounded, to_vec);
+}
+
+#[test]
+fn encode_flush_makes_prefix_decodable() {
+    let data = mixed(50_000, 11);
+    let mut enc = PushEncoder::new(1).unwrap();
+    let mut dec = PushDecoder::new();
+    let mut frame = Vec::new();
+    let mut decoded = Vec::new();
+    for chunk in data.chunks(3000) {
+        let before = frame.len();
+        enc.encode_to_vec(chunk, &mut frame, EndOp::Flush).unwrap();
+        // Everything written so far decodes, without the frame end.
+        dec.decode_to_vec(&frame[before..], &mut decoded).unwrap();
+        assert_eq!(decoded, data[..decoded.len()]);
+        assert_eq!(
+            decoded.len(),
+            (chunk.as_ptr() as usize - data.as_ptr() as usize) + chunk.len()
+        );
+    }
+    enc.encode_to_vec(&[], &mut frame, EndOp::End).unwrap();
+    assert_eq!(zstd::decode_all(&frame[..]).unwrap(), data);
+}
+
+#[test]
+fn encode_frames_back_to_back_and_reset() {
+    let a = mixed(10_000, 1);
+    let b = mixed(200_000, 2);
+    let mut enc = PushEncoder::new(1).unwrap();
+    let mut out = Vec::new();
+    enc.encode_to_vec(&a, &mut out, EndOp::End).unwrap();
+    let first = out.len();
+    enc.encode_to_vec(&b, &mut out, EndOp::End).unwrap();
+    assert_eq!(zrip::decompress(&out[..first]).unwrap(), a);
+    assert_eq!(zrip::decompress(&out[first..]).unwrap(), b);
+
+    // Reset drops a half-written frame.
+    let mut partial = Vec::new();
+    enc.encode_to_vec(&b, &mut partial, EndOp::Continue)
+        .unwrap();
+    enc.reset();
+    let mut fresh = Vec::new();
+    enc.encode_to_vec(&a, &mut fresh, EndOp::End).unwrap();
+    assert_eq!(fresh, out[..first]);
+}
+
+#[test]
+fn encode_options_and_dict() {
+    let data = mixed(1 << 20, 5);
+    let opts = zrip::Options::default().window_log(20).ldm(true);
+    let mut enc = PushEncoder::with_options(1, &opts).unwrap();
+    let frame = push_encode(&mut enc, &data, 70_000, 1 << 16);
+    assert_eq!(zstd::decode_all(&frame[..]).unwrap(), data);
+
+    let samples: Vec<Vec<u8>> = (0..200).map(|i| mixed(300, i)).collect();
+    let dict_bytes = zstd::dict::from_samples(&samples, 4096).unwrap();
+    let dict = Dictionary::from_bytes(&dict_bytes).unwrap();
+    let mut enc = PushEncoder::with_dict(3, dict.clone()).unwrap();
+    let mut dec = PushDecoder::with_dict(dict);
+    let mut cdec = zstd::bulk::Decompressor::with_dictionary(&dict_bytes).unwrap();
+    for sample in &samples[..20] {
+        let frame = push_encode(&mut enc, sample, 50, 17);
+        assert_eq!(cdec.decompress(&frame, sample.len()).unwrap(), *sample);
+        let (out, frames) = push_decode(&mut dec, &frame, 9, 31).unwrap();
+        assert_eq!(out, *sample);
+        assert_eq!(frames, 1);
+    }
+}
+
+#[test]
+fn encode_invalid_level() {
+    assert!(PushEncoder::new(5).is_err());
+}
+
+#[test]
+fn decode_c_frames_every_chunking() {
+    let data = mixed(400_000, 9);
+    let mut dec = PushDecoder::new();
+    for level in [1, 3, 9, 19] {
+        let frame = zstd::bulk::compress(&data, level).unwrap();
+        for (in_chunk, out_buf) in [
+            (1 << 20, 1 << 20),
+            (1, 1 << 20),
+            (1 << 20, 1),
+            (3, 7),
+            (4096, 4096),
+            (131_075, 131_072),
+        ] {
+            let (out, frames) = push_decode(&mut dec, &frame, in_chunk, out_buf).unwrap();
+            assert_eq!(out, data, "L{level} in={in_chunk} out={out_buf}");
+            assert_eq!(frames, 1);
+        }
+    }
+}
+
+#[test]
+fn decode_every_split_point() {
+    let data = mixed(20_000, 4);
+    let mut frame = zstd::stream::encode_all(&data[..], 3).unwrap();
+    let skippable = [0x50, 0x2A, 0x4D, 0x18, 3, 0, 0, 0, 1, 2, 3];
+    frame.extend_from_slice(&skippable);
+    frame.extend_from_slice(&zrip::compress(&data[..100], 1).unwrap());
+    let mut want = data.clone();
+    want.extend_from_slice(&data[..100]);
+
+    let mut dec = PushDecoder::new();
+    let mut buf = vec![0u8; 1 << 18];
+    for split in 0..=frame.len() {
+        let mut out = Vec::new();
+        for part in [&frame[..split], &frame[split..]] {
+            let mut input = part;
+            loop {
+                let p = dec.decode(input, &mut buf).unwrap();
+                out.extend_from_slice(&buf[..p.produced]);
+                input = &input[p.consumed..];
+                if p.status == Status::NeedsInput {
+                    break;
+                }
+            }
+        }
+        dec.finish().unwrap();
+        assert_eq!(out, want, "split={split}");
+    }
+}
+
+#[test]
+fn decode_multi_frame_and_skippable() {
+    let a = mixed(1000, 1);
+    let b = mixed(150_000, 2);
+    let mut stream = vec![0x5E, 0x2A, 0x4D, 0x18, 0, 0, 0, 0]; // empty skippable
+    stream.extend(zstd::bulk::compress(&a, 1).unwrap());
+    stream.extend([0x50, 0x2A, 0x4D, 0x18, 5, 0, 0, 0, 9, 9, 9, 9, 9]);
+    stream.extend(zstd::stream::encode_all(&b[..], 5).unwrap());
+    stream.extend(zrip::compress(&[], 1).unwrap());
+
+    let mut dec = PushDecoder::new();
+    for in_chunk in [1, 2, 5, 1 << 20] {
+        let (out, frames) = push_decode(&mut dec, &stream, in_chunk, 999).unwrap();
+        assert_eq!(out, [&a[..], &b[..]].concat());
+        assert_eq!(frames, 5, "in={in_chunk}");
+    }
+
+    let mut to_vec = Vec::new();
+    for chunk in stream.chunks(777) {
+        dec.decode_to_vec(chunk, &mut to_vec).unwrap();
+    }
+    dec.finish().unwrap();
+    assert_eq!(to_vec, [&a[..], &b[..]].concat());
+}
+
+#[test]
+fn decode_finished_stops_at_frame_end() {
+    let a = zrip::compress(b"first", 1).unwrap();
+    let b = zrip::compress(b"second", 1).unwrap();
+    let both = [&a[..], &b[..]].concat();
+    let mut dec = PushDecoder::new();
+    let mut buf = [0u8; 64];
+    let p = dec.decode(&both, &mut buf).unwrap();
+    assert_eq!(p.status, Status::Finished);
+    assert_eq!(p.consumed, a.len());
+    assert_eq!(&buf[..p.produced], b"first");
+    let p = dec.decode(&both[a.len()..], &mut buf).unwrap();
+    assert_eq!(p.status, Status::Finished);
+    assert_eq!(&buf[..p.produced], b"second");
+}
+
+#[test]
+fn decode_truncated_frames_fail_finish() {
+    let data = mixed(5000, 8);
+    let frame = zstd::stream::encode_all(&data[..], 3).unwrap();
+    let mut dec = PushDecoder::new();
+    for cut in 1..frame.len() {
+        dec.reset();
+        let mut out = Vec::new();
+        dec.decode_to_vec(&frame[..cut], &mut out).unwrap();
+        assert_eq!(
+            dec.finish(),
+            Err(DecompressError::InputExhausted),
+            "cut={cut}"
+        );
+    }
+    dec.reset();
+    dec.finish().unwrap();
+}
+
+#[test]
+fn decode_errors_stick_until_reset() {
+    let data = mixed(5000, 8);
+    let mut c = zstd::stream::Encoder::new(Vec::new(), 3).unwrap();
+    c.include_checksum(true).unwrap();
+    std::io::Write::write_all(&mut c, &data).unwrap();
+    let mut frame = c.finish().unwrap();
+    let n = frame.len();
+    frame[n - 1] ^= 1; // checksum
+    let mut dec = PushDecoder::new();
+    let mut out = Vec::new();
+    let err = dec.decode_to_vec(&frame, &mut out).unwrap_err();
+    assert!(matches!(err, DecompressError::ChecksumMismatch { .. }));
+    assert_eq!(dec.decode_to_vec(&[], &mut out), Err(err.clone()));
+    assert_eq!(dec.finish(), Err(err));
+    dec.reset();
+    frame[n - 1] ^= 1;
+    out.clear();
+    dec.decode_to_vec(&frame, &mut out).unwrap();
+    assert_eq!(out, data);
+}
+
+#[test]
+fn decode_limits() {
+    let data = mixed(300_000, 6);
+    let frame = zstd::stream::encode_all(&data[..], 3).unwrap();
+    let mut out = Vec::new();
+    let err = PushDecoder::with_limit(100_000)
+        .decode_to_vec(&frame, &mut out)
+        .unwrap_err();
+    assert_eq!(err, DecompressError::OutputTooSmall);
+    let mut reader = zrip::FrameDecoder::with_limit(&frame[..], 100_000);
+    let err = std::io::Read::read_to_end(&mut reader, &mut Vec::new()).unwrap_err();
+    let inner = err
+        .get_ref()
+        .and_then(|e| e.downcast_ref::<DecompressError>());
+    assert_eq!(inner, Some(&DecompressError::OutputTooSmall));
+
+    let mut c = zstd::stream::Encoder::new(Vec::new(), 3).unwrap();
+    c.window_log(20).unwrap();
+    std::io::Write::write_all(&mut c, &data).unwrap();
+    let frame = c.finish().unwrap();
+    let mut out = Vec::new();
+    let err = PushDecoder::new()
+        .max_window(1 << 19)
+        .decode_to_vec(&frame, &mut out)
+        .unwrap_err();
+    assert!(
+        matches!(err, DecompressError::WindowTooLarge { .. }),
+        "{err:?}"
+    );
+    PushDecoder::new()
+        .max_window(1 << 20)
+        .decode_to_vec(&frame, &mut out)
+        .unwrap();
+    assert_eq!(out, data);
+
+    // A window above the default 128 MiB needs an explicit cap.
+    let mut c = zstd::stream::Encoder::new(Vec::new(), 3).unwrap();
+    c.window_log(31).unwrap();
+    std::io::Write::write_all(&mut c, &data).unwrap();
+    let frame = c.finish().unwrap();
+    let mut out = Vec::new();
+    let err = PushDecoder::new()
+        .decode_to_vec(&frame, &mut out)
+        .unwrap_err();
+    assert!(
+        matches!(err, DecompressError::WindowTooLarge { .. }),
+        "{err:?}"
+    );
+    PushDecoder::new()
+        .max_window(1 << 31)
+        .decode_to_vec(&frame, &mut out)
+        .unwrap();
+    assert_eq!(out, data);
+}
+
+#[test]
+fn one_pass_frames_match_one_shot() {
+    // A frame that ends before any of it went out is encoded in one pass.
+    let block = zrip::frame::MAX_BLOCK_SIZE;
+    for level in [-7, 1, 3, 4] {
+        for len in [0, 1000, block, block + 1, 300_000] {
+            let data = mixed(len, len as u32);
+            let want = zrip::compress(&data, level).unwrap();
+
+            let mut enc = PushEncoder::new(level).unwrap();
+            let mut out = Vec::new();
+            enc.encode_to_vec(&data, &mut out, EndOp::End).unwrap();
+            assert_eq!(out, want, "L{level} len={len} one call");
+
+            // Buffered under a block, then ended: still one pass.
+            if len <= block {
+                let mut out = Vec::new();
+                for chunk in data.chunks(333) {
+                    enc.encode_to_vec(chunk, &mut out, EndOp::Continue).unwrap();
+                }
+                enc.encode_to_vec(&[], &mut out, EndOp::End).unwrap();
+                assert_eq!(out, want, "L{level} len={len} chunked");
+            }
+
+            let frame = push_encode(&mut enc, &data, 1 << 20, 7);
+            assert_eq!(zstd::decode_all(&frame[..]).unwrap(), data);
+        }
+    }
+
+    let samples: Vec<Vec<u8>> = (0..200).map(|i| mixed(300, i)).collect();
+    let dict_bytes = zstd::dict::from_samples(&samples, 4096).unwrap();
+    let dict = Dictionary::from_bytes(&dict_bytes).unwrap();
+    let mut enc = PushEncoder::with_dict(3, dict.clone()).unwrap();
+    let mut out = Vec::new();
+    enc.encode_to_vec(&samples[0], &mut out, EndOp::End)
+        .unwrap();
+    assert_eq!(
+        out,
+        zrip::compress_with_dict(&samples[0], 3, &dict).unwrap()
+    );
+
+    let opts = zrip::Options::default().window_log(20).ldm(true);
+    let data = mixed(200_000, 3);
+    let mut enc = PushEncoder::with_options(1, &opts).unwrap();
+    let mut out = Vec::new();
+    enc.encode_to_vec(&data, &mut out, EndOp::End).unwrap();
+    assert_eq!(out, zrip::compress_opts(&data, 1, &opts).unwrap());
+}

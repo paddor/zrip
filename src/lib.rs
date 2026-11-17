@@ -50,6 +50,10 @@
 //! # }
 //! ```
 //!
+//! [`push::PushEncoder`] and [`push::PushDecoder`] are the push-style
+//! (sans-io) counterparts: feed input chunks, drain output into your own
+//! buffers. They need only `alloc`.
+//!
 //! # Long distance matching
 //!
 //! For data with long-range repetitions, enable LDM via [`Options`]:
@@ -190,6 +194,15 @@ pub fn compress_bound(input_len: usize) -> usize {
     input_len
         .saturating_add(num_blocks.saturating_mul(3))
         .saturating_add(22)
+}
+
+/// Push-style (sans-io) streaming: feed input chunks, drain output into
+/// your own buffers. Needs only `alloc`.
+#[cfg(feature = "alloc")]
+pub mod push {
+    pub use zrip_core::push::{Progress, Status};
+    pub use zrip_decode::push::PushDecoder;
+    pub use zrip_encode::push::{EndOp, PushEncoder};
 }
 
 #[cfg(feature = "alloc")]

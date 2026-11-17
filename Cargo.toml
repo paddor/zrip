@@ -110,6 +110,10 @@ name = "zrip_proptest_tests"
 path = "tests/proptest_tests.rs"
 
 [[test]]
+name = "zrip_push"
+path = "tests/push.rs"
+
+[[test]]
 name = "zrip_roundtrip"
 path = "tests/roundtrip.rs"
 

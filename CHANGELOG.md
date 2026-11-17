@@ -8,6 +8,28 @@
   buffer, from the frame and block headers alone, like C zstd's
   `ZSTD_findFrameCompressedSize`. Splits concatenated frames and checks that
   a buffer holds exactly one frame without decoding it.
+- `zrip::push::{PushEncoder, PushDecoder}`: push-style (sans-io) streaming.
+  Feed input in chunks of any size, drain output into caller buffers of any
+  size, with `NeedsInput`/`NeedsOutput`/`Finished` status. `EndOp::Flush`
+  ends a block, `EndOp::End` a frame. A frame that ends before any of it
+  was written is encoded in one pass, the same bytes as `compress`. The
+  decoder reads multi-frame streams and skippable frames, takes a
+  dictionary and an output limit, `max_window` lowers or raises the 128 MiB
+  window cap, and `finish()` reports a truncated frame. Both need only
+  `alloc`.
+
+### Changed
+
+- `FrameEncoder` and `FrameDecoder` share their frame state with the push
+  types. `FrameDecoder::with_limit` now reports a crossed limit as
+  `OutputTooSmall` instead of `CorruptSequences`.
+- `FrameDecoder` decodes each block straight into its window history
+  instead of a separate buffer, reserves a known content size up front, and
+  builds the predefined sequence tables once per decoder instead of once per
+  frame. Silesia decodes 12-64% faster at levels 1 and 3.
+- `FrameEncoder` appends input straight into its window, grows it in large
+  steps, and allocates hash tables on the first block. Silesia encodes 1-30%
+  faster.
 
 ### Fixed
 
