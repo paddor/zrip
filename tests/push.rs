@@ -453,3 +453,63 @@ fn one_pass_frames_match_one_shot() {
     enc.encode_to_vec(&data, &mut out, EndOp::End).unwrap();
     assert_eq!(out, zrip::compress_opts(&data, 1, &opts).unwrap());
 }
+
+#[test]
+fn encode_to_vec_after_pending_frame_end() {
+    let a = mixed(50_000, 1);
+    let b = mixed(1000, 2);
+    let want = [
+        zrip::compress(&a, 1).unwrap(),
+        zrip::compress(&b, 1).unwrap(),
+    ]
+    .concat();
+    let mut enc = PushEncoder::new(1).unwrap();
+    let mut buf = [0u8; 16];
+
+    // Input after a pending frame end starts the next frame.
+    let p = enc.encode(&a, &mut buf, EndOp::End).unwrap();
+    assert_eq!(p.status, Status::NeedsOutput);
+    let mut out = buf[..p.produced].to_vec();
+    enc.encode_to_vec(&b, &mut out, EndOp::End).unwrap();
+    assert_eq!(out, want);
+
+    // No input only finishes the pending frame.
+    let p = enc.encode(&a, &mut buf, EndOp::End).unwrap();
+    assert_eq!(p.status, Status::NeedsOutput);
+    let mut out = buf[..p.produced].to_vec();
+    enc.encode_to_vec(&[], &mut out, EndOp::End).unwrap();
+    assert!(!enc.has_pending_output());
+    enc.encode_to_vec(&b, &mut out, EndOp::End).unwrap();
+    assert_eq!(out, want);
+}
+
+#[test]
+fn decode_bad_magic_fails_early() {
+    let mut dec = PushDecoder::new();
+    assert_eq!(
+        dec.decode(b"hell", &mut [0u8; 8]),
+        Err(DecompressError::BadMagic)
+    );
+    let mut reader = zrip::FrameDecoder::new(&b"hello"[..]);
+    let err = std::io::Read::read_to_end(&mut reader, &mut Vec::new()).unwrap_err();
+    let inner = err
+        .get_ref()
+        .and_then(|e| e.downcast_ref::<DecompressError>());
+    assert_eq!(inner, Some(&DecompressError::BadMagic));
+}
+
+#[test]
+fn decode_limit_counts_earlier_frames() {
+    let a = zrip::compress(&mixed(1000, 1), 1).unwrap();
+    let b = zrip::compress(&mixed(1000, 2), 1).unwrap();
+    let header = zrip::frame::header::parse_frame_header(&b).unwrap();
+    assert_eq!(header.frame_content_size, Some(1000));
+    // The second header's content size crosses the limit.
+    let input = [&a[..], &b[..header.header_size]].concat();
+    let mut out = Vec::new();
+    let err = PushDecoder::with_limit(1500)
+        .decode_to_vec(&input, &mut out)
+        .unwrap_err();
+    assert_eq!(err, DecompressError::OutputTooSmall);
+    assert_eq!(out.len(), 1000);
+}

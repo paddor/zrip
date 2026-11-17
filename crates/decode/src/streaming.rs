@@ -9,6 +9,7 @@ use crate::frame_state::{
 use zrip_core::block::{BlockType, parse_block_header};
 use zrip_core::dict::Dictionary;
 use zrip_core::error::DecompressError;
+use zrip_core::frame::ZSTD_MAGIC;
 
 enum State {
     FrameHeader,
@@ -170,6 +171,9 @@ impl<R: Read> FrameDecoder<R> {
                 return Err(io::ErrorKind::UnexpectedEof.into());
             }
             return Ok(());
+        }
+        if magic != ZSTD_MAGIC {
+            return Err(invalid(DecompressError::BadMagic));
         }
 
         self.inner

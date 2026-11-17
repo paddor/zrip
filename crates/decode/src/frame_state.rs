@@ -159,8 +159,9 @@ impl FrameState {
             None => header.window_size as usize,
         };
 
+        // The limit spans the stream, so earlier frames' output counts.
         if let Some(fcs) = header.frame_content_size
-            && fcs as usize > self.max_output
+            && fcs > self.max_output.saturating_sub(self.bytes_output) as u64
         {
             return Err(DecompressError::OutputTooSmall);
         }

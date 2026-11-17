@@ -1945,4 +1945,9 @@ fn find_frame_compressed_size_matches_c() {
         zrip::frame::find_frame_compressed_size(b"not a zstd frame"),
         Err(zrip::DecompressError::BadMagic)
     );
+    // A bad magic number fails before the header is complete.
+    assert_eq!(
+        zrip::frame::find_frame_compressed_size(b"hello"),
+        Err(zrip::DecompressError::BadMagic)
+    );
 }
