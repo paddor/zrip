@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- `zrip::frame::find_frame_compressed_size`: size of the first frame in a
+  buffer, from the frame and block headers alone, like C zstd's
+  `ZSTD_findFrameCompressedSize`. Splits concatenated frames and checks that
+  a buffer holds exactly one frame without decoding it.
+
 ### Fixed
 
 - One-shot decoding (`decompress*`, `DecompressContext`) no longer rejects
