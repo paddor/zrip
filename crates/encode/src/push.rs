@@ -163,6 +163,9 @@ impl PushEncoder {
 
     /// Encodes all of `input` and appends the frame bytes to `output`.
     /// With [`EndOp::End`], `output` then ends with a complete frame.
+    ///
+    /// Bytes still pending from [`encode`](Self::encode) go out first. If
+    /// they end a frame, `input` starts the next one.
     pub fn encode_to_vec(
         &mut self,
         input: &[u8],
@@ -175,6 +178,13 @@ impl PushEncoder {
         output.extend_from_slice(&self.pending[self.pending_pos..]);
         self.pending.clear();
         self.pending_pos = 0;
+        if self.frame_done {
+            self.end_frame();
+            // The call only finished the pending frame.
+            if input.is_empty() {
+                return Ok(());
+            }
+        }
         let mut consumed = 0;
         loop {
             if self.frame_done {
