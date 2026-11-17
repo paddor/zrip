@@ -1867,3 +1867,37 @@ fn checksum_validated_on_small_frame_c() {
     let decompressed = zrip::decompress(&compressed).unwrap();
     assert_eq!(&decompressed, data);
 }
+
+#[test]
+fn one_shot_decodes_windows_above_streaming_cap() {
+    use std::io::{Read, Write};
+    let original: Vec<u8> = (0u32..200_000)
+        .flat_map(|i| (i % 977).to_le_bytes())
+        .collect();
+    for window_log in [28, 30] {
+        let mut enc = zstd::stream::Encoder::new(Vec::new(), 3).unwrap();
+        enc.window_log(window_log).unwrap();
+        enc.write_all(&original).unwrap();
+        let frame = enc.finish().unwrap();
+        let header = zrip::frame::header::parse_frame_header(&frame).unwrap();
+        assert!(!header.single_segment);
+        assert_eq!(header.window_size, 1 << window_log);
+
+        assert_eq!(zrip::decompress(&frame).unwrap(), original);
+        assert_eq!(
+            zstd::bulk::decompress(&frame, original.len()).unwrap(),
+            original
+        );
+        let mut ctx = zrip::DecompressContext::new();
+        assert_eq!(&*ctx.decompress(&frame).unwrap(), &original[..]);
+        assert!(zrip::decompress_with_limit(&frame, original.len() - 1).is_err());
+
+        // Streaming keeps history, so it still caps the window.
+        let mut out = Vec::new();
+        assert!(
+            zrip::FrameDecoder::new(&frame[..])
+                .read_to_end(&mut out)
+                .is_err()
+        );
+    }
+}

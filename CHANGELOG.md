@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- One-shot decoding (`decompress*`, `DecompressContext`) no longer rejects
+  frames whose window exceeds 128 MiB. One-shot output is the history, so
+  the window never bounded its memory; `max_output` does. C zstd's
+  one-shot decoder accepts these frames too. `FrameDecoder` still caps the
+  window, since it keeps the history.
+
 ## [0.8.17] - 2026-11-12
 
 ### Changed

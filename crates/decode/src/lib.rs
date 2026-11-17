@@ -246,13 +246,8 @@ fn decompress_frame_with_header(
     ws: &mut BlockDecodeWorkspace,
     header: FrameHeader,
 ) -> Result<usize, DecompressError> {
-    if header.window_size > MAX_WINDOW_SIZE && !header.single_segment {
-        return Err(DecompressError::WindowTooLarge {
-            requested: header.window_size,
-            max: MAX_WINDOW_SIZE,
-        });
-    }
-
+    // No window cap here: one-shot output is the history, so the window
+    // doesn't bound memory; `max_output` does. Streaming decoders cap it.
     if let Some(frame_dict_id) = header.dict_id {
         match dict {
             Some(d) if d.id() == frame_dict_id => {}
