@@ -98,6 +98,34 @@ enc.write_all(b"second frame")?;
 let second = enc.finish()?;
 ```
 
+### Push (sans-io)
+
+`PushEncoder` and `PushDecoder` take input in chunks of any size and write
+into caller buffers of any size, like zstd's `ZSTD_compressStream2` and
+`ZSTD_decompressStream`. Use them where `Read`/`Write` don't fit: async
+codecs, HTTP bodies, sans-io protocol stacks. They need only `alloc`.
+
+```rust
+use zrip::push::{EndOp, PushDecoder, PushEncoder, Status};
+
+let mut enc = PushEncoder::new(1)?;
+let mut frame = Vec::new();
+for chunk in chunks {
+    enc.encode_to_vec(chunk, &mut frame, EndOp::Continue)?;
+}
+enc.encode_to_vec(&[], &mut frame, EndOp::End)?;
+
+let mut dec = PushDecoder::new();
+let mut buf = [0u8; 4096];
+let p = dec.decode(&frame, &mut buf)?;
+// p.consumed, p.produced, p.status: NeedsInput, NeedsOutput or Finished
+```
+
+`decode` stops at each frame end with `Status::Finished`; call again for
+the next frame. At end of input, `finish()` rejects a truncated frame.
+`PushDecoder::max_window()` sets the window cap (128 MiB by default), and
+with it the history kept.
+
 ### Large-window and long distance matching
 
 The normal match finder operates within a sliding window (512 KiB at L1).
@@ -188,9 +216,10 @@ let dict = train_dict_fastcover(&samples, 16384, FastCoverParams::default());
 [SAFETY.md](SAFETY.md) describes how zrip stays fast without `unsafe` and
 catalogs C zstd memory safety bugs that Rust prevents by construction.
 
-All codec paths are fuzz-tested (17 targets). Fuzz targets cover round-trip
+All codec paths are fuzz-tested (19 targets). Fuzz targets cover round-trip
 correctness, cross-validation against C zstd, streaming, dictionary modes,
-and corruption resistance (bitflip, splice, truncate, overwrite).
+push chunking, and corruption resistance (bitflip, splice, truncate,
+overwrite).
 
 ## Design
 

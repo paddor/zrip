@@ -10,7 +10,11 @@ pub(crate) mod block_decoder;
 pub mod context;
 pub(crate) mod exec;
 pub(crate) mod fast_vec;
+#[cfg(feature = "alloc")]
+pub(crate) mod frame_state;
 pub(crate) mod literals;
+#[cfg(feature = "alloc")]
+pub mod push;
 pub(crate) mod ring_buffer;
 pub(crate) mod seq_table;
 pub(crate) mod sequences;
@@ -81,7 +85,8 @@ impl BlockDecodeWorkspace {
             fse_dist: Vec::new(),
             fse_symbol_next: Vec::new(),
             fse_build_buf: Vec::new(),
-            seq_tables: Some(Box::new(SequenceDecodeTables::new_default())),
+            // Built on first use; streaming decoders keep their own tables.
+            seq_tables: None,
             seq_table_header: Vec::new(),
             seq_table_cache: None,
             seq_table_cache_tables_current: false,

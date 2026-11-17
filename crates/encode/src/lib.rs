@@ -39,10 +39,14 @@ pub(crate) mod block_encoder;
 pub mod context;
 pub(crate) mod dfast;
 pub(crate) mod fast;
+#[cfg(feature = "alloc")]
+pub(crate) mod frame_state;
 #[cfg(feature = "ldm")]
 pub(crate) mod ldm;
 mod output;
 pub(crate) mod primitives;
+#[cfg(feature = "alloc")]
+pub mod push;
 pub(crate) mod rebase;
 pub mod strategy;
 #[cfg(feature = "std")]
@@ -283,7 +287,7 @@ pub fn compress_opts(
 }
 
 /// Returns the parameters for a one-shot frame of `input_len` bytes.
-fn params_with_options(
+pub(crate) fn params_with_options(
     level: i32,
     input_len: usize,
     opts: &strategy::Options,
@@ -310,7 +314,7 @@ fn compress_inner(input: &[u8], params: &strategy::LevelParams) -> Result<Vec<u8
     Ok(output)
 }
 
-fn compress_frame(
+pub(crate) fn compress_frame(
     input: &[u8],
     params: &strategy::LevelParams,
     output: &mut impl OutputSink,
@@ -496,14 +500,26 @@ pub fn compress_with_dict(
     level: i32,
     dict: &zrip_core::dict::Dictionary,
 ) -> Result<Vec<u8>, CompressError> {
+    let mut output = Vec::with_capacity(input.len() + 32);
+    compress_with_dict_to(input, level, dict, &mut output)?;
+    Ok(output)
+}
+
+/// [`compress_with_dict`], appending the frame to `output`.
+pub(crate) fn compress_with_dict_to(
+    input: &[u8],
+    level: i32,
+    dict: &zrip_core::dict::Dictionary,
+    output: &mut Vec<u8>,
+) -> Result<(), CompressError> {
     let params = strategy::level_params_with_prefix(level, dict.content().len(), input.len())
         .ok_or(CompressError::InvalidLevel(level))?;
 
-    let mut output = Vec::with_capacity(input.len() + 32);
-    write_frame_header(&mut output, input.len(), Some(dict.id()), params.window_log)?;
+    output.reserve(input.len() + 32);
+    write_frame_header(output, input.len(), Some(dict.id()), params.window_log)?;
 
     if input.is_empty() {
-        block_encoder::encode_raw_block(&[], true, &mut output)?;
+        block_encoder::encode_raw_block(&[], true, output)?;
     } else {
         let prefix = dict.content();
         let mut rep_offsets = *dict.rep_offsets();
@@ -537,7 +553,7 @@ pub fn compress_with_dict(
                     &sequences,
                     &mut rep_offsets,
                     true,
-                    &mut output,
+                    output,
                     &mut workspace,
                 )?;
             } else {
@@ -546,7 +562,7 @@ pub fn compress_with_dict(
                     &sequences,
                     &mut rep_offsets,
                     true,
-                    &mut output,
+                    output,
                     &mut workspace,
                     strategy::block_policy(&params, input.len()),
                 )?;
@@ -594,7 +610,7 @@ pub fn compress_with_dict(
                                 &sequences,
                                 &mut rep_offsets,
                                 is_last,
-                                &mut output,
+                                output,
                                 &mut workspace,
                             )?;
                         } else {
@@ -603,7 +619,7 @@ pub fn compress_with_dict(
                                 &sequences,
                                 &mut rep_offsets,
                                 is_last,
-                                &mut output,
+                                output,
                                 &mut workspace,
                                 strategy::block_policy(&params, input.len()),
                             )?;
@@ -651,7 +667,7 @@ pub fn compress_with_dict(
                             &sequences,
                             &mut rep_offsets,
                             is_last,
-                            &mut output,
+                            output,
                             &mut workspace,
                             strategy::block_policy(&params, input.len()),
                         )?;
@@ -666,7 +682,7 @@ pub fn compress_with_dict(
     let checksum = (hash & 0xFFFF_FFFF) as u32;
     output.extend_from_slice(&checksum.to_le_bytes());
 
-    Ok(output)
+    Ok(())
 }
 
 pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usize, CompressError> {
