@@ -526,7 +526,12 @@ fn decode_compressed_block(
     Ok(())
 }
 
-#[inline(always)]
+/// Decodes and executes a block's sequences. Runs once per block.
+///
+/// Kept out of line: inlined, the SIMD kernel's code depends on the size of
+/// its caller. Dropping a cold check from `decompress_frame_with_header` let
+/// LLVM inline the AVX2 kernel there, and decoding got 9% slower.
+#[inline(never)]
 pub(crate) fn decode_sequences_dispatch(
     seq_data: &[u8],
     num_sequences: u32,
