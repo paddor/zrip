@@ -1574,10 +1574,14 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
             .max()
             .unwrap_or(1)
             .max(1);
-        let bar_w = (col_w * 0.7 / max_codecs as f64).min(50.0);
-        let inner_gap = bar_w * 0.15;
+        // Whole pixels, so every bar has the same width and every gap the
+        // same size. Fractional edges round to uneven widths and gaps.
+        let inner_gap = 2.0;
+        let bar_w = ((col_w * 0.7 - inner_gap * (max_codecs - 1) as f64) / max_codecs as f64)
+            .min(50.0)
+            .floor();
         for (li, level) in COLUMN_LEVELS.iter().enumerate() {
-            let col_x = x_left + li as f64 * col_w + (col_w * 0.2) / 2.0;
+            let col_x = (x_left + li as f64 * col_w + (col_w * 0.2) / 2.0).round();
             let codecs = cfg
                 .matrix_codecs
                 .iter()
@@ -1596,7 +1600,7 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
                 };
                 draw_stack(
                     &area,
-                    col_x + ci as f64 * (bar_w + inner_gap / max_codecs as f64),
+                    col_x + ci as f64 * (bar_w + inner_gap),
                     bar_w,
                     p_top,
                     p_bot,
