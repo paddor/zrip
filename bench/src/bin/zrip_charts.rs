@@ -211,10 +211,10 @@ impl Config {
                 Some("wasmtime (wasm32-wasip1), Linux VM on Intel Core i7-8700B @ 3.20GHz".into());
             cfg.codecs = vec![
                 codec("C zstd", "C zstd 1.5.7 (libzstd wasm)", 0x60a5fa, 0x4680c4),
-                codec("zrip", "zrip (safe Rust, SIMD128)", 0xf87171, 0xc45050),
+                codec("zrip", "zrip (safe Rust)", 0xf87171, 0xc45050),
                 codec(
                     "structured-zstd",
-                    "structured-zstd 0.0.48",
+                    "structured-zstd 0.4.2",
                     0xf59e0b,
                     0xc47d08,
                 ),
@@ -237,15 +237,15 @@ impl Config {
             hw_label: detect_hardware(),
             codecs: vec![
                 codec("C zstd", "libzstd v1.5.7 (C)", 0x60a5fa, 0x4680c4),
-                codec("zrip", "zrip (safe Rust, SIMD)", 0xf87171, 0xc45050),
+                codec("zrip", "zrip (safe Rust)", 0xf87171, 0xc45050),
                 codec(
                     "structured-zstd",
-                    "structured-zstd v0.0.55 (unsafe)",
+                    "structured-zstd v0.4.2 (unsafe)",
                     0xf59e0b,
                     0xc47d08,
                 ),
                 codec("ruzstd", "ruzstd v0.8.3 (safe)", 0x4ade80, 0x3aaf60),
-                codec("mzstd", "mzstd v0.2.8 (safe)", 0x2dd4bf, 0x22a896),
+                codec("mzstd", "mzstd v0.2.14 (safe)", 0x2dd4bf, 0x22a896),
                 codec(
                     "lz4rip",
                     "lz4rip v0.12.1 (safe Rust, LZ4)",

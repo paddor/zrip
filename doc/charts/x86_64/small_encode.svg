@@ -2454,20 +2454,20 @@ encode MB/s (log scale)
 <text x="73" y="1151" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
 libzstd v1.5.7 (C)
 </text>
-<rect x="244" y="1145" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
-<text x="262" y="1151" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-zrip (safe Rust, SIMD)
+<rect x="251" y="1145" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
+<text x="269" y="1151" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+zrip (safe Rust)
 </text>
-<rect x="517" y="1145" width="12" height="12" opacity="1" fill="#F59E0B" stroke="none"/>
-<text x="535" y="1151" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-structured-zstd v0.0.55 (unsafe)
+<rect x="524" y="1145" width="12" height="12" opacity="1" fill="#F59E0B" stroke="none"/>
+<text x="542" y="1151" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+structured-zstd v0.4.2 (unsafe)
 </text>
 <rect x="55" y="1165" width="12" height="12" opacity="1" fill="#2DD4BF" stroke="none"/>
 <text x="73" y="1171" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-mzstd v0.2.8 (safe)
+mzstd v0.2.14 (safe)
 </text>
-<rect x="244" y="1165" width="12" height="12" opacity="1" fill="#C084FC" stroke="none"/>
-<text x="262" y="1171" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+<rect x="251" y="1165" width="12" height="12" opacity="1" fill="#C084FC" stroke="none"/>
+<text x="269" y="1171" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
 lz4rip v0.12.1 (safe Rust, LZ4)
 </text>
 <polyline fill="none" opacity="1" stroke="#7D8590" stroke-width="2" points="235,1209 255,1209 "/>

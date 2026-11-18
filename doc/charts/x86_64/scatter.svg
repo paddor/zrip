@@ -493,24 +493,24 @@ encode MB/s (log)
 <text x="16" y="526" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#E6EDF3" font-weight="bold" transform="rotate(270, 16, 526)">
 compression ratio
 </text>
-<rect x="97" y="1035" width="12" height="12" opacity="1" fill="#60A5FA" stroke="none"/>
-<text x="115" y="1041" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+<rect x="104" y="1035" width="12" height="12" opacity="1" fill="#60A5FA" stroke="none"/>
+<text x="122" y="1041" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
 libzstd v1.5.7 (C)
 </text>
-<rect x="286" y="1035" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
-<text x="304" y="1041" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-zrip (safe Rust, SIMD)
+<rect x="300" y="1035" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
+<text x="318" y="1041" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+zrip (safe Rust)
 </text>
 <rect x="496" y="1035" width="12" height="12" opacity="1" fill="#F59E0B" stroke="none"/>
 <text x="514" y="1041" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-structured-zstd v0.0.55 (unsafe)
+structured-zstd v0.4.2 (unsafe)
 </text>
-<rect x="97" y="1055" width="12" height="12" opacity="1" fill="#2DD4BF" stroke="none"/>
-<text x="115" y="1061" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-mzstd v0.2.8 (safe)
+<rect x="104" y="1055" width="12" height="12" opacity="1" fill="#2DD4BF" stroke="none"/>
+<text x="122" y="1061" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+mzstd v0.2.14 (safe)
 </text>
-<rect x="286" y="1055" width="12" height="12" opacity="1" fill="#4ADE80" stroke="none"/>
-<text x="304" y="1061" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+<rect x="300" y="1055" width="12" height="12" opacity="1" fill="#4ADE80" stroke="none"/>
+<text x="318" y="1061" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
 ruzstd v0.8.3 (safe)
 </text>
 <rect x="496" y="1055" width="12" height="12" opacity="1" fill="#C084FC" stroke="none"/>

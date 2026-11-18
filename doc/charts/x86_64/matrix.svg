@@ -215,15 +215,15 @@ libzstd v1.5.7 (C)
 </text>
 <rect x="190" y="900" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
 <text x="208" y="906" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-zrip (safe Rust, SIMD)
+zrip (safe Rust)
 </text>
 <rect x="190" y="920" width="12" height="12" opacity="1" fill="#F59E0B" stroke="none"/>
 <text x="208" y="926" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-structured-zstd v0.0.55 (unsafe)
+structured-zstd v0.4.2 (unsafe)
 </text>
 <rect x="460" y="880" width="12" height="12" opacity="1" fill="#2DD4BF" stroke="none"/>
 <text x="478" y="886" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-mzstd v0.2.8 (safe)
+mzstd v0.2.14 (safe)
 </text>
 <rect x="460" y="900" width="12" height="12" opacity="1" fill="#4ADE80" stroke="none"/>
 <text x="478" y="906" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
