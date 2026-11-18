@@ -12,8 +12,22 @@ if [ "$SMOKE" = "1" ]; then
   FUZZ_SECONDS_PER_TARGET="${FUZZ_SECONDS_PER_TARGET:-5}"
   FUZZ_TARGET_LIMIT="${FUZZ_TARGET_LIMIT:-1}"
 else
-  FUZZ_SECONDS_PER_TARGET="${FUZZ_SECONDS_PER_TARGET:-1800}"
   FUZZ_TARGET_LIMIT="${FUZZ_TARGET_LIMIT:-0}"
+fi
+# Targets that feed the decoder arbitrary bytes keep finding new paths for
+# hours. Round-trip targets feed it valid frames and level off in minutes.
+# FUZZ_SECONDS_PER_TARGET sets both.
+FUZZ_SECONDS_LONG="${FUZZ_SECONDS_LONG:-${FUZZ_SECONDS_PER_TARGET:-1200}}"
+FUZZ_SECONDS_SHORT="${FUZZ_SECONDS_SHORT:-${FUZZ_SECONDS_PER_TARGET:-180}}"
+# FUZZ_SHARD=i/n runs every n-th target starting at the i-th, to split one
+# run across n hosts.
+FUZZ_SHARD="${FUZZ_SHARD:-1/1}"
+SHARD_INDEX="${FUZZ_SHARD%/*}"
+SHARD_COUNT="${FUZZ_SHARD#*/}"
+if ! [[ "$SHARD_INDEX" =~ ^[0-9]+$ && "$SHARD_COUNT" =~ ^[0-9]+$ ]] ||
+  [ "$SHARD_INDEX" -lt 1 ] || [ "$SHARD_INDEX" -gt "$SHARD_COUNT" ]; then
+  printf 'FUZZ_SHARD must be i/n with 1 <= i <= n, got %s\n' "$FUZZ_SHARD" >&2
+  exit 2
 fi
 FUZZ_MAX_LEN="${FUZZ_MAX_LEN:-65536}"
 FUZZ_TIMEOUT="${FUZZ_TIMEOUT:-30}"
@@ -104,7 +118,7 @@ fuzz_target() {
       --sanitizer none \
       "$target" \
       -- \
-      -max_total_time="$FUZZ_SECONDS_PER_TARGET" \
+      -max_total_time="$(target_seconds "$target")" \
       -jobs="$CPU_COUNT" \
       -workers="$CPU_COUNT" \
       -max_len="$FUZZ_MAX_LEN" \
@@ -112,6 +126,25 @@ fuzz_target() {
       -print_final_stats=1 \
       -artifact_prefix="$artifact_dir"
   )
+}
+
+SHORT_TARGETS=(
+  zrip_fuzz_roundtrip_frame
+  zrip_fuzz_roundtrip_streaming
+  zrip_fuzz_roundtrip_streaming_dict
+  zrip_fuzz_roundtrip_dict
+  zrip_fuzz_roundtrip_block
+  zrip_fuzz_c_compress_zrip_decompress
+  zrip_fuzz_zrip_compress_c_decompress
+  zrip_fuzz_push_roundtrip
+)
+
+target_seconds() {
+  if contains_target "$1" "${SHORT_TARGETS[@]}"; then
+    printf '%s\n' "$FUZZ_SECONDS_SHORT"
+  else
+    printf '%s\n' "$FUZZ_SECONDS_LONG"
+  fi
 }
 
 contains_target() {
@@ -126,6 +159,7 @@ contains_target() {
   return 1
 }
 
+# Long targets first, corrupt ones leading, then short targets.
 ordered_fuzz_targets() {
   local available=("$@")
   local preferred=(
@@ -138,13 +172,6 @@ ordered_fuzz_targets() {
     zrip_fuzz_corrupt_splice
     zrip_fuzz_corrupt_truncate
     zrip_fuzz_corrupt_overwrite
-    zrip_fuzz_roundtrip_frame
-    zrip_fuzz_roundtrip_streaming
-    zrip_fuzz_roundtrip_streaming_dict
-    zrip_fuzz_roundtrip_dict
-    zrip_fuzz_roundtrip_block
-    zrip_fuzz_c_compress_zrip_decompress
-    zrip_fuzz_zrip_compress_c_decompress
   )
   local target
 
@@ -155,7 +182,13 @@ ordered_fuzz_targets() {
   done
 
   for target in "${available[@]}"; do
-    if ! contains_target "$target" "${preferred[@]}"; then
+    if ! contains_target "$target" "${preferred[@]}" "${SHORT_TARGETS[@]}"; then
+      printf '%s\n' "$target"
+    fi
+  done
+
+  for target in "${SHORT_TARGETS[@]}"; do
+    if contains_target "$target" "${available[@]}"; then
       printf '%s\n' "$target"
     fi
   done
@@ -171,7 +204,8 @@ main() {
   status "overnight fuzz start run_id=$RUN_ID"
   status "log_dir=$LOG_DIR"
   status "config cpu_count=$CPU_COUNT smoke=$SMOKE"
-  status "config fuzz_seconds_per_target=$FUZZ_SECONDS_PER_TARGET"
+  status "config fuzz_seconds_long=$FUZZ_SECONDS_LONG fuzz_seconds_short=$FUZZ_SECONDS_SHORT"
+  status "config shard=$FUZZ_SHARD"
   status "config fuzz_max_len=$FUZZ_MAX_LEN"
 
   if ! cargo +nightly fuzz list >"$fuzz_list_log" 2>&1; then
@@ -186,8 +220,22 @@ main() {
   mapfile -t targets < <(ordered_fuzz_targets "${available_targets[@]}")
   if [ "$FUZZ_TARGET_LIMIT" -gt 0 ] &&
     [ "${#targets[@]}" -gt "$FUZZ_TARGET_LIMIT" ]; then
-    targets=("${targets[@]:0:$FUZZ_TARGET_LIMIT}")
-  fi
+  targets=("${targets[@]:0:$FUZZ_TARGET_LIMIT}")
+fi
+if [ "$SHARD_COUNT" -gt 1 ]; then
+  local shard=()
+  local i
+  for i in "${!targets[@]}"; do
+    if [ $((i % SHARD_COUNT)) -eq $((SHARD_INDEX - 1)) ]; then
+      shard+=("${targets[$i]}")
+    fi
+  done
+  targets=("${shard[@]}")
+fi
+if [ "${#targets[@]}" -eq 0 ]; then
+  status "no fuzz targets selected"
+  return 1
+fi
   printf '%s\n' "${targets[@]}" >"$TARGETS_LOG"
 
   run_logged fuzz_build fuzz_build "${targets[@]}" \

@@ -211,10 +211,10 @@ impl Config {
                 Some("wasmtime (wasm32-wasip1), Linux VM on Intel Core i7-8700B @ 3.20GHz".into());
             cfg.codecs = vec![
                 codec("C zstd", "C zstd 1.5.7 (libzstd wasm)", 0x60a5fa, 0x4680c4),
-                codec("zrip", "zrip (safe Rust, SIMD128)", 0xf87171, 0xc45050),
+                codec("zrip", "zrip (safe Rust)", 0xf87171, 0xc45050),
                 codec(
                     "structured-zstd",
-                    "structured-zstd 0.0.48",
+                    "structured-zstd 0.4.2",
                     0xf59e0b,
                     0xc47d08,
                 ),
@@ -237,15 +237,15 @@ impl Config {
             hw_label: detect_hardware(),
             codecs: vec![
                 codec("C zstd", "libzstd v1.5.7 (C)", 0x60a5fa, 0x4680c4),
-                codec("zrip", "zrip (safe Rust, SIMD)", 0xf87171, 0xc45050),
+                codec("zrip", "zrip (safe Rust)", 0xf87171, 0xc45050),
                 codec(
                     "structured-zstd",
-                    "structured-zstd v0.0.55 (unsafe)",
+                    "structured-zstd v0.4.2 (unsafe)",
                     0xf59e0b,
                     0xc47d08,
                 ),
                 codec("ruzstd", "ruzstd v0.8.3 (safe)", 0x4ade80, 0x3aaf60),
-                codec("mzstd", "mzstd v0.2.8 (safe)", 0x2dd4bf, 0x22a896),
+                codec("mzstd", "mzstd v0.2.14 (safe)", 0x2dd4bf, 0x22a896),
                 codec(
                     "lz4rip",
                     "lz4rip v0.12.1 (safe Rust, LZ4)",
@@ -1574,10 +1574,14 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
             .max()
             .unwrap_or(1)
             .max(1);
-        let bar_w = (col_w * 0.7 / max_codecs as f64).min(50.0);
-        let inner_gap = bar_w * 0.15;
+        // Whole pixels, so every bar has the same width and every gap the
+        // same size. Fractional edges round to uneven widths and gaps.
+        let inner_gap = 2.0;
+        let bar_w = ((col_w * 0.7 - inner_gap * (max_codecs - 1) as f64) / max_codecs as f64)
+            .min(50.0)
+            .floor();
         for (li, level) in COLUMN_LEVELS.iter().enumerate() {
-            let col_x = x_left + li as f64 * col_w + (col_w * 0.2) / 2.0;
+            let col_x = (x_left + li as f64 * col_w + (col_w * 0.2) / 2.0).round();
             let codecs = cfg
                 .matrix_codecs
                 .iter()
@@ -1596,7 +1600,7 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
                 };
                 draw_stack(
                     &area,
-                    col_x + ci as f64 * (bar_w + inner_gap / max_codecs as f64),
+                    col_x + ci as f64 * (bar_w + inner_gap),
                     bar_w,
                     p_top,
                     p_bot,

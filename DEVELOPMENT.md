@@ -121,21 +121,34 @@ Before tagging a release, run every fuzz target, corrupt targets first. The
 code has no `unsafe`, so targets build without a sanitizer. They catch
 panics, hangs, out-of-memory, and round-trip or C zstd mismatches.
 
-For the full release duration, run each fuzz target for 3 hours:
+The script defaults to the release durations. Targets that feed the decoder
+arbitrary bytes (corrupt, push decode, dict decode paths, context reuse) run
+20 minutes each, since they keep finding new paths for hours. Round-trip and
+C zstd targets feed it valid frames and run 3 minutes each. That is about
+4.5 hours on one host:
 
 ```bash
-FUZZ_SECONDS_PER_TARGET=10800 scripts/overnight_fuzz.sh
+scripts/overnight_fuzz.sh
 ```
 
-For an overnight pass, the script defaults to 30 minutes per fuzz target.
-Logs, artifacts, and TSV summaries are written under
-`tmp/overnight-fuzz/$RUN_ID/`.
+To split the run across hosts, give each one a shard. Shards take every n-th
+target, so each gets an even share of long and short targets:
+
+```bash
+FUZZ_SHARD=1/3 scripts/overnight_fuzz.sh   # on host 1; 2/3 and 3/3 on the others
+```
+
+Each target's corpus persists in `fuzz/corpus/`, so fuzzing time adds up
+across runs on the same host. Logs, artifacts, and TSV summaries are written
+under `tmp/overnight-fuzz/$RUN_ID/`.
 
 Useful controls:
 
 ```bash
 SMOKE=1 scripts/overnight_fuzz.sh      # quick harness check
 CPU_COUNT=8 scripts/overnight_fuzz.sh  # build/fuzz parallelism
+FUZZ_SECONDS_LONG=3600 FUZZ_SECONDS_SHORT=300 scripts/overnight_fuzz.sh
+FUZZ_SECONDS_PER_TARGET=600 scripts/overnight_fuzz.sh  # sets both
 ```
 
 The dict decode test uses a pre-built fixture

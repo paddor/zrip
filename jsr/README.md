@@ -100,13 +100,13 @@ const compressed = compress(data);
 ## Performance
 
 Level 1 benchmark through the JavaScript API, using the first 4 MiB of each of
-the 12 Silesia files. Geometric mean, decimal MB/s. Measured on 2026-10-31 with
+the 12 Silesia files. Geometric mean, decimal MB/s. Measured on 2026-11-18 with
 Deno 2.8.3, SIMD128, and an Intel Core i7-8700B Linux VM.
 
 | Impl                      | Encode MB/s | Decode MB/s |
 | :------------------------ | ----------: | ----------: |
-| zrip                      |   **172.4** |   **404.3** |
-| C zstd (zstd-codec 0.1.5) |       127.2 |       271.3 |
+| zrip                      |   **172.6** |   **402.1** |
+| C zstd (zstd-codec 0.1.5) |       129.5 |       270.1 |
 
 Run `deno run --allow-read src/bench.ts` from `jsr/` after building the WASM
 package to reproduce this comparison. The
