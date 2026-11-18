@@ -1,8 +1,6 @@
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
-use alloc::vec;
-#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 use super::primitives;
@@ -29,11 +27,18 @@ impl HuffmanEncodeTable {
 
     /// Builds a table from byte counts, as returned by [`byte_histogram`].
     pub fn from_histogram(freqs: &[u32; MAX_SYMBOL_VALUE + 1]) -> Option<Self> {
-        let max_sym = freqs.iter().rposition(|&f| f > 0).unwrap_or(0) as u8;
+        let max_sym = freqs.iter().rposition(|&f| f > 0)?;
 
-        let num_symbols = max_sym as usize + 1;
-        let active_count = freqs[..num_symbols].iter().filter(|&&f| f > 0).count();
-        if active_count < 2 {
+        // The symbols that occur, in symbol order. Every later step works on
+        // this list instead of all 256 counts.
+        let mut syms = [0u8; MAX_SYMBOL_VALUE + 1];
+        let mut n = 0usize;
+        for (s, &f) in freqs[..=max_sym].iter().enumerate() {
+            syms[n & MAX_SYMBOL_VALUE] = s as u8;
+            n += usize::from(f > 0);
+        }
+        let syms = &syms[..n];
+        if n < 2 {
             return None;
         }
 
@@ -41,28 +46,36 @@ impl HuffmanEncodeTable {
         // it must fit in 127 bytes. If it does not, flatten the counts: fewer
         // distinct weights compress better.
         let mut counts = *freqs;
-        let (weights, table_log, description) = loop {
-            let (weights, table_log) = compute_huffman_weights(&counts, num_symbols)?;
-            if let Some(description) = describe_weights(&weights[..max_sym as usize]) {
-                break (weights, table_log, description);
+        loop {
+            let (num_bits, table_log) = code_lengths(&counts, syms);
+            let mut weights = [0u8; MAX_SYMBOL_VALUE + 1];
+            for &s in syms {
+                weights[s as usize] = table_log + 1 - num_bits[s as usize];
             }
-            if counts.iter().all(|&c| c <= 1) {
+            // The explicit weights cover every symbol below the last one.
+            let mut hist = [0u32; WEIGHT_HIST_LEN];
+            for &s in &syms[..n - 1] {
+                hist[usize::from(weights[s as usize]) % WEIGHT_HIST_LEN] += 1;
+            }
+            hist[0] = (max_sym + 1 - n) as u32;
+            if let Some(description) = describe_weights(&weights[..max_sym], &hist) {
+                let codes = build_encode_codes(&weights, syms, table_log);
+                return Some(Self {
+                    packed: pack_codes(&codes, &num_bits),
+                    description,
+                    num_bits,
+                    table_log,
+                });
+            }
+            if syms.iter().all(|&s| counts[s as usize] <= 1) {
                 return None;
             }
             // (c + 1) / 2 keeps every symbol present and reaches 1 for all,
             // so the loop ends.
-            for c in counts.iter_mut().filter(|c| **c > 0) {
-                *c = c.div_ceil(2);
+            for &s in syms {
+                counts[s as usize] = counts[s as usize].div_ceil(2);
             }
-        };
-        let (codes, num_bits) = build_encode_codes(&weights, table_log);
-
-        Some(Self {
-            packed: pack_codes(&codes, &num_bits),
-            description,
-            num_bits,
-            table_log,
-        })
+        }
     }
 
     pub fn from_decode_table(
@@ -92,21 +105,26 @@ impl HuffmanEncodeTable {
             return None;
         }
 
-        let num_symbols = max_sym as usize + 1;
-        let active_count = seen[..num_symbols].iter().filter(|&&s| s).count();
-        if active_count < 2 {
+        let mut syms = [0u8; MAX_SYMBOL_VALUE + 1];
+        let mut n = 0usize;
+        let mut weights = [0u8; MAX_SYMBOL_VALUE + 1];
+        let mut num_bits = [0u8; MAX_SYMBOL_VALUE + 1];
+        for s in 0..=max_sym {
+            if seen[s as usize] {
+                syms[n] = s;
+                n += 1;
+                num_bits[s as usize] = num_bits_per_sym[s as usize];
+                weights[s as usize] = table_log + 1 - num_bits_per_sym[s as usize];
+            }
+        }
+        if n < 2 {
             return None;
         }
 
-        let mut weights = vec![0u8; num_symbols];
-        for s in 0..num_symbols {
-            if seen[s] {
-                weights[s] = table_log + 1 - num_bits_per_sym[s];
-            }
-        }
-
-        let (codes, num_bits) = build_encode_codes(&weights, table_log);
-        let description = describe_weights(&weights[..max_sym as usize]).unwrap_or_default();
+        let codes = build_encode_codes(&weights, &syms[..n], table_log);
+        let explicit = &weights[..max_sym as usize];
+        let description =
+            describe_weights(explicit, &weight_histogram(explicit)).unwrap_or_default();
 
         Some(Self {
             packed: pack_codes(&codes, &num_bits),
@@ -270,89 +288,108 @@ impl HuffmanEncodeTable {
     }
 }
 
-fn compute_huffman_weights(freqs: &[u32], num_symbols: usize) -> Option<(Vec<u8>, u8)> {
-    let mut active: Vec<(u64, usize)> = freqs[..num_symbols]
-        .iter()
-        .enumerate()
-        .filter(|(_, f)| **f > 0)
-        .map(|(s, &f)| (f as u64, s))
-        .collect();
-
-    if active.len() < 2 {
-        return None;
+/// Code lengths of at most [`MAX_BITS`] for the symbols in `syms` (at
+/// least two, in symbol order) with these counts, as a per-symbol array and
+/// the longest length.
+fn code_lengths(
+    counts: &[u32; MAX_SYMBOL_VALUE + 1],
+    syms: &[u8],
+) -> ([u8; MAX_SYMBOL_VALUE + 1], u8) {
+    let n = syms.len();
+    debug_assert!((2..=MAX_SYMBOL_VALUE + 1).contains(&n));
+    let mut freq = [0u32; MAX_SYMBOL_VALUE + 1];
+    for (f, &s) in freq.iter_mut().zip(syms) {
+        *f = counts[s as usize];
+    }
+    // Block literal counts stay far below 2^23, so the sum of up to 256 of
+    // them fits a u32. Larger counts are scaled down to that range.
+    let max = freq[..n].iter().copied().max().unwrap_or(0);
+    let scale = (u32::BITS - max.leading_zeros()).saturating_sub(23);
+    if scale > 0 {
+        for f in &mut freq[..n] {
+            *f = (*f >> scale).max(1);
+        }
     }
 
     // An optimal tree can be deeper than MAX_BITS. Flatten the frequencies
     // and rebuild until it fits, as bzip2 does. Each pass halves the spread
     // between counts, so the depth converges to ceil(log2(active)) <= 8.
     loop {
-        let bit_lengths = huffman_bit_lengths(&active, num_symbols);
-        let max_bl = *bit_lengths.iter().max().unwrap();
-        if max_bl == 0 {
-            return None;
+        let (num_bits, max_bits) = huffman_bit_lengths(&freq[..n], syms);
+        if max_bits <= MAX_BITS {
+            return (num_bits, max_bits);
         }
-        if max_bl <= MAX_BITS {
-            let table_log = max_bl;
-            let mut weights = vec![0u8; num_symbols];
-            for (s, &bl) in bit_lengths.iter().enumerate() {
-                if bl > 0 {
-                    weights[s] = table_log + 1 - bl;
-                }
-            }
-            return Some((weights, table_log));
-        }
-        for (f, _) in &mut active {
+        for f in &mut freq[..n] {
             *f = 1 + *f / 2;
         }
     }
 }
 
-/// Builds unrestricted Huffman code lengths for the `(frequency, symbol)`
-/// pairs in `active`.
-fn huffman_bit_lengths(active: &[(u64, usize)], num_symbols: usize) -> Vec<u8> {
-    // Two-queue construction: leaves sorted by (frequency, index), internal
+/// Builds unrestricted Huffman code lengths for the symbols in `syms` (in
+/// symbol order) with counts `freq`, as a per-symbol array and the longest
+/// length.
+fn huffman_bit_lengths(freq: &[u32], syms: &[u8]) -> ([u8; MAX_SYMBOL_VALUE + 1], u8) {
+    // Two-queue construction: leaves sorted by (frequency, symbol), internal
     // nodes created in nondecreasing frequency order. Preferring the leaf on
     // equal frequency picks the same node as a min-heap keyed by
     // (frequency, id), because leaf ids precede internal ids.
     const MAX_NODES: usize = 2 * (MAX_SYMBOL_VALUE + 1);
-    let n = active.len();
+    const NODE_MASK: usize = MAX_NODES - 1;
+    let n = syms.len();
     debug_assert!((2..=MAX_SYMBOL_VALUE + 1).contains(&n));
 
-    // Sort packed (frequency, index) keys. Block literal counts stay below
-    // 2^17 and flattening only lowers them, so a u32 holds both fields.
+    // Sort packed (frequency, symbol) keys; frequencies stay below 2^23.
+    // Counting sort by frequency, with every count of 255 or more in the
+    // last bucket: the buckets keep symbol order, so only that last one
+    // needs a comparison sort, and only the few frequent symbols land there.
+    const TOP: usize = 255;
+    let mut starts = [0u16; TOP + 1];
+    for &f in freq {
+        starts[(f as usize).min(TOP)] += 1;
+    }
+    let mut at = 0u16;
+    for start in &mut starts {
+        let count = *start;
+        *start = at;
+        at += count;
+    }
     let mut keys = [0u32; MAX_SYMBOL_VALUE + 1];
-    for (i, (k, &(f, _))) in keys.iter_mut().zip(active).enumerate() {
-        debug_assert!(f < 1 << 23);
-        *k = ((f as u32) << 9) | i as u32;
+    for (&f, &s) in freq.iter().zip(syms) {
+        let bucket = &mut starts[(f as usize).min(TOP)];
+        keys[usize::from(*bucket) & MAX_SYMBOL_VALUE] = (f << 8) | u32::from(s);
+        *bucket += 1;
     }
-    keys[..n].sort_unstable();
-    let mut order = [0u16; MAX_SYMBOL_VALUE + 1];
-    for (o, &k) in order.iter_mut().zip(&keys[..n]) {
-        *o = (k & 0x1FF) as u16;
-    }
+    let keys = &mut keys[..n];
+    // Each start now holds its bucket's end, so this is where the last
+    // bucket begins.
+    let frequent = usize::from(starts[TOP - 1]);
+    keys[frequent..].sort_unstable();
 
-    let mut freq = [0u64; MAX_NODES];
-    for (f, &(af, _)) in freq.iter_mut().zip(active) {
-        *f = af;
+    // Both queues end in a sentinel above every sum (at most 2^31), so a
+    // pick needs no emptiness check: the sorted leaves, and the internal
+    // nodes in creation order, each set once its children are picked. Leaf
+    // `i` has id `i`, internal node `j` id `n + j`.
+    let mut leaves = [u32::MAX; MAX_NODES];
+    for (l, &k) in leaves.iter_mut().zip(keys.iter()) {
+        *l = k >> 8;
     }
+    let mut sums = [u32::MAX; MAX_NODES];
     let mut parent = [0u16; MAX_NODES];
-    let mut leaf = 0usize;
-    let mut internal = n;
-    for next in n..2 * n - 1 {
+    let (mut leaf, mut internal) = (0usize, 0usize);
+    for j in 0..n - 1 {
         let mut pick = || {
-            if leaf < n && (internal >= next || freq[order[leaf] as usize] <= freq[internal]) {
-                leaf += 1;
-                order[leaf - 1] as usize
-            } else {
-                internal += 1;
-                internal - 1
-            }
+            let (l, i) = (leaves[leaf & NODE_MASK], sums[internal & NODE_MASK]);
+            let take_leaf = l <= i;
+            let id = if take_leaf { leaf } else { n + internal };
+            leaf += usize::from(take_leaf);
+            internal += usize::from(!take_leaf);
+            (id, if take_leaf { l } else { i })
         };
-        let a = pick();
-        let b = pick();
-        freq[next] = freq[a] + freq[b];
-        parent[a] = next as u16;
-        parent[b] = next as u16;
+        let (a, fa) = pick();
+        let (b, fb) = pick();
+        sums[j] = fa + fb;
+        parent[a & NODE_MASK] = (n + j) as u16;
+        parent[b & NODE_MASK] = (n + j) as u16;
     }
 
     // Parents always follow their children, so one backward pass from the
@@ -360,23 +397,24 @@ fn huffman_bit_lengths(active: &[(u64, usize)], num_symbols: usize) -> Vec<u8> {
     let root = 2 * n - 2;
     let mut depth = [0u8; MAX_NODES];
     for k in (0..root).rev() {
-        depth[k] = depth[parent[k] as usize] + 1;
+        depth[k] = depth[usize::from(parent[k]) & NODE_MASK] + 1;
     }
 
-    let mut bit_lengths = vec![0u8; num_symbols];
-    for (i, &(_, sym)) in active.iter().enumerate() {
-        bit_lengths[sym] = depth[i];
+    let mut bit_lengths = [0u8; MAX_SYMBOL_VALUE + 1];
+    for (&k, &d) in keys.iter().zip(&depth) {
+        bit_lengths[(k & 0xFF) as usize] = d;
     }
-    bit_lengths
+    let max_bits = depth[..n].iter().copied().max().unwrap_or(0);
+    (bit_lengths, max_bits)
 }
 
 /// Serializes explicit Huffman weights, preferring the FSE-compressed form
 /// when it is smaller, as C zstd's `HUF_writeCTable` does. Returns `None` when
 /// more than 128 weights cannot be FSE-compressed.
-fn describe_weights(explicit: &[u8]) -> Option<Vec<u8>> {
+fn describe_weights(explicit: &[u8], hist: &[u32; WEIGHT_HIST_LEN]) -> Option<Vec<u8>> {
     let num_symbols = explicit.len();
     let direct_len = 1 + num_symbols.div_ceil(2);
-    if let Some(compressed) = compress_weights(explicit)
+    if let Some(compressed) = compress_weights(explicit, hist)
         && (num_symbols > 128 || 1 + compressed.len() < direct_len)
     {
         let mut out = Vec::with_capacity(1 + compressed.len());
@@ -400,13 +438,29 @@ fn describe_weights(explicit: &[u8]) -> Option<Vec<u8>> {
 /// Two states share one table: the first encodes even-indexed weights, the
 /// second odd-indexed ones. Returns `None` when the weights use a single
 /// value or the result does not fit the one-byte size header (< 128).
-fn compress_weights(weights: &[u8]) -> Option<Vec<u8>> {
+fn compress_weights(weights: &[u8], hist: &[u32; WEIGHT_HIST_LEN]) -> Option<Vec<u8>> {
     // C zstd's FSE_optimalTableLog settles on the minimum log, 5, for every
     // weight count the format allows.
-    compress_weights_with_log(weights, 5)
+    compress_weights_with_log(weights, hist, 5)
 }
 
-fn compress_weights_with_log(weights: &[u8], accuracy_log: u8) -> Option<Vec<u8>> {
+/// Entries in a histogram of weights: 0 through `MAX_BITS + 1`.
+const WEIGHT_HIST_LEN: usize = MAX_BITS as usize + 2;
+
+/// Counts each weight value.
+fn weight_histogram(weights: &[u8]) -> [u32; WEIGHT_HIST_LEN] {
+    let mut hist = [0u32; WEIGHT_HIST_LEN];
+    for &w in weights {
+        hist[usize::from(w) % WEIGHT_HIST_LEN] += 1;
+    }
+    hist
+}
+
+fn compress_weights_with_log(
+    weights: &[u8],
+    hist: &[u32; WEIGHT_HIST_LEN],
+    accuracy_log: u8,
+) -> Option<Vec<u8>> {
     use crate::fse::encode::{FseEncodeState, FseEncodeTable};
     use crate::fse::table_builder::{normalize_counts, serialize_fse_table_description};
 
@@ -414,11 +468,8 @@ fn compress_weights_with_log(weights: &[u8], accuracy_log: u8) -> Option<Vec<u8>
     if n < 2 {
         return None;
     }
-    let max_w = *weights.iter().max()? as usize;
-    let mut hist = [0u32; MAX_BITS as usize + 2];
-    for &w in weights {
-        hist[w as usize] += 1;
-    }
+    debug_assert_eq!(hist, &weight_histogram(weights));
+    let max_w = hist.iter().rposition(|&c| c > 0)?;
     if hist[..=max_w].iter().filter(|&&c| c > 0).count() < 2 {
         return None;
     }
@@ -509,40 +560,35 @@ fn pack_codes(
     core::array::from_fn(|s| u32::from(codes[s]) | (u32::from(num_bits[s]) << 16))
 }
 
+/// Canonical codes for the symbols in `syms` (in symbol order) with these
+/// weights: by weight, then by symbol, as the decoder assigns them.
 fn build_encode_codes(
-    weights: &[u8],
+    weights: &[u8; MAX_SYMBOL_VALUE + 1],
+    syms: &[u8],
     table_log: u8,
-) -> ([u16; MAX_SYMBOL_VALUE + 1], [u8; MAX_SYMBOL_VALUE + 1]) {
-    let mut codes = [0u16; MAX_SYMBOL_VALUE + 1];
-    let mut num_bits = [0u8; MAX_SYMBOL_VALUE + 1];
-
-    let max_w = table_log + 1;
-    let mut rank_count = [0u32; MAX_BITS as usize + 2];
-
-    for (s, &w) in weights.iter().enumerate() {
-        if w > 0 && w <= max_w {
-            num_bits[s] = table_log + 1 - w;
-            rank_count[w as usize] += 1;
-        }
+) -> [u16; MAX_SYMBOL_VALUE + 1] {
+    // Weights are at most `table_log + 1 <= 12`, so `& 15` only drops the
+    // bounds checks.
+    let mut rank_count = [0u32; 16];
+    for &s in syms {
+        rank_count[usize::from(weights[s as usize]) & 15] += 1;
     }
 
-    let mut rank_start = [0u32; MAX_BITS as usize + 2];
+    let mut rank_start = [0u32; 16];
     let mut cumul = 0u32;
-    for w in 1..=max_w {
-        rank_start[w as usize] = cumul;
-        cumul += rank_count[w as usize] * (1u32 << (w - 1));
+    for w in 1..=usize::from(table_log) + 1 {
+        rank_start[w & 15] = cumul;
+        cumul += rank_count[w & 15] << (w - 1);
     }
 
-    for (s, &w) in weights.iter().enumerate() {
-        if w == 0 {
-            continue;
-        }
-        let start = rank_start[w as usize];
-        codes[s] = (start >> (w - 1)) as u16;
-        rank_start[w as usize] += 1u32 << (w - 1);
+    let mut codes = [0u16; MAX_SYMBOL_VALUE + 1];
+    for &s in syms {
+        let w = usize::from(weights[s as usize]);
+        let start = rank_start[w & 15];
+        codes[s as usize] = (start >> (w - 1)) as u16;
+        rank_start[w & 15] += 1u32 << (w - 1);
     }
-
-    (codes, num_bits)
+    codes
 }
 
 #[cfg(test)]

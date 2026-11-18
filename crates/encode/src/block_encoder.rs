@@ -933,7 +933,9 @@ fn encode_literals_section(
 
     let try_huffman_literals = policy.custom_tables;
 
-    let use_4_streams = lits.len() >= 1024;
+    // Like C zstd: from 256 literals, four streams decode in parallel and
+    // repay their 6-byte jump table.
+    let use_4_streams = lits.len() >= 256;
     let encode = |table: &HuffmanEncodeTable, concat: &mut Vec<u8>, stream: &mut Vec<u8>| {
         if use_4_streams {
             table.encode_4_streams_into(lits, concat, stream);
