@@ -98,8 +98,8 @@ pub(crate) struct BlockEncodeWorkspace {
     pub pred_seq: Vec<u8>,
     pub cust_seq: Vec<u8>,
     pub repeat_seq: Vec<u8>,
+    /// Huffman literal streams; bytes past the encoded length are scratch.
     pub huf_concat: Vec<u8>,
-    pub huf_stream: Vec<u8>,
     pub pred_writer_buf: Vec<u8>,
     pub cust_writer_buf: Vec<u8>,
     pub repeat_writer_buf: Vec<u8>,
@@ -124,7 +124,6 @@ impl BlockEncodeWorkspace {
             cust_seq: Vec::new(),
             repeat_seq: Vec::new(),
             huf_concat: Vec::new(),
-            huf_stream: Vec::new(),
             pred_writer_buf: Vec::new(),
             cust_writer_buf: Vec::new(),
             repeat_writer_buf: Vec::new(),
@@ -508,7 +507,6 @@ fn encode_compressed_block_impl(
         n,
         &mut workspace.lit_section,
         &mut workspace.huf_concat,
-        &mut workspace.huf_stream,
         &mut workspace.prev_huffman,
         policy,
     );
@@ -615,7 +613,6 @@ fn encode_literals_only_block(
         0,
         &mut workspace.lit_section,
         &mut workspace.huf_concat,
-        &mut workspace.huf_stream,
         &mut workspace.prev_huffman,
         policy,
     );
@@ -925,7 +922,6 @@ fn encode_literals_section(
     num_seq: usize,
     output: &mut Vec<u8>,
     huf_concat: &mut Vec<u8>,
-    huf_stream: &mut Vec<u8>,
     prev_huffman: &mut Option<HuffmanEncodeTable>,
     policy: BlockPolicy,
 ) -> bool {
@@ -936,11 +932,11 @@ fn encode_literals_section(
     // Like C zstd: from 256 literals, four streams decode in parallel and
     // repay their 6-byte jump table.
     let use_4_streams = lits.len() >= 256;
-    let encode = |table: &HuffmanEncodeTable, concat: &mut Vec<u8>, stream: &mut Vec<u8>| {
+    let encode = |table: &HuffmanEncodeTable, concat: &mut Vec<u8>| {
         if use_4_streams {
-            table.encode_4_streams_into(lits, concat, stream);
+            table.encode_4_streams_into(lits, concat)
         } else {
-            table.encode_single_stream_into(lits, concat);
+            table.encode_single_stream_into(lits, concat)
         }
     };
 
@@ -1015,21 +1011,20 @@ fn encode_literals_section(
     if let Some(bits) = reuse_bits
         && bits <= fresh_bits
     {
-        encode(prev_huffman.as_ref().unwrap(), huf_concat, huf_stream);
-        let compressed_size = huf_concat.len();
-        if compressed_size < lits.len() {
-            encode_treeless_literals_header(lits.len(), compressed_size, use_4_streams, output);
-            output.extend_from_slice(huf_concat);
+        let len = encode(prev_huffman.as_ref().unwrap(), huf_concat);
+        if len < lits.len() {
+            encode_treeless_literals_header(lits.len(), len, use_4_streams, output);
+            output.extend_from_slice(&huf_concat[..len]);
             return false;
         }
     } else if let Some((table, _)) = fresh {
-        encode(&table, huf_concat, huf_stream);
+        let len = encode(&table, huf_concat);
         let tree_desc = table.weights_description();
-        let compressed_size = tree_desc.len() + huf_concat.len();
+        let compressed_size = tree_desc.len() + len;
         if compressed_size < lits.len() {
             encode_compressed_literals_header(lits.len(), compressed_size, use_4_streams, output);
             output.extend_from_slice(tree_desc);
-            output.extend_from_slice(huf_concat);
+            output.extend_from_slice(&huf_concat[..len]);
             *prev_huffman = Some(table);
             return false;
         }

@@ -3,16 +3,17 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use super::primitives;
 use crate::huffman::{MAX_BITS, MAX_SYMBOL_VALUE};
 
 #[derive(Clone)]
 pub struct HuffmanEncodeTable {
     num_bits: [u8; MAX_SYMBOL_VALUE + 1],
-    /// `code | num_bits << 16` per symbol, so encoding needs one load.
-    packed: [u32; MAX_SYMBOL_VALUE + 1],
+    /// Per symbol, the code in the top `num_bits` bits and `num_bits` in the
+    /// low bits (C zstd's `HUF_CElt`), so one load feeds the whole encode
+    /// step. Absent symbols are 0.
+    celt: [u64; MAX_SYMBOL_VALUE + 1],
     /// Serialized weight description, built once with the table.
-    description: Vec<u8>,
+    description: Description,
     table_log: u8,
 }
 
@@ -29,25 +30,27 @@ impl HuffmanEncodeTable {
     pub fn from_histogram(freqs: &[u32; MAX_SYMBOL_VALUE + 1]) -> Option<Self> {
         let max_sym = freqs.iter().rposition(|&f| f > 0)?;
 
-        // The symbols that occur, in symbol order. Every later step works on
-        // this list instead of all 256 counts.
+        // The symbols that occur, in symbol order, and their counts. Every
+        // later step works on these lists instead of all 256 counts.
         let mut syms = [0u8; MAX_SYMBOL_VALUE + 1];
+        let mut counts = [0u32; MAX_SYMBOL_VALUE + 1];
         let mut n = 0usize;
         for (s, &f) in freqs[..=max_sym].iter().enumerate() {
             syms[n & MAX_SYMBOL_VALUE] = s as u8;
+            counts[n & MAX_SYMBOL_VALUE] = f;
             n += usize::from(f > 0);
         }
-        let syms = &syms[..n];
         if n < 2 {
             return None;
         }
+        let syms = &syms[..n];
+        let counts = &mut counts[..n];
 
         // Beyond 128 explicit weights only the FSE-compressed form exists, and
         // it must fit in 127 bytes. If it does not, flatten the counts: fewer
         // distinct weights compress better.
-        let mut counts = *freqs;
         loop {
-            let (num_bits, table_log) = code_lengths(&counts, syms);
+            let (num_bits, table_log) = code_lengths(counts, syms);
             let mut weights = [0u8; MAX_SYMBOL_VALUE + 1];
             for &s in syms {
                 weights[s as usize] = table_log + 1 - num_bits[s as usize];
@@ -59,21 +62,20 @@ impl HuffmanEncodeTable {
             }
             hist[0] = (max_sym + 1 - n) as u32;
             if let Some(description) = describe_weights(&weights[..max_sym], &hist) {
-                let codes = build_encode_codes(&weights, syms, table_log);
                 return Some(Self {
-                    packed: pack_codes(&codes, &num_bits),
+                    celt: code_entries(&weights, &num_bits, syms, table_log),
                     description,
                     num_bits,
                     table_log,
                 });
             }
-            if syms.iter().all(|&s| counts[s as usize] <= 1) {
+            if counts.iter().all(|&c| c <= 1) {
                 return None;
             }
             // (c + 1) / 2 keeps every symbol present and reaches 1 for all,
             // so the loop ends.
-            for &s in syms {
-                counts[s as usize] = counts[s as usize].div_ceil(2);
+            for c in counts.iter_mut() {
+                *c = c.div_ceil(2);
             }
         }
     }
@@ -121,13 +123,12 @@ impl HuffmanEncodeTable {
             return None;
         }
 
-        let codes = build_encode_codes(&weights, &syms[..n], table_log);
         let explicit = &weights[..max_sym as usize];
         let description =
             describe_weights(explicit, &weight_histogram(explicit)).unwrap_or_default();
 
         Some(Self {
-            packed: pack_codes(&codes, &num_bits),
+            celt: code_entries(&weights, &num_bits, &syms[..n], table_log),
             description,
             num_bits,
             table_log,
@@ -141,14 +142,14 @@ impl HuffmanEncodeTable {
     /// Encoded size in bits of data with these byte counts, or `None` when
     /// the table has no code for a byte that occurs.
     pub fn estimate_bits(&self, freqs: &[u32; MAX_SYMBOL_VALUE + 1]) -> Option<u64> {
+        // No early exit, so the loop vectorizes.
         let mut bits = 0u64;
+        let mut missing = false;
         for (&f, &n) in freqs.iter().zip(&self.num_bits) {
-            if f > 0 && n == 0 {
-                return None;
-            }
+            missing |= f > 0 && n == 0;
             bits += u64::from(f) * u64::from(n);
         }
-        Some(bits)
+        (!missing).then_some(bits)
     }
 
     pub fn can_encode(&self, data: &[u8]) -> bool {
@@ -177,106 +178,136 @@ impl HuffmanEncodeTable {
 
     /// The serialized Huffman tree description (weights header).
     pub fn weights_description(&self) -> &[u8] {
-        debug_assert_ne!(self.description.len(), 0);
-        &self.description
+        debug_assert_ne!(self.description.len, 0);
+        &self.description.bytes[..usize::from(self.description.len)]
     }
 
     pub fn encode_single_stream(&self, data: &[u8]) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(data.len() + 8);
-        self.encode_single_stream_into(data, &mut buf);
+        let mut buf = Vec::new();
+        let len = self.encode_single_stream_into(data, &mut buf);
+        buf.truncate(len);
         buf
     }
 
-    pub fn encode_single_stream_into(&self, data: &[u8], buf: &mut Vec<u8>) {
-        // Codes are at most MAX_BITS (11) long: four codes plus at most seven
-        // pending bits fit in the 64-bit container, so every group of four
-        // symbols ends in an unconditional flush.
-        const _: () = assert!(4 * MAX_BITS as u32 + 7 <= 64);
+    /// Writes the single-stream encoding of `data` to the start of `out`,
+    /// growing it as needed, and returns its length. Bytes past it are
+    /// scratch, so a reused buffer is not cleared.
+    pub fn encode_single_stream_into(&self, data: &[u8], out: &mut Vec<u8>) -> usize {
+        let need = stream_bound(data.len());
+        if out.len() < need {
+            out.resize(need, 0);
+        }
+        self.encode_stream(data, out)
+    }
 
-        let mut bitstream = primitives::BitstreamScratch::new(buf, data.len() + 16);
-        let packed = &self.packed;
+    pub fn encode_4_streams(&self, data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let len = self.encode_4_streams_into(data, &mut out);
+        out.truncate(len);
+        out
+    }
+
+    /// Writes the 4-stream encoding of `data` (jump table, then the streams)
+    /// to the start of `out`, growing it as needed, and returns its length.
+    /// Bytes past it are scratch, so a reused buffer is not cleared.
+    pub fn encode_4_streams_into(&self, data: &[u8], out: &mut Vec<u8>) -> usize {
+        let seg = data.len().div_ceil(4);
+        let need = 6 + 4 * stream_bound(seg);
+        if out.len() < need {
+            out.resize(need, 0);
+        }
+        let mut pos = 6;
+        for k in 0..4 {
+            let stream = &data[(seg * k).min(data.len())..(seg * (k + 1)).min(data.len())];
+            let len = self.encode_stream(stream, &mut out[pos..]);
+            // Streams of a 128 KiB block stay below 64 KiB.
+            if k < 3 {
+                out[2 * k..2 * k + 2].copy_from_slice(&(len as u16).to_le_bytes());
+            }
+            pos += len;
+        }
+        pos
+    }
+
+    /// Encodes one stream of `data` to the start of `out`, which holds at
+    /// least [`stream_bound`] bytes, and returns its length.
+    fn encode_stream(&self, data: &[u8], out: &mut [u8]) -> usize {
+        // Codes per flush: `7 + n * table_log` pending bits fit in 64.
+        match self.table_log {
+            0..=7 => self.encode_stream_n::<8>(data, out),
+            8 => self.encode_stream_n::<7>(data, out),
+            9 => self.encode_stream_n::<6>(data, out),
+            _ => self.encode_stream_n::<5>(data, out),
+        }
+    }
+
+    /// As in C zstd, the bit container takes each code at its top: it shifts
+    /// right by the code length and ORs in the whole entry. The length bits
+    /// ORed in at the bottom only move down, and the last code of each group
+    /// leaves them out, so they never reach the pending bits at the top. Two
+    /// containers take turns on `N` codes each, so their shift chains
+    /// overlap.
+    fn encode_stream_n<const N: usize>(&self, data: &[u8], out: &mut [u8]) -> usize {
+        debug_assert!(7 + N * usize::from(self.table_log) <= 64);
+        debug_assert!(out.len() >= stream_bound(data.len()));
+        let celt = &self.celt;
         let mut bits: u64 = 0;
-        let mut bits_used: u32 = 0;
-        let mut wpos: usize = 0;
+        let mut used: u64 = 0;
+        let mut pos = 0;
 
+        // Entries add into `used` whole: their code bits carry above the low
+        // byte, which keeps the bit count.
         macro_rules! put {
-            ($b:expr) => {
-                let e = packed[$b as usize];
-                bits |= u64::from(e & 0xFFFF) << bits_used;
-                bits_used += e >> 16;
+            ($bits:ident, $used:ident, $sym:expr, $mask:expr) => {
+                let e = celt[usize::from($sym)];
+                $bits = ($bits >> (e & 63)) | (e & $mask);
+                $used = $used.wrapping_add(e);
             };
         }
-        macro_rules! flush_bits {
+        macro_rules! group {
+            ($bits:ident, $used:ident, $syms:expr) => {
+                for i in 0..N - 1 {
+                    put!($bits, $used, $syms[N - 1 - i], !0);
+                }
+                put!($bits, $used, $syms[0], !15);
+            };
+        }
+        macro_rules! flush {
             () => {
-                bitstream.flush(wpos, bits);
-                let nb = (bits_used >> 3) as usize;
-                wpos += nb;
-                bits >>= nb << 3;
-                bits_used &= 7;
+                let nb = (used & 0xFF) as u32;
+                let word = bits.wrapping_shr(64 - nb);
+                out[pos..pos + 8].copy_from_slice(&word.to_le_bytes());
+                pos += (nb >> 3) as usize;
+                used &= 7;
             };
         }
 
         // Symbols are written last to first. rchunks_exact walks groups from
         // the end; the leftover head is encoded after them, in reverse.
-        let chunks = data.rchunks_exact(4);
+        let chunks = data.rchunks_exact(2 * N);
         let head = chunks.remainder();
         for c in chunks {
-            put!(c[3]);
-            put!(c[2]);
-            put!(c[1]);
-            put!(c[0]);
-            flush_bits!();
+            let (lo, hi) = c.split_at(N);
+            group!(bits, used, hi);
+            flush!();
+            let mut bits2: u64 = 0;
+            let mut used2: u64 = 0;
+            group!(bits2, used2, lo);
+            bits = (bits >> (used2 & 63)) | bits2;
+            used = used.wrapping_add(used2);
+            flush!();
         }
-        for &b in head.iter().rev() {
-            put!(b);
+        for group in head.rchunks(N) {
+            for &b in group.iter().rev() {
+                put!(bits, used, b, !15);
+            }
+            flush!();
         }
-        flush_bits!();
-
-        bits |= 1u64 << bits_used;
-        bits_used += 1;
-        while bits_used > 0 {
-            bitstream.write_byte(wpos, bits as u8);
-            wpos += 1;
-            bits >>= 8;
-            bits_used = bits_used.saturating_sub(8);
-        }
-        bitstream.finish(wpos);
-    }
-
-    pub fn encode_4_streams(&self, data: &[u8]) -> Vec<u8> {
-        let mut out = Vec::new();
-        self.encode_4_streams_into(data, &mut out, &mut Vec::new());
-        out
-    }
-
-    pub fn encode_4_streams_into(&self, data: &[u8], out: &mut Vec<u8>, stream_buf: &mut Vec<u8>) {
-        let seg = data.len().div_ceil(4);
-        let s1 = &data[..seg.min(data.len())];
-        let s2 = &data[seg.min(data.len())..(seg * 2).min(data.len())];
-        let s3 = &data[(seg * 2).min(data.len())..(seg * 3).min(data.len())];
-        let s4 = &data[(seg * 3).min(data.len())..];
-
-        out.clear();
-        out.extend_from_slice(&[0u8; 6]);
-
-        self.encode_single_stream_into(s1, stream_buf);
-        let e1_len = stream_buf.len();
-        out.extend_from_slice(stream_buf);
-
-        self.encode_single_stream_into(s2, stream_buf);
-        let e2_len = stream_buf.len();
-        out.extend_from_slice(stream_buf);
-
-        self.encode_single_stream_into(s3, stream_buf);
-        let e3_len = stream_buf.len();
-        out.extend_from_slice(stream_buf);
-
-        self.encode_single_stream_into(s4, stream_buf);
-        out.extend_from_slice(stream_buf);
-
-        out[0..2].copy_from_slice(&(e1_len as u16).to_le_bytes());
-        out[2..4].copy_from_slice(&(e2_len as u16).to_le_bytes());
-        out[4..6].copy_from_slice(&(e3_len as u16).to_le_bytes());
+        // End mark: a single 1 bit.
+        bits = (bits >> 1) | (1 << 63);
+        used += 1;
+        flush!();
+        pos + usize::from(used != 0)
     }
 
     pub fn compressed_size_single(&self, data: &[u8]) -> usize {
@@ -289,18 +320,13 @@ impl HuffmanEncodeTable {
 }
 
 /// Code lengths of at most [`MAX_BITS`] for the symbols in `syms` (at
-/// least two, in symbol order) with these counts, as a per-symbol array and
-/// the longest length.
-fn code_lengths(
-    counts: &[u32; MAX_SYMBOL_VALUE + 1],
-    syms: &[u8],
-) -> ([u8; MAX_SYMBOL_VALUE + 1], u8) {
+/// least two, in symbol order) with counts `counts`, as a per-symbol array
+/// and the longest length.
+fn code_lengths(counts: &[u32], syms: &[u8]) -> ([u8; MAX_SYMBOL_VALUE + 1], u8) {
     let n = syms.len();
     debug_assert!((2..=MAX_SYMBOL_VALUE + 1).contains(&n));
     let mut freq = [0u32; MAX_SYMBOL_VALUE + 1];
-    for (f, &s) in freq.iter_mut().zip(syms) {
-        *f = counts[s as usize];
-    }
+    freq[..n].copy_from_slice(counts);
     // Block literal counts stay far below 2^23, so the sum of up to 256 of
     // them fits a u32. Larger counts are scaled down to that range.
     let max = freq[..n].iter().copied().max().unwrap_or(0);
@@ -311,76 +337,187 @@ fn code_lengths(
         }
     }
 
-    // An optimal tree can be deeper than MAX_BITS. Flatten the frequencies
-    // and rebuild until it fits, as bzip2 does. Each pass halves the spread
-    // between counts, so the depth converges to ceil(log2(active)) <= 8.
-    loop {
-        let (num_bits, max_bits) = huffman_bit_lengths(&freq[..n], syms);
-        if max_bits <= MAX_BITS {
-            return (num_bits, max_bits);
-        }
-        for f in &mut freq[..n] {
-            *f = 1 + *f / 2;
-        }
+    // An optimal tree can be deeper than MAX_BITS. As in C zstd, build it
+    // once and then limit the lengths in place, most frequent symbol first.
+    let mut keys = [0u32; MAX_SYMBOL_VALUE + 1];
+    let mut depths = [0u8; MAX_SYMBOL_VALUE + 1];
+    huffman_depths(&freq[..n], syms, &mut keys, &mut depths);
+    let mut bits = [0u8; MAX_SYMBOL_VALUE + 1];
+    let mut sorted = [0u32; MAX_SYMBOL_VALUE + 1];
+    for p in 0..n {
+        bits[p] = depths[n - 1 - p];
+        sorted[p] = keys[n - 1 - p] >> 8;
     }
+    let max_bits = set_max_height(&mut bits[..n], &sorted[..n], MAX_BITS);
+    let mut num_bits = [0u8; MAX_SYMBOL_VALUE + 1];
+    for p in 0..n {
+        num_bits[(keys[n - 1 - p] & 0xFF) as usize] = bits[p];
+    }
+    (num_bits, max_bits)
 }
 
-/// Builds unrestricted Huffman code lengths for the symbols in `syms` (in
-/// symbol order) with counts `freq`, as a per-symbol array and the longest
-/// length.
-fn huffman_bit_lengths(freq: &[u32], syms: &[u8]) -> ([u8; MAX_SYMBOL_VALUE + 1], u8) {
+/// Limits code lengths to `target` bits, as C zstd's `HUF_setMaxHeight`
+/// does, and returns the longest length. `bits` and `counts` are in
+/// descending count order, so `bits` is nondecreasing.
+///
+/// Lengths past `target` drop to it, which overfills the code space. The
+/// excess is repaid by lengthening the codes where it costs least: one
+/// code at `target - k` bits frees `2^(k-1)` units of `2^-target`. An
+/// overshoot is given back by shortening `target`-bit codes.
+fn set_max_height(bits: &mut [u8], counts: &[u32], target: u8) -> u8 {
+    let last = bits.len() - 1;
+    let largest = bits[last];
+    if largest <= target {
+        return largest;
+    }
+    let base_cost = 1i32 << (largest - target);
+    let mut total_cost = 0i32;
+    let mut n = last;
+    while bits[n] > target {
+        total_cost += base_cost - (1 << (largest - bits[n]));
+        bits[n] = target;
+        n -= 1;
+    }
+    // At most 256 symbols cannot all use `target >= 9` bits, so `n` stays
+    // in range.
+    while bits[n] == target {
+        n -= 1;
+    }
+    total_cost >>= largest - target;
+
+    // The last (least frequent) position of each length below `target`,
+    // indexed by `target - length`.
+    const NONE: usize = usize::MAX;
+    let mut rank_last = [NONE; 16];
+    let mut current = target;
+    for pos in (0..=n).rev() {
+        if bits[pos] < current {
+            current = bits[pos];
+            rank_last[usize::from(target - current) & 15] = pos;
+        }
+    }
+
+    while total_cost > 0 {
+        // Lengthening a code at `target - k` bits repays 2^(k-1). Try the
+        // power of two just above the cost, unless two codes one rank down
+        // are cheaper.
+        let mut k = (31 - total_cost.leading_zeros()) as usize + 1;
+        while k > 1 {
+            let high = rank_last[k & 15];
+            let low = rank_last[(k - 1) & 15];
+            if high == NONE {
+                k -= 1;
+                continue;
+            }
+            if low == NONE || counts[high] <= 2 * counts[low] {
+                break;
+            }
+            k -= 1;
+        }
+        while k <= usize::from(MAX_BITS) && rank_last[k & 15] == NONE {
+            k += 1;
+        }
+        let pos = rank_last[k & 15];
+        total_cost -= 1 << (k - 1);
+        bits[pos] += 1;
+        // The lengthened code joins rank k - 1, as its least frequent
+        // member if the rank was empty.
+        if rank_last[(k - 1) & 15] == NONE {
+            rank_last[(k - 1) & 15] = pos;
+        }
+        // The next more frequent code ends rank k, if it has that length.
+        rank_last[k & 15] = if pos == 0 || bits[pos - 1] != target - k as u8 {
+            NONE
+        } else {
+            pos - 1
+        };
+    }
+
+    // An overshoot: shorten `target`-bit codes, most frequent first, into
+    // rank 1.
+    while total_cost < 0 {
+        if rank_last[1] == NONE {
+            while bits[n] == target {
+                n -= 1;
+            }
+            bits[n + 1] -= 1;
+            rank_last[1] = n + 1;
+        } else {
+            bits[rank_last[1] + 1] -= 1;
+            rank_last[1] += 1;
+        }
+        total_cost += 1;
+    }
+    target
+}
+
+/// Builds an unrestricted Huffman tree for the symbols in `syms` (in symbol
+/// order) with counts `freq`. Leaf `i` in ascending (count, symbol) order
+/// gets its packed `count << 8 | symbol` key in `keys[i]` and its depth in
+/// `depths[i]`.
+fn huffman_depths(
+    freq: &[u32],
+    syms: &[u8],
+    keys: &mut [u32; MAX_SYMBOL_VALUE + 1],
+    depths: &mut [u8; MAX_SYMBOL_VALUE + 1],
+) {
     // Two-queue construction: leaves sorted by (frequency, symbol), internal
     // nodes created in nondecreasing frequency order. Preferring the leaf on
     // equal frequency picks the same node as a min-heap keyed by
     // (frequency, id), because leaf ids precede internal ids.
-    const MAX_NODES: usize = 2 * (MAX_SYMBOL_VALUE + 1);
-    const NODE_MASK: usize = MAX_NODES - 1;
+    const SYMS: usize = MAX_SYMBOL_VALUE + 1;
     let n = syms.len();
-    debug_assert!((2..=MAX_SYMBOL_VALUE + 1).contains(&n));
+    debug_assert!((2..=SYMS).contains(&n));
 
     // Sort packed (frequency, symbol) keys; frequencies stay below 2^23.
     // Counting sort by frequency, with every count of 255 or more in the
     // last bucket: the buckets keep symbol order, so only that last one
-    // needs a comparison sort, and only the few frequent symbols land there.
+    // needs a comparison sort, and only when it holds counts that differ.
+    // Only buckets up to the largest count are used.
     const TOP: usize = 255;
+    let max = freq.iter().copied().max().unwrap_or(0) as usize;
+    let top = max.min(TOP);
     let mut starts = [0u16; TOP + 1];
     for &f in freq {
-        starts[(f as usize).min(TOP)] += 1;
+        starts[(f as usize).min(top) & TOP] += 1;
     }
     let mut at = 0u16;
-    for start in &mut starts {
+    for start in &mut starts[..=top] {
         let count = *start;
         *start = at;
         at += count;
     }
-    let mut keys = [0u32; MAX_SYMBOL_VALUE + 1];
     for (&f, &s) in freq.iter().zip(syms) {
-        let bucket = &mut starts[(f as usize).min(TOP)];
+        let bucket = &mut starts[(f as usize).min(top) & TOP];
         keys[usize::from(*bucket) & MAX_SYMBOL_VALUE] = (f << 8) | u32::from(s);
         *bucket += 1;
     }
     let keys = &mut keys[..n];
-    // Each start now holds its bucket's end, so this is where the last
-    // bucket begins.
-    let frequent = usize::from(starts[TOP - 1]);
-    keys[frequent..].sort_unstable();
+    if max > TOP {
+        // Each start now holds its bucket's end, so this is where the last
+        // bucket begins.
+        let frequent = usize::from(starts[TOP - 1]);
+        keys[frequent..].sort_unstable();
+    }
 
     // Both queues end in a sentinel above every sum (at most 2^31), so a
     // pick needs no emptiness check: the sorted leaves, and the internal
-    // nodes in creation order, each set once its children are picked. Leaf
-    // `i` has id `i`, internal node `j` id `n + j`.
-    let mut leaves = [u32::MAX; MAX_NODES];
+    // nodes in creation order, each set once its children are picked. A
+    // valid pick always exists, so the leaf index stops at `n`. `parent`
+    // holds the internal node above each leaf `i` at `i`, and above each
+    // internal node `j` at `SYMS + j`.
+    let mut leaves = [u32::MAX; 2 * SYMS];
     for (l, &k) in leaves.iter_mut().zip(keys.iter()) {
         *l = k >> 8;
     }
-    let mut sums = [u32::MAX; MAX_NODES];
-    let mut parent = [0u16; MAX_NODES];
+    let mut sums = [u32::MAX; SYMS];
+    let mut parent = [0u8; 2 * SYMS];
     let (mut leaf, mut internal) = (0usize, 0usize);
     for j in 0..n - 1 {
         let mut pick = || {
-            let (l, i) = (leaves[leaf & NODE_MASK], sums[internal & NODE_MASK]);
+            let (l, i) = (leaves[leaf & (2 * SYMS - 1)], sums[internal & (SYMS - 1)]);
             let take_leaf = l <= i;
-            let id = if take_leaf { leaf } else { n + internal };
+            let id = if take_leaf { leaf } else { SYMS + internal };
             leaf += usize::from(take_leaf);
             internal += usize::from(!take_leaf);
             (id, if take_leaf { l } else { i })
@@ -388,82 +525,83 @@ fn huffman_bit_lengths(freq: &[u32], syms: &[u8]) -> ([u8; MAX_SYMBOL_VALUE + 1]
         let (a, fa) = pick();
         let (b, fb) = pick();
         sums[j] = fa + fb;
-        parent[a & NODE_MASK] = (n + j) as u16;
-        parent[b & NODE_MASK] = (n + j) as u16;
+        parent[a & (2 * SYMS - 1)] = j as u8;
+        parent[b & (2 * SYMS - 1)] = j as u8;
     }
 
     // Parents always follow their children, so one backward pass from the
-    // root assigns every depth.
-    let root = 2 * n - 2;
-    let mut depth = [0u8; MAX_NODES];
-    for k in (0..root).rev() {
-        depth[k] = depth[usize::from(parent[k]) & NODE_MASK] + 1;
+    // root (the last internal node) assigns every depth.
+    let mut depth = [0u8; SYMS];
+    for j in (0..n - 2).rev() {
+        depth[j] = depth[usize::from(parent[SYMS + j])] + 1;
     }
 
-    let mut bit_lengths = [0u8; MAX_SYMBOL_VALUE + 1];
-    for (&k, &d) in keys.iter().zip(&depth) {
-        bit_lengths[(k & 0xFF) as usize] = d;
+    for (d, &p) in depths[..n].iter_mut().zip(&parent) {
+        *d = depth[usize::from(p)] + 1;
     }
-    let max_bits = depth[..n].iter().copied().max().unwrap_or(0);
-    (bit_lengths, max_bits)
+}
+
+/// A serialized weight description. The FSE form takes a size byte and
+/// under 128 bytes, and the direct form at most 65, so neither needs the
+/// heap.
+#[derive(Clone, Copy)]
+struct Description {
+    bytes: [u8; 128],
+    len: u8,
+}
+
+impl Default for Description {
+    fn default() -> Self {
+        Self {
+            bytes: [0; 128],
+            len: 0,
+        }
+    }
 }
 
 /// Serializes explicit Huffman weights, preferring the FSE-compressed form
 /// when it is smaller, as C zstd's `HUF_writeCTable` does. Returns `None` when
 /// more than 128 weights cannot be FSE-compressed.
-fn describe_weights(explicit: &[u8], hist: &[u32; WEIGHT_HIST_LEN]) -> Option<Vec<u8>> {
+fn describe_weights(explicit: &[u8], hist: &[u32; WEIGHT_HIST_LEN]) -> Option<Description> {
     let num_symbols = explicit.len();
     let direct_len = 1 + num_symbols.div_ceil(2);
-    if let Some(compressed) = compress_weights(explicit, hist)
-        && (num_symbols > 128 || 1 + compressed.len() < direct_len)
+    let mut d = Description::default();
+    if let Some(len) = compress_weights(explicit, hist, &mut d.bytes[1..])
+        && (num_symbols > 128 || 1 + len < direct_len)
     {
-        let mut out = Vec::with_capacity(1 + compressed.len());
-        out.push(compressed.len() as u8);
-        out.extend_from_slice(&compressed);
-        return Some(out);
+        d.bytes[0] = len as u8;
+        d.len = 1 + len as u8;
+        return Some(d);
     }
     if num_symbols > 128 {
         return None;
     }
-    let mut out = Vec::with_capacity(direct_len);
-    out.push((num_symbols + 127) as u8);
-    for pair in explicit.chunks(2) {
-        out.push((pair[0] << 4) | pair.get(1).copied().unwrap_or(0));
+    d.bytes[0] = (num_symbols + 127) as u8;
+    for (b, pair) in d.bytes[1..].iter_mut().zip(explicit.chunks(2)) {
+        *b = (pair[0] << 4) | pair.get(1).copied().unwrap_or(0);
     }
-    Some(out)
+    d.len = direct_len as u8;
+    Some(d)
 }
 
-/// FSE-compresses Huffman weights as in C zstd's `HUF_compressWeights`.
+/// FSE-compresses Huffman weights into `out` (127 bytes) as in C zstd's
+/// `HUF_compressWeights`, and returns the length.
 ///
 /// Two states share one table: the first encodes even-indexed weights, the
 /// second odd-indexed ones. Returns `None` when the weights use a single
 /// value or the result does not fit the one-byte size header (< 128).
-fn compress_weights(weights: &[u8], hist: &[u32; WEIGHT_HIST_LEN]) -> Option<Vec<u8>> {
-    // C zstd's FSE_optimalTableLog settles on the minimum log, 5, for every
-    // weight count the format allows.
-    compress_weights_with_log(weights, hist, 5)
-}
-
-/// Entries in a histogram of weights: 0 through `MAX_BITS + 1`.
-const WEIGHT_HIST_LEN: usize = MAX_BITS as usize + 2;
-
-/// Counts each weight value.
-fn weight_histogram(weights: &[u8]) -> [u32; WEIGHT_HIST_LEN] {
-    let mut hist = [0u32; WEIGHT_HIST_LEN];
-    for &w in weights {
-        hist[usize::from(w) % WEIGHT_HIST_LEN] += 1;
-    }
-    hist
-}
-
-fn compress_weights_with_log(
+fn compress_weights(
     weights: &[u8],
     hist: &[u32; WEIGHT_HIST_LEN],
-    accuracy_log: u8,
-) -> Option<Vec<u8>> {
-    use crate::fse::encode::{FseEncodeState, FseEncodeTable};
-    use crate::fse::table_builder::{normalize_counts, serialize_fse_table_description};
+    out: &mut [u8],
+) -> Option<usize> {
+    use crate::fse::encode::{SymbolTransform, build_encode_table};
+    use crate::fse::table_builder::{normalize_counts_into, write_fse_table_description};
 
+    // C zstd's FSE_optimalTableLog settles on the minimum log, 5, for every
+    // weight count the format allows.
+    const LOG: u8 = 5;
+    const STATES: usize = 1 << LOG;
     let n = weights.len();
     if n < 2 {
         return None;
@@ -473,38 +611,54 @@ fn compress_weights_with_log(
     if hist[..=max_w].iter().filter(|&&c| c > 0).count() < 2 {
         return None;
     }
+    let syms = max_w + 1;
+    let mut dist = [0i16; WEIGHT_HIST_LEN];
+    normalize_counts_into(&hist[..syms], LOG, &mut dist[..syms]);
+    let mut tt = [SymbolTransform {
+        delta_nb_bits: 0,
+        delta_find_state: 0,
+    }; WEIGHT_HIST_LEN];
+    let mut states = [0u16; STATES];
+    let mut spread = [0u16; STATES];
+    let mut cumul = [0u32; WEIGHT_HIST_LEN + 1];
+    build_encode_table(
+        &dist[..syms],
+        LOG,
+        &mut tt[..syms],
+        &mut states,
+        &mut spread,
+        &mut cumul[..=syms],
+    );
 
-    let dist = normalize_counts(&hist[..=max_w], accuracy_log);
-    let table = FseEncodeTable::from_distribution(&dist, accuracy_log);
-    let mut out = serialize_fse_table_description(&dist, accuracy_log);
+    // The table description, padded to a byte, then the weights encoded
+    // backward so the decoder reads them front to back, starting with the
+    // first state. Bits go through a 64-bit accumulator; each step adds at
+    // most 7 bits. Output past 128 bytes is dropped, since it fails anyway.
+    let mut w = WeightBits {
+        buf: [0; 128],
+        len: 0,
+        acc: 0,
+        used: 0,
+    };
+    write_fse_table_description(&dist[..syms], LOG, |v, nb| w.put(v, u32::from(nb)));
+    w.put(0, (8 - w.used % 8) % 8);
 
-    // Encode backward so the decoder reads weights front to back, starting
-    // with the first state. Bits go through a local 64-bit accumulator; each
-    // step adds at most accuracy_log bits.
-    let mut acc: u64 = 0;
-    let mut used: u32 = 0;
-    macro_rules! put {
-        ($val:expr, $nb:expr) => {
-            acc |= u64::from($val) << used;
-            used += $nb;
-            if used >= 32 {
-                out.extend_from_slice(&(acc as u32).to_le_bytes());
-                acc >>= 32;
-                used -= 32;
-            }
-        };
-    }
     macro_rules! encode {
         ($state:ident, $sym:expr) => {{
-            let tt = table.symbol_tt[$sym as usize];
-            let nb = $state.wrapping_add(tt.delta_nb_bits) >> 16;
-            put!($state & ((1u32 << nb) - 1), nb);
-            $state = u32::from(
-                table.state_table[(($state >> nb) as i32 + tt.delta_find_state) as usize],
-            );
+            let t = tt[usize::from($sym) % WEIGHT_HIST_LEN];
+            let nb = $state.wrapping_add(t.delta_nb_bits) >> 16;
+            w.put($state & ((1u32 << nb) - 1), nb);
+            $state =
+                u32::from(states[((($state >> nb) as i32 + t.delta_find_state) as usize) % STATES]);
         }};
     }
-    let init = |sym: u8| FseEncodeState::init(&table, sym).state();
+    // C zstd's FSE_initCState2.
+    let init = |sym: u8| {
+        let t = tt[usize::from(sym) % WEIGHT_HIST_LEN];
+        let nb = t.delta_nb_bits.wrapping_add(1 << 16) >> 16;
+        let value = (nb << 16).wrapping_sub(t.delta_nb_bits);
+        u32::from(states[((value >> nb) as i32 + t.delta_find_state) as usize % STATES])
+    };
 
     let mut i = n;
     let (mut s1, mut s2);
@@ -523,29 +677,81 @@ fn compress_weights_with_log(
         encode!(s1, weights[i - 2]);
         i -= 2;
     }
-    let mask = (1u32 << accuracy_log) - 1;
-    put!(s2 & mask, u32::from(accuracy_log));
-    put!(s1 & mask, u32::from(accuracy_log));
-    put!(1u32, 1);
-    while used > 0 {
-        out.push(acc as u8);
-        acc >>= 8;
-        used = used.saturating_sub(8);
+    let mask = (1u32 << LOG) - 1;
+    w.put(s2 & mask, u32::from(LOG));
+    w.put(s1 & mask, u32::from(LOG));
+    w.put(1, 1);
+    let len = w.finish();
+    if len >= 128 {
+        return None;
+    }
+    out[..len].copy_from_slice(&w.buf[..len]);
+    Some(len)
+}
+
+/// A little-endian bit accumulator over 128 bytes, for weight descriptions.
+/// Bytes past the end are dropped; such a description is too long anyway.
+struct WeightBits {
+    buf: [u8; 128],
+    len: usize,
+    acc: u64,
+    used: u32,
+}
+
+impl WeightBits {
+    fn put(&mut self, value: u32, nb: u32) {
+        self.acc |= u64::from(value) << self.used;
+        self.used += nb;
+        if self.used >= 32 {
+            if let Some(dst) = self.buf.get_mut(self.len..self.len + 4) {
+                dst.copy_from_slice(&(self.acc as u32).to_le_bytes());
+            }
+            self.len += 4;
+            self.acc >>= 32;
+            self.used -= 32;
+        }
     }
 
-    (out.len() < 128).then_some(out)
+    /// Writes the pending bits, padded to a byte, and returns the length.
+    fn finish(&mut self) -> usize {
+        let tail = self.used.div_ceil(8) as usize;
+        for k in 0..tail {
+            if let Some(b) = self.buf.get_mut(self.len + k) {
+                *b = (self.acc >> (8 * k)) as u8;
+            }
+        }
+        self.len + tail
+    }
+}
+
+/// Entries in a histogram of weights: 0 through `MAX_BITS + 1`.
+const WEIGHT_HIST_LEN: usize = MAX_BITS as usize + 2;
+
+/// Counts each weight value.
+fn weight_histogram(weights: &[u8]) -> [u32; WEIGHT_HIST_LEN] {
+    let mut hist = [0u32; WEIGHT_HIST_LEN];
+    for &w in weights {
+        hist[usize::from(w) % WEIGHT_HIST_LEN] += 1;
+    }
+    hist
 }
 
 /// Counts byte frequencies into four interleaved tables, so runs of one byte
-/// value do not serialize on a single counter.
+/// value do not serialize on a single counter. Each 8-byte word is loaded
+/// once and split with shifts, which takes 15% less time than byte loads.
 pub fn byte_histogram(data: &[u8]) -> [u32; MAX_SYMBOL_VALUE + 1] {
     let mut t = [[0u32; MAX_SYMBOL_VALUE + 1]; 4];
-    let (chunks, tail) = data.as_chunks::<4>();
+    let (chunks, tail) = data.as_chunks::<8>();
     for c in chunks {
-        t[0][c[0] as usize] += 1;
-        t[1][c[1] as usize] += 1;
-        t[2][c[2] as usize] += 1;
-        t[3][c[3] as usize] += 1;
+        let w = u64::from_le_bytes(*c);
+        t[0][(w & 0xFF) as usize] += 1;
+        t[1][((w >> 8) & 0xFF) as usize] += 1;
+        t[2][((w >> 16) & 0xFF) as usize] += 1;
+        t[3][((w >> 24) & 0xFF) as usize] += 1;
+        t[0][((w >> 32) & 0xFF) as usize] += 1;
+        t[1][((w >> 40) & 0xFF) as usize] += 1;
+        t[2][((w >> 48) & 0xFF) as usize] += 1;
+        t[3][(w >> 56) as usize] += 1;
     }
     for &b in tail {
         t[0][b as usize] += 1;
@@ -553,20 +759,23 @@ pub fn byte_histogram(data: &[u8]) -> [u32; MAX_SYMBOL_VALUE + 1] {
     core::array::from_fn(|i| t[0][i] + t[1][i] + t[2][i] + t[3][i])
 }
 
-fn pack_codes(
-    codes: &[u16; MAX_SYMBOL_VALUE + 1],
-    num_bits: &[u8; MAX_SYMBOL_VALUE + 1],
-) -> [u32; MAX_SYMBOL_VALUE + 1] {
-    core::array::from_fn(|s| u32::from(codes[s]) | (u32::from(num_bits[s]) << 16))
+/// Worst-case bytes [`HuffmanEncodeTable::encode_stream`] touches for `n`
+/// symbols: `MAX_BITS` per symbol plus the end mark, and its last 8-byte
+/// store.
+const fn stream_bound(n: usize) -> usize {
+    n + n / 2 + 16
 }
 
 /// Canonical codes for the symbols in `syms` (in symbol order) with these
-/// weights: by weight, then by symbol, as the decoder assigns them.
-fn build_encode_codes(
+/// weights, by weight, then by symbol, as the decoder assigns them. Each is
+/// left-aligned with its length in the low bits, as
+/// [`HuffmanEncodeTable::encode_stream`] takes them; absent symbols get 0.
+fn code_entries(
     weights: &[u8; MAX_SYMBOL_VALUE + 1],
+    num_bits: &[u8; MAX_SYMBOL_VALUE + 1],
     syms: &[u8],
     table_log: u8,
-) -> [u16; MAX_SYMBOL_VALUE + 1] {
+) -> [u64; MAX_SYMBOL_VALUE + 1] {
     // Weights are at most `table_log + 1 <= 12`, so `& 15` only drops the
     // bounds checks.
     let mut rank_count = [0u32; 16];
@@ -581,14 +790,16 @@ fn build_encode_codes(
         cumul += rank_count[w & 15] << (w - 1);
     }
 
-    let mut codes = [0u16; MAX_SYMBOL_VALUE + 1];
+    let mut celt = [0u64; MAX_SYMBOL_VALUE + 1];
     for &s in syms {
         let w = usize::from(weights[s as usize]);
         let start = rank_start[w & 15];
-        codes[s as usize] = (start >> (w - 1)) as u16;
         rank_start[w & 15] += 1u32 << (w - 1);
+        // Present symbols have 1 to `MAX_BITS` bits.
+        let nb = u32::from(num_bits[s as usize]);
+        celt[s as usize] = (u64::from(start >> (w - 1)) << (64 - nb)) | u64::from(nb);
     }
-    codes
+    celt
 }
 
 #[cfg(test)]
@@ -675,7 +886,7 @@ mod tests {
         assert_eq!(original.table_log, rebuilt.table_log);
         assert_eq!(original.explicit_weights(), rebuilt.explicit_weights());
         assert_eq!(original.num_bits, rebuilt.num_bits);
-        assert_eq!(original.packed, rebuilt.packed);
+        assert_eq!(original.celt, rebuilt.celt);
 
         let encoded = rebuilt.encode_single_stream(data);
         let decoded = crate::huffman::decode::decode_single_stream(
@@ -703,7 +914,7 @@ mod tests {
             crate::huffman::weights::build_huffman_decode_table(&parsed_weights).unwrap();
 
         let rebuilt = HuffmanEncodeTable::from_decode_table(&decode_table, decode_log).unwrap();
-        assert_eq!(original.packed, rebuilt.packed);
+        assert_eq!(original.celt, rebuilt.celt);
         assert_eq!(original.num_bits, rebuilt.num_bits);
 
         let encoded = rebuilt.encode_single_stream(&data);

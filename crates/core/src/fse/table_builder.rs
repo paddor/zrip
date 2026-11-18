@@ -134,7 +134,19 @@ pub fn serialize_fse_table_description(distribution: &[i16], accuracy_log: u8) -
     use crate::bitstream::writer::BitWriter;
 
     let mut writer = BitWriter::new();
-    writer.write_bits((accuracy_log - 5) as u32, 4);
+    write_fse_table_description(distribution, accuracy_log, |v, n| writer.write_bits(v, n));
+    writer.flush_remaining();
+    writer.as_bytes().to_vec()
+}
+
+/// Writes the FSE table description bits, LSB first, through `put(value,
+/// bits)`. The caller pads the last byte.
+pub fn write_fse_table_description(
+    distribution: &[i16],
+    accuracy_log: u8,
+    mut put: impl FnMut(u32, u8),
+) {
+    put((accuracy_log - 5) as u32, 4);
 
     let table_size = 1i32 << accuracy_log;
     let mut remaining = table_size + 1;
@@ -148,11 +160,11 @@ pub fn serialize_fse_table_description(distribution: &[i16], accuracy_log: u8) -
         let max_val = (2 * threshold - 1) - remaining;
 
         if count < max_val {
-            writer.write_bits(count as u32, nb_bits - 1);
+            put(count as u32, nb_bits - 1);
         } else if count < threshold {
-            writer.write_bits(count as u32, nb_bits);
+            put(count as u32, nb_bits);
         } else {
-            writer.write_bits((count + max_val) as u32, nb_bits);
+            put((count + max_val) as u32, nb_bits);
         }
 
         if prob == -1 {
@@ -170,10 +182,10 @@ pub fn serialize_fse_table_description(distribution: &[i16], accuracy_log: u8) -
             let mut z = zeros;
             loop {
                 if z >= 3 {
-                    writer.write_bits(3, 2);
+                    put(3, 2);
                     z -= 3;
                 } else {
-                    writer.write_bits(z as u32, 2);
+                    put(z as u32, 2);
                     break;
                 }
             }
@@ -187,20 +199,23 @@ pub fn serialize_fse_table_description(distribution: &[i16], accuracy_log: u8) -
             threshold >>= 1;
         }
     }
-
-    writer.flush_remaining();
-    writer.as_bytes().to_vec()
 }
 
 pub fn normalize_counts(freqs: &[u32], accuracy_log: u8) -> Vec<i16> {
+    let mut dist = vec![0i16; freqs.len()];
+    normalize_counts_into(freqs, accuracy_log, &mut dist);
+    dist
+}
+
+/// Normalizes `freqs` to `1 << accuracy_log` into `dist` (same length,
+/// all zero on entry).
+pub fn normalize_counts_into(freqs: &[u32], accuracy_log: u8, dist: &mut [i16]) {
     let table_size = 1i32 << accuracy_log;
     let total: u64 = freqs.iter().map(|&f| f as u64).sum();
 
     if total == 0 {
-        return vec![0; freqs.len()];
+        return;
     }
-
-    let mut dist = vec![0i16; freqs.len()];
     let mut largest_idx = 0;
     let mut largest_freq = 0u32;
     for (i, &freq) in freqs.iter().enumerate() {
@@ -232,8 +247,6 @@ pub fn normalize_counts(freqs: &[u32], accuracy_log: u8) -> Vec<i16> {
     }
 
     dist[largest_idx] = (table_size - distributed) as i16;
-
-    dist
 }
 
 pub fn build_decode_table(
