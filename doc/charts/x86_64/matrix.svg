@@ -33,8 +33,8 @@ High compressibility
 <rect x="95" y="250" width="33" height="17" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="95" y="244" width="33" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="130" y="262" width="33" height="22" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="130" y="247" width="33" height="15" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="130" y="239" width="33" height="8" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="130" y="248" width="33" height="14" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="130" y="239" width="33" height="9" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="165" y="266" width="33" height="18" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="165" y="249" width="33" height="17" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="165" y="242" width="33" height="7" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -131,7 +131,7 @@ Level 1
 <rect x="602" y="499" width="33" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="637" y="526" width="33" height="35" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="637" y="505" width="33" height="21" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="637" y="497" width="33" height="8" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="637" y="496" width="33" height="9" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="672" y="525" width="33" height="36" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="672" y="505" width="33" height="20" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="672" y="497" width="33" height="8" opacity="1" fill="#F59E0B" stroke="none"/>
