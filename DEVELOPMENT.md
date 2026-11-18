@@ -338,7 +338,9 @@ cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- small-encode \
 `tiny_matrix.svg` stacks the pipeline for the `--tiny` slices by
 compressibility at every Fast strategy level, -7 through 2. Each segment is
 the geometric mean over all slice inputs in a group, so every size counts the
-same. lz4rip has one level and shows next to level -7:
+same. The transfer segment assumes a 1 GB/s link instead of 100 MB/s, since
+tiny frames take only microseconds to compress. lz4rip has one level and shows
+next to level -7:
 
 ```bash
 cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \

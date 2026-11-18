@@ -60,6 +60,9 @@ const SIZE_LABELS: &[&str] = &[
 // at Fast strategy levels.
 const TINY_SUFFIXES: &[&str] = &["_512", "_1k", "_2k", "_4k", "_8k"];
 const TINY_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2];
+/// Tiny frames compress and decompress in microseconds, so the transfer
+/// uses a faster link to keep its segment comparable to the codec time.
+const TINY_TRANSFER_RATE: f64 = 1e9;
 
 const SCATTER_LOG_X_MIN: f64 = 1.477; // 10^1.477 ~= 30 MB/s
 const SCATTER_LOG_X_MAX: f64 = 4.0; // 10^4 = 10000 MB/s
@@ -1136,7 +1139,12 @@ fn draw_marker_legend_item(
     Ok(())
 }
 
-fn draw_segment_legend(area: &Area<'_>, mid_x: f64, y: f64) -> Result<(), Box<dyn Error>> {
+fn draw_segment_legend(
+    area: &Area<'_>,
+    mid_x: f64,
+    y: f64,
+    transfer_rate: f64,
+) -> Result<(), Box<dyn Error>> {
     text(
         area,
         "bright = compress + decompress",
@@ -1149,7 +1157,7 @@ fn draw_segment_legend(area: &Area<'_>, mid_x: f64, y: f64) -> Result<(), Box<dy
     )?;
     text(
         area,
-        "dim = transfer @100 MB/s",
+        format!("dim = transfer @{}", rate_label(transfer_rate)),
         px(mid_x + 30.0),
         px(y),
         9,
@@ -1218,11 +1226,20 @@ fn draw_stack(
     Ok(())
 }
 
-fn compute_pipeline(row: &BenchRow) -> (f64, f64, f64) {
+/// `100 MB/s` or `1 GB/s`.
+fn rate_label(bytes_per_sec: f64) -> String {
+    if bytes_per_sec >= 1e9 {
+        format!("{} GB/s", bytes_per_sec / 1e9)
+    } else {
+        format!("{} MB/s", bytes_per_sec / 1e6)
+    }
+}
+
+fn compute_pipeline(row: &BenchRow, transfer_rate: f64) -> (f64, f64, f64) {
     let per_gb = 1e9 / row.input_size as f64;
     (
         row.compress_ns / 1e9 * per_gb,
-        (row.compressed_size as f64 / row.input_size as f64) * (1e9 / TRANSFER_RATE),
+        (row.compressed_size as f64 / row.input_size as f64) * (1e9 / transfer_rate),
         row.decompress_ns / 1e9 * per_gb,
     )
 }
@@ -1248,7 +1265,7 @@ fn draw_summary(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
             if row.compress_ns <= 0.0 || !levels.contains(&row.level) {
                 continue;
             }
-            let (c, t, d) = compute_pipeline(&row);
+            let (c, t, d) = compute_pipeline(&row, TRANSFER_RATE);
             comp.push(c.ln());
             xfer.push(t.ln());
             decomp.push(d.ln());
@@ -1335,7 +1352,12 @@ fn draw_summary(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
     let mid = width as f64 / 2.0;
     let leg_y = p_bot + 52.0;
     draw_legend(&area, cfg, &codecs, mid - 235.0, leg_y, 2)?;
-    draw_segment_legend(&area, mid, leg_y + leg_rows as f64 * LEGEND_ROW_H + 18.0)?;
+    draw_segment_legend(
+        &area,
+        mid,
+        leg_y + leg_rows as f64 * LEGEND_ROW_H + 18.0,
+        TRANSFER_RATE,
+    )?;
     area.present()?;
     drop(area);
     finish_svg(&path, width, height)?;
@@ -1376,7 +1398,10 @@ fn draw_pipeline(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
         for row in rows {
             input_order.insert(row.input.clone());
             input_sizes.insert(row.input.clone(), row.input_size);
-            stacks.insert((row.input.clone(), codec.clone()), compute_pipeline(row));
+            stacks.insert(
+                (row.input.clone(), codec.clone()),
+                compute_pipeline(row, TRANSFER_RATE),
+            );
         }
     }
     let inputs = input_order.into_iter().collect::<Vec<_>>();
@@ -1478,6 +1503,7 @@ fn draw_pipeline(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
         &area,
         width as f64 / 2.0,
         leg_y + rows as f64 * LEGEND_ROW_H + 16.0,
+        TRANSFER_RATE,
     )?;
     area.present()?;
     drop(area);
@@ -1529,6 +1555,8 @@ struct MatrixSpec {
     title: &'static str,
     width: u32,
     aggregate: Aggregate,
+    /// Link speed for the transfer segment, bytes per second.
+    transfer_rate: f64,
     codecs: Vec<&'static str>,
     levels: &'static [i32],
     /// Cache level of the rows a codec shows in a level column, if any.
@@ -1572,6 +1600,7 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
         title: "12-file Silesia: Pipeline @100 MB/s by compressibility (lower is better)",
         width: 850,
         aggregate: Aggregate::Bytes,
+        transfer_rate: TRANSFER_RATE,
         codecs: cfg.matrix_codecs.clone(),
         levels: MATRIX_LEVELS,
         row_level: same_level,
@@ -1586,9 +1615,10 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
 fn draw_tiny_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
     let spec = MatrixSpec {
         file: "tiny_matrix.svg",
-        title: "12-file Silesia, 512 B to 8 KiB slices: geomean pipeline @100 MB/s (lower is better)",
+        title: "12-file Silesia, 512 B to 8 KiB slices: geomean pipeline @1 GB/s (lower is better)",
         width: 1200,
         aggregate: Aggregate::Geomean,
+        transfer_rate: TINY_TRANSFER_RATE,
         codecs: cfg.tiny_codecs.clone(),
         levels: TINY_LEVELS,
         row_level: tiny_row_level,
@@ -1769,6 +1799,7 @@ fn draw_matrix_chart(
         &area,
         width as f64 / 2.0,
         leg_y + rows as f64 * LEGEND_ROW_H + 16.0,
+        spec.transfer_rate,
     )?;
     area.present()?;
     drop(area);
@@ -1809,12 +1840,16 @@ fn compute_matrix_stacks(
                         let per_gb = 1e9 / total_input as f64;
                         (
                             total_comp / 1e9 * per_gb,
-                            total_compressed as f64 / total_input as f64 * (1e9 / TRANSFER_RATE),
+                            total_compressed as f64 / total_input as f64
+                                * (1e9 / spec.transfer_rate),
                             total_decomp / 1e9 * per_gb,
                         )
                     }
                     Aggregate::Geomean => {
-                        let parts = rows.iter().map(|r| compute_pipeline(r)).collect::<Vec<_>>();
+                        let parts = rows
+                            .iter()
+                            .map(|r| compute_pipeline(r, spec.transfer_rate))
+                            .collect::<Vec<_>>();
                         let gm = |f: fn(&(f64, f64, f64)) -> f64| {
                             let logs = parts.iter().map(|p| f(p).ln()).sum::<f64>();
                             (logs / parts.len() as f64).exp()
