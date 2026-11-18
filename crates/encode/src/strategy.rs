@@ -254,9 +254,11 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             #[cfg(feature = "ldm")]
             ldm_params: None,
         },
-        // L-6 to L-4 hash 8 or 7 bytes. With Huffman literals, longer
-        // matches at shorter steps beat 6-byte matches at long steps on both
-        // ratio and speed, as fewer bytes are left to code as literals.
+        // L-6 to L-4 hash and confirm 8 bytes. With Huffman literals, longer
+        // matches at short steps beat shorter matches at long steps on both
+        // ratio and speed, as fewer bytes are left to code as literals and
+        // frames decode with fewer sequences. The step grows every 8 or 16
+        // bytes without a match, so sparse regions cost few probes.
         -6 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
@@ -264,8 +266,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             chain_log: 13,
             search_log: 0,
             min_match: 8,
-            target_length: 9,
-            search_strength: 5,
+            target_length: 5,
+            search_strength: 3,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
             ldm_params: None,
@@ -277,8 +279,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             chain_log: 13,
             search_log: 0,
             min_match: 8,
-            target_length: 5,
-            search_strength: 6,
+            target_length: 4,
+            search_strength: 4,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
             ldm_params: None,
@@ -289,25 +291,25 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             hash_log: 13,
             chain_log: 13,
             search_log: 0,
-            min_match: 7,
-            target_length: 4,
-            search_strength: 5,
+            min_match: 8,
+            target_length: 2,
+            search_strength: 4,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
             ldm_params: None,
         },
-        // L-3 through L-1 grow the step every 32 bytes without a match.
-        // Long literal runs need fewer probes, while frequent matches keep
-        // the initial step and most of the compression ratio.
+        // L-3 through L-1 hash seven bytes. L-3 and L-2 grow the step every
+        // 16 bytes without a match, L-1 every 32, so frequent matches keep
+        // the initial step while long literal runs need few probes.
         -3 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
             hash_log: 14,
             chain_log: 14,
             search_log: 0,
-            min_match: 6,
-            target_length: 4,
-            search_strength: 5,
+            min_match: 7,
+            target_length: 3,
+            search_strength: 4,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
             ldm_params: None,
@@ -318,9 +320,9 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             hash_log: 14,
             chain_log: 14,
             search_log: 0,
-            min_match: 6,
-            target_length: 3,
-            search_strength: 5,
+            min_match: 7,
+            target_length: 2,
+            search_strength: 4,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
             ldm_params: None,
@@ -331,7 +333,7 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             hash_log: 14,
             chain_log: 14,
             search_log: 0,
-            min_match: 6,
+            min_match: 7,
             target_length: 2,
             search_strength: 5,
             force_raw_literals: false,
@@ -340,12 +342,14 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         },
         // L1 and L2 hash seven bytes to favor longer matches and grow the
         // step every 16 bytes without a match. Dense matches keep the
-        // initial step, while long literal runs need fewer probes.
+        // initial step, while long literal runs need fewer probes. L1 hashes
+        // into a table of C zstd's size, L2 into half of C's, which trades
+        // a little ratio for speed.
         1 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
-            hash_log: 15,
-            chain_log: 15,
+            hash_log: 14,
+            chain_log: 14,
             search_log: 0,
             min_match: 7,
             target_length: 1,
@@ -357,8 +361,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         2 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 20,
-            hash_log: 16,
-            chain_log: 16,
+            hash_log: 15,
+            chain_log: 15,
             search_log: 0,
             min_match: 7,
             target_length: 1,
