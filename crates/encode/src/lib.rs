@@ -865,9 +865,14 @@ mod tests {
             let out = compress(&data, level).unwrap();
             assert!(out.len() * 5 < data.len() * 4, "L{level}: {}", out.len());
         }
-        // L-7 keeps literals raw at every size.
+        // L-7 keeps literals raw, except in blocks that are almost all
+        // literals, with over 32 KiB of them.
+        let data = skewed_bytes(64 * 1024);
         let out = compress(&data, -7).unwrap();
-        assert!(out.len() > data.len(), "L-7: {}", out.len());
+        assert!(out.len() * 5 < data.len() * 4, "L-7: {}", out.len());
+        let small = skewed_bytes(16 * 1024);
+        let out = compress(&small, -7).unwrap();
+        assert!(out.len() > small.len(), "L-7 small: {}", out.len());
     }
 
     #[test]

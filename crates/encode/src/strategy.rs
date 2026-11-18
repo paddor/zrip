@@ -238,9 +238,11 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         0 => return level_params_inner(DEFAULT_LEVEL),
         // The fastest level, for LZ4's niche: raw literals, as in C zstd,
         // and only matches of eight bytes or more (`min_match` 8 hashes and
-        // confirms eight bytes), so frames decode with few sequences and no
-        // Huffman tables. It steps 3 bytes and grows the step every 16 bytes
-        // without a match. L-8, a separate level before, runs as L-7.
+        // confirms eight bytes), so frames decode with few sequences. Blocks
+        // that are almost all literals try Huffman literals instead, so
+        // low-compressibility data still shrinks a little. It steps 3 bytes
+        // and grows the step every 16 bytes without a match. L-8, a separate
+        // level before, runs as L-7.
         -8 | -7 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
