@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.8.14] - 2026-11-18
+
+- Add `push::PushDecoder`: push-style (sans-io) decoding into caller
+  buffers. Reads multi-frame streams and skippable frames, takes a
+  dictionary and an output limit, and needs only `alloc`.
+- One-shot decoding accepts frames whose window exceeds 128 MiB. One-shot
+  output is the history, so `max_output` bounds memory, not the window.
+- `FrameDecoder` decodes each block straight into its window history,
+  reserves a known content size up front, and builds the predefined
+  sequence tables once per decoder. Silesia decodes 12-64% faster at
+  levels 1 and 3.
+- `FrameDecoder::with_limit` reports a crossed limit as `OutputTooSmall`
+  instead of `CorruptSequences`, and a bad magic number fails as soon as it
+  is read.
+- Literal sections under 24 KiB decode with single-symbol Huffman tables,
+  which are faster there.
+
 ## [0.8.13] - 2026-11-02
 
 - `FrameDecoder` keeps up to two windows of history and drops the older one

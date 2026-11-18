@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-18
+
+- Breaking: `HuffmanEncodeTable::encode_4_streams_into` no longer takes a
+  stream buffer. It and `encode_single_stream_into` write to the start of
+  `out` and return the encoded length; bytes past it are scratch.
+- Faster Huffman encoding, as C zstd does it: left-aligned `u64` code
+  entries, two bit containers, and four streams written straight into one
+  buffer. `byte_histogram` loads 8 bytes at a time.
+- Huffman tables build from the active symbols only, with a counting sort and
+  a two-queue tree, and limit code lengths in place like `HUF_setMaxHeight`.
+  Weight descriptions use stack buffers. Builds take about half the time.
+- `prefers_pairs` picks two-symbol decoding only for literal sections of at
+  least 24 KiB, where its larger table pays off.
+- Add `fse::encode::build_encode_table`,
+  `fse::table_builder::normalize_counts_into`, and
+  `fse::table_builder::write_fse_table_description`, which work on caller
+  buffers.
+- Add `frame::find_frame_compressed_size`: the size of the first frame in a
+  buffer, from its frame and block headers alone, like C zstd's
+  `ZSTD_findFrameCompressedSize`.
+- Add the `push` module with `Status` and `Progress`, shared by the push
+  encoder and decoder.
+
 ## [0.11.1] - 2026-10-19
 
 - Enforce `#![forbid(unsafe_code)]` for every build. The `paranoid` feature

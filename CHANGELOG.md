@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.18] - 2026-11-18
+
 ### Added
 
 - `zrip::frame::find_frame_compressed_size`: size of the first frame in a
@@ -32,6 +34,25 @@
 - `FrameEncoder` appends input straight into its window, grows it in large
   steps, and allocates hash tables on the first block. Silesia encodes 1-30%
   faster.
+- Retune Fast levels -6 to 2 for speed. Levels -6 to -4 hash and confirm 8
+  bytes, -3 to -1 hash 7, most negative levels skip ahead faster in literal
+  runs, and levels 1 and 2 use smaller hash tables. On medium-compressibility
+  Silesia files, levels -4 to 2 encode 11-17% faster for 2.5-3.4% less ratio.
+  Highly compressible files encode faster and mostly compress better, and
+  literal-heavy files encode up to 2.3x faster. On 64 KiB inputs the trade
+  is steeper: levels -6 to -2 lose up to 10% of ratio for 29-59% more speed.
+- Level -7 Huffman-codes literals in blocks over 32 KiB where matches cover
+  under 1/8 of the data and literals fit in 6.09 bits per byte. Such blocks
+  were stored raw before. Low-compressibility Silesia files compress 1.015:1
+  instead of 1.000:1 at about the same speed.
+- Literals use four Huffman streams from 256 literals, as C zstd does, and
+  two-symbol decode tables only for sections of at least 24 KiB. Huffman
+  tables build in about half the time. On 512 B to 8 KiB Silesia slices,
+  level 1 encodes 22% faster and decodes 9% faster, for 0.6% larger output.
+- Huffman streams encode the way C zstd does, with two bit containers and no
+  copy per stream, and code lengths are limited in place. Level 1 encodes
+  another 10-16% faster on 512 B to 8 KiB inputs and 19% faster on
+  literal-heavy 128 KiB blocks.
 
 ### Fixed
 
