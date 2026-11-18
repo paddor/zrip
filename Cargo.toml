@@ -81,6 +81,11 @@ path = "examples/profile_czstd_decode.rs"
 required-features = ["std"]
 
 [[example]]
+name = "zrip_tune_fast"
+path = "examples/tune_fast.rs"
+required-features = ["std"]
+
+[[example]]
 name = "zrip_profile_tiny"
 path = "examples/profile_tiny.rs"
 required-features = ["std"]
