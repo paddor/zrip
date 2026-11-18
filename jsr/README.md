@@ -105,8 +105,8 @@ Deno 2.8.3, SIMD128, and an Intel Core i7-8700B Linux VM.
 
 | Impl                      | Encode MB/s | Decode MB/s |
 | :------------------------ | ----------: | ----------: |
-| zrip                      |   **172.6** |   **402.1** |
-| C zstd (zstd-codec 0.1.5) |       129.5 |       270.1 |
+| zrip                      |   **196.6** |   **413.9** |
+| C zstd (zstd-codec 0.1.5) |       129.7 |       270.3 |
 
 Run `deno run --allow-read src/bench.ts` from `jsr/` after building the WASM
 package to reproduce this comparison. The

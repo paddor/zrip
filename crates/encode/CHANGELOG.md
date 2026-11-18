@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-11-18
+
+- Add `push::PushEncoder` with `EndOp`: push-style (sans-io) encoding into
+  caller buffers. A frame that ends before any of it was written is encoded
+  in one pass, the same bytes as `compress`. Needs only `alloc`.
+- `FrameEncoder` appends input straight into its window, grows it in large
+  steps, and allocates hash tables on the first block. Silesia encodes
+  1-30% faster.
+- Retune Fast levels -6 to 2 for speed. Levels -6 to -4 hash and confirm 8
+  bytes, -3 to -1 hash 7, most negative levels skip ahead faster in literal
+  runs, and levels 1 and 2 use smaller hash tables. On medium-compressibility
+  Silesia files, levels -4 to 2 encode 11-17% faster for 2.5-3.4% less ratio.
+- Level -7 Huffman-codes literals in literal-heavy blocks over 32 KiB below
+  6.09 bits per byte, instead of storing them raw.
+- Use four Huffman literal streams from 256 literals, as C zstd does.
+
 ## [0.9.5] - 2026-11-12
 
 - The `context` module and `CompressContext` need only the `alloc` feature,

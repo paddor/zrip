@@ -1,6 +1,6 @@
 [package]
 name = "zrip-wasm"
-version = "0.5.16"
+version = "0.5.17"
 edition = "2024"
 description = "WebAssembly bindings for zrip"
 repository = "https://github.com/paddor/zrip"
