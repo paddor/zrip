@@ -23,8 +23,7 @@ const LEGEND_COL_W: f64 = 270.0;
 const TRANSFER_RATE: f64 = 100e6;
 const LEVEL: i32 = 1;
 const DECODE_LEVEL: i32 = 3;
-const LEVELS: &[i32] = &[3, 1, -1];
-const COLUMN_LEVELS: &[i32] = &[-1, 1, 3];
+const MATRIX_LEVELS: &[i32] = &[-1, 1, 3];
 const SUMMARY_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 const BAND_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 const C_ZSTD_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
@@ -57,6 +56,14 @@ const SIZE_LABELS: &[&str] = &[
     "512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1M",
 ];
 
+// `tiny_matrix.svg`: random slices of every Silesia file (`zrip_bench --tiny`)
+// at Fast strategy levels.
+const TINY_SUFFIXES: &[&str] = &["_512", "_1k", "_2k", "_4k", "_8k"];
+const TINY_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2];
+/// Tiny frames compress and decompress in microseconds, so the transfer
+/// uses a faster link to keep its segment comparable to the codec time.
+const TINY_TRANSFER_RATE: f64 = 1e9;
+
 const SCATTER_LOG_X_MIN: f64 = 1.477; // 10^1.477 ~= 30 MB/s
 const SCATTER_LOG_X_MAX: f64 = 4.0; // 10^4 = 10000 MB/s
 const SCATTER_X_TICKS: &[f64] = &[50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0];
@@ -77,6 +84,7 @@ struct Config {
     scatter_codecs: Vec<&'static str>,
     summary_codecs: Vec<&'static str>,
     matrix_codecs: Vec<&'static str>,
+    tiny_codecs: Vec<&'static str>,
     pipeline_codecs: Vec<&'static str>,
     small_codecs: Vec<&'static str>,
     small_decode_codecs: Vec<&'static str>,
@@ -113,6 +121,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             ChartKind::Pipeline,
             ChartKind::SmallEncode,
             ChartKind::SmallDecode,
+            ChartKind::TinyMatrix,
         ]
     } else {
         vec![args.chart]
@@ -127,6 +136,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             ChartKind::Pipeline => draw_pipeline(&cfg, &out_dir)?,
             ChartKind::SmallEncode => draw_small_encode(&cfg, &out_dir)?,
             ChartKind::SmallDecode => draw_small_decode(&cfg, &out_dir)?,
+            ChartKind::TinyMatrix => draw_tiny_matrix(&cfg, &out_dir)?,
         }
     }
 
@@ -142,6 +152,7 @@ enum ChartKind {
     Pipeline,
     SmallEncode,
     SmallDecode,
+    TinyMatrix,
 }
 
 struct Args {
@@ -185,7 +196,7 @@ impl Args {
 
 fn print_help() {
     println!(
-        "Usage: zrip_charts [all|scatter|summary|matrix|pipeline|small-encode|small-decode] [OUT_DIR] [--profile wasm32]"
+        "Usage: zrip_charts [all|scatter|summary|matrix|pipeline|small-encode|small-decode|tiny-matrix] [OUT_DIR] [--profile wasm32]"
     );
 }
 
@@ -198,6 +209,7 @@ fn parse_chart_kind(s: &str) -> Option<ChartKind> {
         "pipeline" => Some(ChartKind::Pipeline),
         "small-encode" => Some(ChartKind::SmallEncode),
         "small-decode" | "small_decode" => Some(ChartKind::SmallDecode),
+        "tiny-matrix" => Some(ChartKind::TinyMatrix),
         _ => None,
     }
 }
@@ -222,6 +234,7 @@ impl Config {
             cfg.scatter_codecs = vec!["C zstd", "zrip", "structured-zstd"];
             cfg.summary_codecs = vec!["C zstd", "zrip", "structured-zstd"];
             cfg.matrix_codecs = cfg.summary_codecs.clone();
+            cfg.tiny_codecs = cfg.summary_codecs.clone();
             cfg.pipeline_codecs = cfg.summary_codecs.clone();
             cfg.small_codecs = vec!["C zstd", "zrip", "structured-zstd"];
             cfg.small_decode_codecs = cfg.scatter_codecs.clone();
@@ -263,6 +276,7 @@ impl Config {
             ],
             summary_codecs: vec!["C zstd", "zrip", "structured-zstd", "mzstd", "ruzstd"],
             matrix_codecs: vec!["C zstd", "zrip", "structured-zstd", "mzstd", "ruzstd"],
+            tiny_codecs: vec!["C zstd", "zrip", "structured-zstd", "mzstd", "lz4rip"],
             pipeline_codecs: vec!["C zstd", "zrip", "structured-zstd", "mzstd", "ruzstd"],
             small_codecs: vec!["C zstd", "zrip", "structured-zstd", "mzstd", "lz4rip"],
             small_decode_codecs: vec![
@@ -527,6 +541,29 @@ fn load_small_data(cfg: &Config, codecs: &[&str]) -> BTreeMap<String, Vec<BenchR
         .collect()
 }
 
+fn load_tiny_data(cfg: &Config, codecs: &[&str]) -> BTreeMap<String, Vec<BenchRow>> {
+    let base = cache_dir(cfg).join("tiny");
+    let mut out = BTreeMap::new();
+    for entry in std::fs::read_dir(base).into_iter().flatten().flatten() {
+        let level_dir = entry.path();
+        if !level_dir.is_dir() || !entry.file_name().to_string_lossy().starts_with('L') {
+            continue;
+        }
+        for &codec in codecs {
+            load_rows_from_path(&level_dir.join(codec_file(codec)), codec, 0, None, &mut out);
+        }
+    }
+    out.into_iter()
+        .map(|(codec, rows)| {
+            let mut latest = BTreeMap::new();
+            for row in rows {
+                latest.insert((row.input.clone(), row.level), row);
+            }
+            (codec, latest.into_values().collect())
+        })
+        .collect()
+}
+
 fn load_small_decode_data(
     cfg: &Config,
     codecs: &[&str],
@@ -702,6 +739,9 @@ fn missing_cache_hint(chart_name: &str) -> String {
     match chart_name {
         "small encode" => {
             format!("Run `{BENCH} -- --small-only --impl all`.")
+        }
+        "tiny matrix" => {
+            format!("Run `{BENCH} -- --tiny --impl all --levels -7,-6,-5,-4,-3,-2,-1,1,2`.")
         }
         "small decode" => {
             format!("Run `{BENCH} -- --small-only --decode-only --levels 3`.")
@@ -1099,7 +1139,12 @@ fn draw_marker_legend_item(
     Ok(())
 }
 
-fn draw_segment_legend(area: &Area<'_>, mid_x: f64, y: f64) -> Result<(), Box<dyn Error>> {
+fn draw_segment_legend(
+    area: &Area<'_>,
+    mid_x: f64,
+    y: f64,
+    transfer_rate: f64,
+) -> Result<(), Box<dyn Error>> {
     text(
         area,
         "bright = compress + decompress",
@@ -1112,7 +1157,7 @@ fn draw_segment_legend(area: &Area<'_>, mid_x: f64, y: f64) -> Result<(), Box<dy
     )?;
     text(
         area,
-        "dim = transfer @100 MB/s",
+        format!("dim = transfer @{}", rate_label(transfer_rate)),
         px(mid_x + 30.0),
         px(y),
         9,
@@ -1181,11 +1226,20 @@ fn draw_stack(
     Ok(())
 }
 
-fn compute_pipeline(row: &BenchRow) -> (f64, f64, f64) {
+/// `100 MB/s` or `1 GB/s`.
+fn rate_label(bytes_per_sec: f64) -> String {
+    if bytes_per_sec >= 1e9 {
+        format!("{} GB/s", bytes_per_sec / 1e9)
+    } else {
+        format!("{} MB/s", bytes_per_sec / 1e6)
+    }
+}
+
+fn compute_pipeline(row: &BenchRow, transfer_rate: f64) -> (f64, f64, f64) {
     let per_gb = 1e9 / row.input_size as f64;
     (
         row.compress_ns / 1e9 * per_gb,
-        (row.compressed_size as f64 / row.input_size as f64) * (1e9 / TRANSFER_RATE),
+        (row.compressed_size as f64 / row.input_size as f64) * (1e9 / transfer_rate),
         row.decompress_ns / 1e9 * per_gb,
     )
 }
@@ -1211,7 +1265,7 @@ fn draw_summary(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
             if row.compress_ns <= 0.0 || !levels.contains(&row.level) {
                 continue;
             }
-            let (c, t, d) = compute_pipeline(&row);
+            let (c, t, d) = compute_pipeline(&row, TRANSFER_RATE);
             comp.push(c.ln());
             xfer.push(t.ln());
             decomp.push(d.ln());
@@ -1298,7 +1352,12 @@ fn draw_summary(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
     let mid = width as f64 / 2.0;
     let leg_y = p_bot + 52.0;
     draw_legend(&area, cfg, &codecs, mid - 235.0, leg_y, 2)?;
-    draw_segment_legend(&area, mid, leg_y + leg_rows as f64 * LEGEND_ROW_H + 18.0)?;
+    draw_segment_legend(
+        &area,
+        mid,
+        leg_y + leg_rows as f64 * LEGEND_ROW_H + 18.0,
+        TRANSFER_RATE,
+    )?;
     area.present()?;
     drop(area);
     finish_svg(&path, width, height)?;
@@ -1339,7 +1398,10 @@ fn draw_pipeline(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
         for row in rows {
             input_order.insert(row.input.clone());
             input_sizes.insert(row.input.clone(), row.input_size);
-            stacks.insert((row.input.clone(), codec.clone()), compute_pipeline(row));
+            stacks.insert(
+                (row.input.clone(), codec.clone()),
+                compute_pipeline(row, TRANSFER_RATE),
+            );
         }
     }
     let inputs = input_order.into_iter().collect::<Vec<_>>();
@@ -1441,6 +1503,7 @@ fn draw_pipeline(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
         &area,
         width as f64 / 2.0,
         leg_y + rows as f64 * LEGEND_ROW_H + 16.0,
+        TRANSFER_RATE,
     )?;
     area.present()?;
     drop(area);
@@ -1485,6 +1548,43 @@ fn draw_y_grid(
     Ok(())
 }
 
+/// A stacked pipeline bar chart: one panel per input group, one column per
+/// level, one bar per codec.
+struct MatrixSpec {
+    file: &'static str,
+    title: &'static str,
+    width: u32,
+    aggregate: Aggregate,
+    /// Link speed for the transfer segment, bytes per second.
+    transfer_rate: f64,
+    codecs: Vec<&'static str>,
+    levels: &'static [i32],
+    /// Cache level of the rows a codec shows in a level column, if any.
+    row_level: fn(&str, i32) -> Option<i32>,
+    groups: Vec<(String, Vec<String>)>,
+}
+
+#[derive(Clone, Copy)]
+enum Aggregate {
+    /// Total time and bytes over all inputs in a group.
+    Bytes,
+    /// Geometric mean of each input's seconds per GB, per segment, so every
+    /// input counts the same regardless of its size.
+    Geomean,
+}
+
+fn same_level(_codec: &str, level: i32) -> Option<i32> {
+    Some(level)
+}
+
+/// lz4rip has one level; it shows next to the fastest zstd level.
+fn tiny_row_level(codec: &str, level: i32) -> Option<i32> {
+    match codec {
+        "lz4rip" => (level == TINY_LEVELS[0]).then_some(LEVEL),
+        _ => Some(level),
+    }
+}
+
 fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
     let data = load_all_data(cfg, &cfg.matrix_codecs, 10_000, Some(MAIN_CORPUS));
     let main_inputs = input_names(MAIN_CORPUS);
@@ -1492,13 +1592,87 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
         &data,
         &cfg.matrix_codecs,
         &main_inputs,
-        |codec| supported_chart_levels(codec, LEVELS),
+        |codec| supported_chart_levels(codec, MATRIX_LEVELS),
         "matrix",
     )?;
-    let stacks = compute_matrix_stacks(&data, &cfg.matrix_codecs);
-    let width = 850;
+    let spec = MatrixSpec {
+        file: "matrix.svg",
+        title: "12-file Silesia: Pipeline @100 MB/s by compressibility (lower is better)",
+        width: 850,
+        aggregate: Aggregate::Bytes,
+        transfer_rate: TRANSFER_RATE,
+        codecs: cfg.matrix_codecs.clone(),
+        levels: MATRIX_LEVELS,
+        row_level: same_level,
+        groups: GROUPS
+            .iter()
+            .map(|(group, files)| ((*group).to_string(), input_names(files)))
+            .collect(),
+    };
+    draw_matrix_chart(cfg, out_dir, &data, &spec)
+}
+
+fn draw_tiny_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
+    let spec = MatrixSpec {
+        file: "tiny_matrix.svg",
+        title: "12-file Silesia, 512 B to 8 KiB slices: geomean pipeline @1 GB/s (lower is better)",
+        width: 1200,
+        aggregate: Aggregate::Geomean,
+        transfer_rate: TINY_TRANSFER_RATE,
+        codecs: cfg.tiny_codecs.clone(),
+        levels: TINY_LEVELS,
+        row_level: tiny_row_level,
+        groups: GROUPS
+            .iter()
+            .map(|(group, files)| {
+                let inputs = files
+                    .iter()
+                    .flat_map(|file| {
+                        TINY_SUFFIXES
+                            .iter()
+                            .map(move |suffix| format!("{file}{suffix}"))
+                    })
+                    .collect();
+                ((*group).to_string(), inputs)
+            })
+            .collect(),
+    };
+    let data = load_tiny_data(cfg, &spec.codecs);
+    let inputs = spec
+        .groups
+        .iter()
+        .flat_map(|(_, inputs)| inputs.iter().cloned())
+        .collect::<Vec<_>>();
+    require_named_rows(
+        &data,
+        &spec.codecs,
+        &inputs,
+        |codec| {
+            let supported = supported_encode_levels(codec);
+            let mut levels = TINY_LEVELS
+                .iter()
+                .filter_map(|level| tiny_row_level(codec, *level))
+                .filter(|level| supported.contains(level))
+                .collect::<Vec<_>>();
+            levels.sort_unstable();
+            levels.dedup();
+            levels
+        },
+        "tiny matrix",
+    )?;
+    draw_matrix_chart(cfg, out_dir, &data, &spec)
+}
+
+fn draw_matrix_chart(
+    cfg: &Config,
+    out_dir: &Path,
+    data: &BTreeMap<String, Vec<BenchRow>>,
+    spec: &MatrixSpec,
+) -> Result<(), Box<dyn Error>> {
+    let stacks = compute_matrix_stacks(data, spec);
+    let width = spec.width;
     let x_left = 70.0;
-    let x_right = 830.0;
+    let x_right = f64::from(width) - 20.0;
     let plot_w = x_right - x_left;
     let top = if cfg.hw_label.is_some() { 62.0 } else { 43.0 };
     let panel_h = 200.0;
@@ -1506,36 +1680,33 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
     let label_h = 22.0;
     let mut panel_tops = Vec::new();
     let mut y = top;
-    for _ in GROUPS {
+    for _ in &spec.groups {
         y += label_h;
         panel_tops.push(y);
         y += panel_h + panel_gap;
     }
     let height = (y - panel_gap + 130.0) as u32;
-    let path = output_path(out_dir, "matrix.svg");
+    let plots_top = panel_tops[0];
+    let plots_bot = panel_tops[panel_tops.len() - 1] + panel_h;
+    let path = output_path(out_dir, spec.file);
     let area = root(&path, width, height)?;
-    chart_header(
-        &area,
-        width,
-        "12-file Silesia: Pipeline @100 MB/s by compressibility (lower is better)",
-        cfg.hw_label.as_deref(),
-        22,
-    )?;
+    chart_header(&area, width, spec.title, cfg.hw_label.as_deref(), 22)?;
     vtext(
         &area,
         "seconds / GB",
         22,
-        px((panel_tops[0] + panel_tops[2] + panel_h) / 2.0),
+        px((plots_top + plots_bot) / 2.0),
         11,
         TEXT,
     )?;
 
-    for (pi, (group, _)) in GROUPS.iter().enumerate() {
+    for (pi, (group, _)) in spec.groups.iter().enumerate() {
+        let key = |codec: &str, level: i32| (codec.to_string(), level, group.clone());
         let p_top = panel_tops[pi];
         let p_bot = p_top + panel_h;
         text(
             &area,
-            *group,
+            group.as_str(),
             px((x_left + x_right) / 2.0),
             px(p_top - 10.0),
             12,
@@ -1544,11 +1715,9 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
             true,
         )?;
         let mut y_max: f64 = 0.0;
-        for level in LEVELS {
-            for codec in &cfg.matrix_codecs {
-                if let Some((a, b, c)) =
-                    stacks.get(&((*codec).to_string(), *level, (*group).to_string()))
-                {
+        for level in spec.levels {
+            for codec in &spec.codecs {
+                if let Some((a, b, c)) = stacks.get(&key(codec, *level)) {
                     y_max = y_max.max(a + b + c);
                 }
             }
@@ -1559,16 +1728,14 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
         }
         draw_y_grid(&area, x_left, x_right, p_top, p_bot, y_max, true)?;
 
-        let col_w = plot_w / COLUMN_LEVELS.len() as f64;
-        let max_codecs = COLUMN_LEVELS
+        let col_w = plot_w / spec.levels.len() as f64;
+        let max_codecs = spec
+            .levels
             .iter()
             .map(|level| {
-                cfg.matrix_codecs
+                spec.codecs
                     .iter()
-                    .copied()
-                    .filter(|codec| {
-                        stacks.contains_key(&((*codec).to_string(), *level, (*group).to_string()))
-                    })
+                    .filter(|codec| stacks.contains_key(&key(codec, *level)))
                     .count()
             })
             .max()
@@ -1580,19 +1747,16 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
         let bar_w = ((col_w * 0.7 - inner_gap * (max_codecs - 1) as f64) / max_codecs as f64)
             .min(50.0)
             .floor();
-        for (li, level) in COLUMN_LEVELS.iter().enumerate() {
+        for (li, level) in spec.levels.iter().enumerate() {
             let col_x = (x_left + li as f64 * col_w + (col_w * 0.2) / 2.0).round();
-            let codecs = cfg
-                .matrix_codecs
+            let codecs = spec
+                .codecs
                 .iter()
                 .copied()
-                .filter(|codec| {
-                    stacks.contains_key(&((*codec).to_string(), *level, (*group).to_string()))
-                })
+                .filter(|codec| stacks.contains_key(&key(codec, *level)))
                 .collect::<Vec<_>>();
             for (ci, codec) in codecs.iter().enumerate() {
-                let Some(parts) = stacks.get(&((*codec).to_string(), *level, (*group).to_string()))
-                else {
+                let Some(parts) = stacks.get(&key(codec, *level)) else {
                     continue;
                 };
                 let Some(style) = cfg.style(codec) else {
@@ -1609,15 +1773,9 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
                     style,
                 )?;
             }
-            let label = match *level {
-                -1 => "Level -1",
-                1 => "Level 1",
-                3 => "Level 3",
-                _ => "",
-            };
             text(
                 &area,
-                label,
+                format!("Level {level}"),
                 px(x_left + li as f64 * col_w + col_w / 2.0),
                 px(p_bot + 18.0),
                 11,
@@ -1627,20 +1785,21 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
             )?;
         }
     }
-    let leg_y = panel_tops[2] + panel_h + 48.0;
+    let leg_y = plots_bot + 48.0;
     draw_legend(
         &area,
         cfg,
-        &cfg.matrix_codecs,
+        &spec.codecs,
         width as f64 / 2.0 - 235.0,
         leg_y,
         2,
     )?;
-    let rows = cfg.matrix_codecs.len().div_ceil(2);
+    let rows = spec.codecs.len().div_ceil(2);
     draw_segment_legend(
         &area,
         width as f64 / 2.0,
         leg_y + rows as f64 * LEGEND_ROW_H + 16.0,
+        spec.transfer_rate,
     )?;
     area.present()?;
     drop(area);
@@ -1651,40 +1810,54 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
 
 fn compute_matrix_stacks(
     data: &BTreeMap<String, Vec<BenchRow>>,
-    codecs: &[&str],
+    spec: &MatrixSpec,
 ) -> BTreeMap<(String, i32, String), (f64, f64, f64)> {
     let mut out = BTreeMap::new();
-    for codec in codecs {
-        let rows = data.get(*codec).cloned().unwrap_or_default();
-        for level in LEVELS {
-            for (group, files) in GROUPS {
-                let mut total_input = 0usize;
-                let mut total_compressed = 0usize;
-                let mut total_comp = 0.0;
-                let mut total_decomp = 0.0;
-                for row in rows
+    for codec in &spec.codecs {
+        let Some(rows) = data.get(*codec) else {
+            continue;
+        };
+        for level in spec.levels {
+            let Some(row_level) = (spec.row_level)(codec, *level) else {
+                continue;
+            };
+            for (group, inputs) in &spec.groups {
+                let rows = rows
                     .iter()
-                    .filter(|r| r.level == *level && files.contains(&r.input.as_str()))
-                {
-                    if row.compress_ns <= 0.0 {
-                        continue;
-                    }
-                    total_input += row.input_size;
-                    total_compressed += row.compressed_size;
-                    total_comp += row.compress_ns;
-                    total_decomp += row.decompress_ns;
+                    .filter(|r| r.level == row_level && r.compress_ns > 0.0)
+                    .filter(|r| inputs.contains(&r.input))
+                    .collect::<Vec<_>>();
+                if rows.is_empty() {
+                    continue;
                 }
-                if total_input > 0 {
-                    let per_gb = 1e9 / total_input as f64;
-                    out.insert(
-                        ((*codec).to_string(), *level, (*group).to_string()),
+                let parts = match spec.aggregate {
+                    Aggregate::Bytes => {
+                        let total_input = rows.iter().map(|r| r.input_size).sum::<usize>();
+                        let total_compressed =
+                            rows.iter().map(|r| r.compressed_size).sum::<usize>();
+                        let total_comp = rows.iter().map(|r| r.compress_ns).sum::<f64>();
+                        let total_decomp = rows.iter().map(|r| r.decompress_ns).sum::<f64>();
+                        let per_gb = 1e9 / total_input as f64;
                         (
                             total_comp / 1e9 * per_gb,
-                            total_compressed as f64 / total_input as f64 * (1e9 / TRANSFER_RATE),
+                            total_compressed as f64 / total_input as f64
+                                * (1e9 / spec.transfer_rate),
                             total_decomp / 1e9 * per_gb,
-                        ),
-                    );
-                }
+                        )
+                    }
+                    Aggregate::Geomean => {
+                        let parts = rows
+                            .iter()
+                            .map(|r| compute_pipeline(r, spec.transfer_rate))
+                            .collect::<Vec<_>>();
+                        let gm = |f: fn(&(f64, f64, f64)) -> f64| {
+                            let logs = parts.iter().map(|p| f(p).ln()).sum::<f64>();
+                            (logs / parts.len() as f64).exp()
+                        };
+                        (gm(|p| p.0), gm(|p| p.1), gm(|p| p.2))
+                    }
+                };
+                out.insert(((*codec).to_string(), *level, group.clone()), parts);
             }
         }
     }

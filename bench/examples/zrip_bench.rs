@@ -37,7 +37,8 @@ struct BenchInput {
     data: Vec<u8>,
     slice_len: usize,
     sha256: String,
-    is_small: bool,
+    /// Cache subdirectory: `small`, `tiny`, or none for full files.
+    scope: Option<&'static str>,
     dict_source: String,
     dict_entry: Option<&'static CorpusEntry>,
 }
@@ -203,6 +204,28 @@ const SMALL_SIZES: &[SmallSize] = &[
     },
 ];
 
+/// Tiny inputs take this many slices of each small size up to
+/// `TINY_MAX_BYTES`, from anywhere in every corpus file.
+const TINY_SLICES: usize = 64;
+const TINY_MAX_BYTES: usize = 8192;
+
+/// Random slice offsets for a tiny input. splitmix64, seeded from the input
+/// name, so every run picks the same slices.
+fn tiny_offsets(name: &str, file_len: usize, slice_len: usize) -> Vec<usize> {
+    let digest = Sha256::digest(name.as_bytes());
+    let mut state = u64::from_le_bytes(digest[..8].try_into().unwrap());
+    let span = (file_len - slice_len + 1) as u64;
+    (0..TINY_SLICES)
+        .map(|_| {
+            state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            ((z ^ (z >> 31)) % span) as usize
+        })
+        .collect()
+}
+
 fn cpu_nanos() -> u64 {
     let mut ts = libc::timespec {
         tv_sec: 0,
@@ -325,6 +348,8 @@ fn bench_slices(
 
 fn bench_zrip(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> BenchResult {
     let mut ctx = zrip::CompressContext::new(level).unwrap();
+    // C zstd writes no content checksum by default; match it.
+    ctx.set_content_checksum(false);
     let mut dec_ctx = zrip::DecompressContext::new();
     bench_slices(
         ZRIP_CODEC,
@@ -457,6 +482,7 @@ fn bench_zrip_dict(
     let dict = zrip::dict::Dictionary::from_bytes(dict_bytes).unwrap();
     let mut ctx =
         zrip::CompressContext::with_dict_for_size(level, dict.clone(), slices[0].len()).unwrap();
+    ctx.set_content_checksum(false);
     bench_slices(
         "zrip+dict",
         slices,
@@ -497,7 +523,7 @@ fn bench_c_zstd_dict(
 
 /// Times `codec` decoding every frame of `frames` (C zstd's output for
 /// `slices`) per pass, after checking each decodes to its slice's length.
-/// The frames carry content checksums, which the decoders verify.
+/// C zstd writes no content checksums by default, so none are verified.
 fn bench_decode_only(
     codec: &str,
     frames: &[Vec<u8>],
@@ -693,12 +719,40 @@ fn small_input_matches_filter(prefix: &str, size_label: &str, file_filter: &[Str
 
 fn load_benchmark_inputs(
     small_only: bool,
+    tiny: bool,
     file_filter: &[String],
     extra_files: &[String],
 ) -> Result<Vec<BenchInput>, String> {
     let mut inputs = Vec::new();
 
-    if small_only {
+    if tiny {
+        for entry in BASE_CORPUS {
+            if !small_source_matches_filter(entry.label, file_filter) {
+                continue;
+            }
+            let (base, _) = load_corpus_entry(entry)?;
+            for size in SMALL_SIZES.iter().filter(|s| s.bytes <= TINY_MAX_BYTES) {
+                if !small_input_matches_filter(entry.label, size.label, file_filter) {
+                    continue;
+                }
+                let name = format!("{}_{}", entry.label, size.label);
+                let mut data = Vec::with_capacity(TINY_SLICES * size.bytes);
+                for offset in tiny_offsets(&name, base.len(), size.bytes) {
+                    data.extend_from_slice(&base[offset..offset + size.bytes]);
+                }
+                let sha256 = sha256_hex(&data);
+                inputs.push(BenchInput {
+                    name,
+                    data,
+                    slice_len: size.bytes,
+                    sha256,
+                    scope: Some("tiny"),
+                    dict_source: entry.label.to_string(),
+                    dict_entry: Some(entry),
+                });
+            }
+        }
+    } else if small_only {
         for source in SMALL_SOURCES {
             if !small_source_matches_filter(source.prefix, file_filter) {
                 continue;
@@ -728,7 +782,7 @@ fn load_benchmark_inputs(
                     data,
                     slice_len: size.bytes,
                     sha256,
-                    is_small: true,
+                    scope: Some("small"),
                     dict_source: source.prefix.to_string(),
                     dict_entry: Some(entry),
                 });
@@ -745,7 +799,7 @@ fn load_benchmark_inputs(
                 slice_len: data.len(),
                 data,
                 sha256,
-                is_small: false,
+                scope: None,
                 dict_source: dict_source_name(entry.label),
                 dict_entry: Some(entry),
             });
@@ -767,7 +821,7 @@ fn load_benchmark_inputs(
             slice_len: data.len(),
             data,
             sha256,
-            is_small: false,
+            scope: None,
             dict_entry: None,
         });
     }
@@ -788,10 +842,10 @@ fn cache_dir() -> PathBuf {
     dir
 }
 
-fn level_cache_dir_inner(level: i32, small: bool, decode_only: bool) -> PathBuf {
+fn level_cache_dir_inner(level: i32, scope: Option<&str>, decode_only: bool) -> PathBuf {
     let mut dir = cache_dir();
-    if small {
-        dir = dir.join("small");
+    if let Some(scope) = scope {
+        dir = dir.join(scope);
     }
     if decode_only {
         dir = dir.join("decode_cmp");
@@ -801,23 +855,23 @@ fn level_cache_dir_inner(level: i32, small: bool, decode_only: bool) -> PathBuf 
     dir
 }
 
-fn level_codec_cache_path(level: i32, codec: &str, small: bool) -> PathBuf {
-    level_cache_dir_inner(level, small, false).join(format!("{}.jsonl", codec.replace(' ', "_")))
+fn level_codec_cache_path(level: i32, codec: &str, scope: Option<&str>) -> PathBuf {
+    level_cache_dir_inner(level, scope, false).join(format!("{}.jsonl", codec.replace(' ', "_")))
 }
 
-fn level_codec_cache_path_decode(level: i32, codec: &str, small: bool) -> PathBuf {
-    level_cache_dir_inner(level, small, true).join(format!("{}.jsonl", codec.replace(' ', "_")))
+fn level_codec_cache_path_decode(level: i32, codec: &str, scope: Option<&str>) -> PathBuf {
+    level_cache_dir_inner(level, scope, true).join(format!("{}.jsonl", codec.replace(' ', "_")))
 }
 
-fn write_cache(results: &[BenchResult], small: bool) {
-    write_cache_inner(results, small, false);
+fn write_cache(results: &[BenchResult], scope: Option<&str>) {
+    write_cache_inner(results, scope, false);
 }
 
-fn write_cache_decode(results: &[BenchResult], small: bool) {
-    write_cache_inner(results, small, true);
+fn write_cache_decode(results: &[BenchResult], scope: Option<&str>) {
+    write_cache_inner(results, scope, true);
 }
 
-fn write_cache_inner(results: &[BenchResult], small: bool, decode_only: bool) {
+fn write_cache_inner(results: &[BenchResult], scope: Option<&str>, decode_only: bool) {
     let mut keys: Vec<(i32, &str)> = results
         .iter()
         .map(|r| (r.level, r.codec.as_str()))
@@ -827,9 +881,9 @@ fn write_cache_inner(results: &[BenchResult], small: bool, decode_only: bool) {
 
     for (level, codec) in &keys {
         let path = if decode_only {
-            level_codec_cache_path_decode(*level, codec, small)
+            level_codec_cache_path_decode(*level, codec, scope)
         } else {
-            level_codec_cache_path(*level, codec, small)
+            level_codec_cache_path(*level, codec, scope)
         };
         let entries: Vec<_> = results
             .iter()
@@ -888,7 +942,7 @@ fn migrate_flat_cache() {
 
         let mut total = 0;
         for (level, lines) in &by_level {
-            let dest = level_codec_cache_path(*level, codec_name, false);
+            let dest = level_codec_cache_path(*level, codec_name, None);
             let mut f = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -976,15 +1030,14 @@ fn print_live_line(file: &str, level: i32, results: &[&BenchResult]) {
 }
 
 fn load_cached_keys(
-    small: bool,
+    scope: Option<&str>,
     decode_only: bool,
 ) -> HashSet<(String, i32, String, Option<String>)> {
     let mut keys = HashSet::new();
-    let mut base = if small {
-        cache_dir().join("small")
-    } else {
-        cache_dir()
-    };
+    let mut base = cache_dir();
+    if let Some(scope) = scope {
+        base = base.join(scope);
+    }
     if decode_only {
         base = base.join("decode_cmp");
     }
@@ -1055,6 +1108,7 @@ Options:
   --levels <list>     Comma-separated levels, e.g. -7,1,3
   --extra <path>      Add an extra input file
   --small-only        Run the small-file corpus
+  --tiny              Run 64 random 512 B to 8 KiB slices of every corpus file
   --dict              Run dictionary benchmarks
   --decode-only       Run decode-only benchmark set
   --reuse             Reuse cached results when available
@@ -1073,6 +1127,7 @@ fn main() {
     let mut level_filter: Vec<i32> = Vec::new();
     let mut extra_files: Vec<String> = Vec::new();
     let mut small_only = false;
+    let mut tiny = false;
     let mut dict_mode = false;
     let mut decode_only = false;
     let mut reuse_cached = false;
@@ -1121,6 +1176,7 @@ fn main() {
                 extra_files.push(args[i].clone());
             }
             "--small-only" => small_only = true,
+            "--tiny" => tiny = true,
             "--dict" => dict_mode = true,
             "--decode-only" => decode_only = true,
             "--reuse" => reuse_cached = true,
@@ -1134,7 +1190,19 @@ fn main() {
         i += 1;
     }
 
-    let all_inputs = match load_benchmark_inputs(small_only, &file_filter, &extra_files) {
+    if tiny && (small_only || dict_mode) {
+        eprintln!("--tiny does not combine with --small-only or --dict");
+        std::process::exit(2);
+    }
+    let scope = if tiny {
+        Some("tiny")
+    } else if small_only {
+        Some("small")
+    } else {
+        None
+    };
+
+    let all_inputs = match load_benchmark_inputs(small_only, tiny, &file_filter, &extra_files) {
         Ok(inputs) => inputs,
         Err(e) => {
             eprintln!("corpus setup failed: {e}");
@@ -1145,7 +1213,7 @@ fn main() {
     migrate_flat_cache();
 
     let cached_keys = if reuse_cached {
-        let keys = load_cached_keys(small_only, decode_only);
+        let keys = load_cached_keys(scope, decode_only);
         if !keys.is_empty() {
             eprintln!(
                 "--reuse: {} cached results loaded, will skip those",
@@ -1203,8 +1271,7 @@ fn main() {
 
     let target_ns = 20_000_000u64;
 
-    let mut results: Vec<BenchResult> = Vec::new();
-    let mut results_small: Vec<BenchResult> = Vec::new();
+    let mut results: HashMap<Option<&'static str>, Vec<BenchResult>> = HashMap::new();
 
     // Pre-train dicts per source file (keyed by base name before _4k/_16k/etc.)
     let mut dicts: HashMap<String, Vec<u8>> = HashMap::new();
@@ -1319,21 +1386,17 @@ fn main() {
             if !level_batch.is_empty() {
                 let refs: Vec<&BenchResult> = level_batch.iter().collect();
                 print_live_line(name, level, &refs);
-                if input.is_small {
-                    results_small.extend(level_batch);
-                } else {
-                    results.extend(level_batch);
-                }
+                results.entry(input.scope).or_default().extend(level_batch);
             }
         }
     }
 
-    if decode_only {
-        write_cache_decode(&results, false);
-        write_cache_decode(&results_small, true);
-    } else {
-        write_cache(&results, false);
-        write_cache(&results_small, true);
+    for (scope, results) in &results {
+        if decode_only {
+            write_cache_decode(results, *scope);
+        } else {
+            write_cache(results, *scope);
+        }
     }
 }
 

@@ -185,6 +185,9 @@ Options: `--impl zrip|"C zstd"|all`, `--levels -7,1,3`,
 The benchmark harness prepares its own ignored corpus under `bench/corpus/`.
 It downloads the 12 pinned Silesia inputs. `--small-only` slices the first bytes
 from the base corpus in memory; no small corpus files need to be generated.
+`--tiny` takes 64 slices of 512 B to 8 KiB from random offsets in every
+Silesia file. The offsets are seeded by the input name, so every run picks the
+same slices. Rows go to `~/.cache/zrip/<arch>/tiny/`.
 
 Results cache under `~/.cache/zrip/` is append-only benchmark history. Do not
 delete, truncate, or rewrite cache files when re-benchmarking after code
@@ -269,6 +272,7 @@ Rust chart generation lives in the `bench` crate and reads
 | `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- pipeline` | `pipeline.svg` | Encode+decode pipeline throughput |
 | `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- small-encode` | `small_encode.svg` | Encode speed vs input size |
 | `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- small-decode` | `small_decode.svg` | Small decode comparison |
+| `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- tiny-matrix` | `tiny_matrix.svg` | Geomean pipeline stacks for random 512 B to 8 KiB Silesia slices, Fast levels |
 
 Chart refresh means benchmark first, appending new rows to the cache, then run
 the chart tool. Re-running the chart tool against old cache data only replots;
@@ -331,6 +335,19 @@ cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- small-encode \
   doc/charts/x86_64/
 ```
 
+`tiny_matrix.svg` stacks the pipeline for the `--tiny` slices by
+compressibility at every Fast strategy level, -7 through 2. Each segment is
+the geometric mean over all slice inputs in a group, so every size counts the
+same. The transfer segment assumes a 1 GB/s link instead of 100 MB/s, since
+tiny frames take only microseconds to compress. lz4rip has one level and shows
+next to level -7:
+
+```bash
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --tiny --levels -7,-6,-5,-4,-3,-2,-1,1,2
+cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- tiny-matrix
+```
+
 ### All-implementation benchmark + chart workflow
 
 Use this only when refreshing all baselines, validating a benchmark harness
@@ -343,6 +360,8 @@ cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
   --small-only --impl all
 cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
   --small-only --decode-only --levels 3
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --tiny --impl all --levels -7,-6,-5,-4,-3,-2,-1,1,2
 export ZRIP_HW_EXTRAS="performance governor,turbo off"
 cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- all
 ```

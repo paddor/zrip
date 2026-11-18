@@ -145,6 +145,12 @@ const ALGO_TIME: [[(u32, u32); 2]; 16] = [
     [(1412, 185), (1695, 202)],
 ];
 
+/// Fewest literals the two-symbol decoder takes. Its 2048-entry table and
+/// the single-symbol stream ends cost more than pairs save on shorter
+/// sections: on Silesia text slices, pairs decode 10% slower at 14 KiB of
+/// literals, 2.5% slower at 20 KiB, and 2% faster at 26 KiB.
+const PAIR_MIN_LITERALS: usize = 24 * 1024;
+
 /// Whether the two-symbol decoder is expected to be faster for `literals`
 /// symbols in `compressed` bytes.
 ///
@@ -152,9 +158,10 @@ const ALGO_TIME: [[(u32, u32); 2]; 16] = [
 /// of at most five bits per symbol: with longer codes few pairs fit in an
 /// 11-bit lookup, and the single-symbol loop is faster (measured on the
 /// Silesia corpus at level 1, where text gains up to 6% and high-entropy
-/// literals lose up to 20% without this limit).
+/// literals lose up to 20% without this limit), and only for sections of at
+/// least [`PAIR_MIN_LITERALS`].
 pub fn prefers_pairs(literals: usize, compressed: usize) -> bool {
-    if compressed * 8 > literals * 5 {
+    if literals < PAIR_MIN_LITERALS || compressed * 8 > literals * 5 {
         return false;
     }
     let bucket = if compressed >= literals {
@@ -566,6 +573,8 @@ mod tests {
         assert!(prefers_pairs(100_000, 30_000));
         assert!(!prefers_pairs(100, 99));
         assert!(!prefers_pairs(1_000, 2_000));
+        // Well compressed, but too short to repay the pair table.
+        assert!(!prefers_pairs(8_000, 2_400));
     }
 
     #[test]

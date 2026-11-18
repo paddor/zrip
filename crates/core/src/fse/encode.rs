@@ -31,78 +31,97 @@ impl FseEncodeTable {
             distribution.len()
         ];
         let mut state_table = vec![0u16; table_size];
-
-        let step = (table_size >> 1) + (table_size >> 3) + 3;
-        let mask = table_size - 1;
-
-        let mut high_threshold = table_size - 1;
-        let mut position = 0;
+        let mut spread = vec![0u16; table_size];
         let mut cumul = vec![0u32; distribution.len() + 1];
-
-        for (s, &prob) in distribution.iter().enumerate() {
-            if prob == -1 {
-                state_table[high_threshold] = s as u16;
-                high_threshold -= 1;
-                cumul[s + 1] = cumul[s] + 1;
-            } else {
-                cumul[s + 1] = cumul[s] + prob.max(0) as u32;
-            }
-        }
-
-        for (s, &prob) in distribution.iter().enumerate() {
-            if prob <= 0 {
-                continue;
-            }
-            for _ in 0..prob {
-                state_table[position] = s as u16;
-                position = (position + step) & mask;
-                while position > high_threshold {
-                    position = (position + step) & mask;
-                }
-            }
-        }
-
-        let mut next_state_number = vec![0u32; distribution.len()];
-        for s in 0..distribution.len() {
-            let prob = distribution[s];
-            // A "less than one" probability (-1) owns one state, exactly like
-            // probability 1 (C zstd's FSE_buildCTable).
-            if prob == 0 {
-                symbol_tt[s].delta_nb_bits =
-                    ((accuracy_log as u32 + 1) << 16).wrapping_sub(1 << accuracy_log);
-                symbol_tt[s].delta_find_state = 0;
-                next_state_number[s] = cumul[s];
-            } else if prob == 1 || prob == -1 {
-                let max_bits_out = accuracy_log as u32;
-                let min_state_plus = 1u32 << accuracy_log;
-                symbol_tt[s].delta_nb_bits = (max_bits_out << 16).wrapping_sub(min_state_plus);
-                symbol_tt[s].delta_find_state = cumul[s] as i32 - 1;
-                next_state_number[s] = cumul[s];
-            } else {
-                let prob = prob as u32;
-                let max_bits_out = accuracy_log as u32 - high_bit(prob - 1);
-                let min_state_plus = prob << max_bits_out;
-                symbol_tt[s].delta_nb_bits = (max_bits_out << 16).wrapping_sub(min_state_plus);
-                symbol_tt[s].delta_find_state = (cumul[s] as i32) - (prob as i32);
-                next_state_number[s] = cumul[s];
-            }
-        }
-
-        // State table stores values in [table_size, 2*table_size),
-        // matching C zstd's FSE_buildCTable convention.
-        let mut table_symbol_sorted = vec![0u16; table_size];
-        for (i, &st) in state_table.iter().enumerate().take(table_size) {
-            let s = st as usize;
-            let ns = next_state_number[s];
-            table_symbol_sorted[ns as usize] = (table_size + i) as u16;
-            next_state_number[s] += 1;
-        }
-
+        build_encode_table(
+            distribution,
+            accuracy_log,
+            &mut symbol_tt,
+            &mut state_table,
+            &mut spread,
+            &mut cumul,
+        );
         Self {
             symbol_tt,
-            state_table: table_symbol_sorted,
+            state_table,
             accuracy_log,
         }
+    }
+}
+
+/// Builds an encode table for `distribution` into caller storage, as C
+/// zstd's `FSE_buildCTable` does: `symbol_tt` takes one transform per
+/// symbol, and `state_table` and the scratch `spread` take
+/// `1 << accuracy_log` entries each. `cumul` takes `distribution.len() + 1`.
+pub fn build_encode_table(
+    distribution: &[i16],
+    accuracy_log: u8,
+    symbol_tt: &mut [SymbolTransform],
+    state_table: &mut [u16],
+    spread: &mut [u16],
+    cumul: &mut [u32],
+) {
+    let table_size = 1usize << accuracy_log;
+    let step = (table_size >> 1) + (table_size >> 3) + 3;
+    let mask = table_size - 1;
+
+    let mut high_threshold = table_size - 1;
+    let mut position = 0;
+    cumul[0] = 0;
+    for (s, &prob) in distribution.iter().enumerate() {
+        if prob == -1 {
+            spread[high_threshold] = s as u16;
+            high_threshold -= 1;
+            cumul[s + 1] = cumul[s] + 1;
+        } else {
+            cumul[s + 1] = cumul[s] + prob.max(0) as u32;
+        }
+    }
+
+    for (s, &prob) in distribution.iter().enumerate() {
+        if prob <= 0 {
+            continue;
+        }
+        for _ in 0..prob {
+            spread[position] = s as u16;
+            position = (position + step) & mask;
+            while position > high_threshold {
+                position = (position + step) & mask;
+            }
+        }
+    }
+
+    for (s, &prob) in distribution.iter().enumerate() {
+        // A "less than one" probability (-1) owns one state, exactly like
+        // probability 1 (C zstd's FSE_buildCTable).
+        symbol_tt[s] = if prob == 0 {
+            SymbolTransform {
+                delta_nb_bits: ((accuracy_log as u32 + 1) << 16).wrapping_sub(1 << accuracy_log),
+                delta_find_state: 0,
+            }
+        } else if prob == 1 || prob == -1 {
+            SymbolTransform {
+                delta_nb_bits: ((accuracy_log as u32) << 16).wrapping_sub(1 << accuracy_log),
+                delta_find_state: cumul[s] as i32 - 1,
+            }
+        } else {
+            let prob = prob as u32;
+            let max_bits_out = accuracy_log as u32 - high_bit(prob - 1);
+            let min_state_plus = prob << max_bits_out;
+            SymbolTransform {
+                delta_nb_bits: (max_bits_out << 16).wrapping_sub(min_state_plus),
+                delta_find_state: (cumul[s] as i32) - (prob as i32),
+            }
+        };
+    }
+
+    // State table stores values in [table_size, 2*table_size), matching C
+    // zstd's FSE_buildCTable convention. `cumul` now counts each symbol's
+    // next state number.
+    for (i, &st) in spread[..table_size].iter().enumerate() {
+        let next = &mut cumul[st as usize];
+        state_table[*next as usize] = (table_size + i) as u16;
+        *next += 1;
     }
 }
 

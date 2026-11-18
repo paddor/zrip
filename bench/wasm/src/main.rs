@@ -67,7 +67,14 @@ fn main() {
                 &raw,
                 level,
                 json_output,
-                |data, lvl| zrip::compress(data, lvl).expect("zrip compress failed"),
+                |data, lvl| {
+                    // C zstd writes no content checksum by default; match it.
+                    let mut ctx = zrip::CompressContext::new(lvl).expect("zrip level");
+                    ctx.set_content_checksum(false);
+                    ctx.compress(data)
+                        .expect("zrip compress failed")
+                        .into_owned()
+                },
                 |compressed| zrip::decompress(compressed).expect("zrip decompress failed"),
             );
         }
