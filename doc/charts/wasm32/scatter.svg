@@ -91,54 +91,54 @@ L1
 L3
 </text>
 <circle cx="346" cy="86" r="3" opacity="1" fill="#60A5FA" stroke="none" stroke-width="1"/>
-<polyline fill="none" opacity="1" stroke="#F87171" stroke-width="1" points="404,222 383,200 379,165 374,155 366,146 365,130 362,117 359,103 353,97 342,91 338,82 "/>
-<circle cx="404" cy="222" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<text x="410" y="222" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
+<polyline fill="none" opacity="1" stroke="#F87171" stroke-width="1" points="405,222 384,200 381,165 373,155 365,146 364,130 360,117 360,103 357,97 347,91 348,82 "/>
+<circle cx="405" cy="222" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<text x="411" y="222" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
 L-7
 </text>
-<circle cx="383" cy="200" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="379" cy="165" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="374" cy="155" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="366" cy="146" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="365" cy="130" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="362" cy="117" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<text x="368" y="117" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
+<circle cx="384" cy="200" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="381" cy="165" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="373" cy="155" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="365" cy="146" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="364" cy="130" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="360" cy="117" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<text x="366" y="117" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
 L-1
 </text>
-<circle cx="359" cy="103" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<text x="365" y="103" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
+<circle cx="360" cy="103" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<text x="366" y="103" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
 L1
 </text>
-<circle cx="353" cy="97" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="342" cy="91" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<text x="348" y="91" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
+<circle cx="357" cy="97" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="347" cy="91" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<text x="353" y="91" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
 L3
 </text>
-<circle cx="338" cy="82" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<polyline fill="none" opacity="1" stroke="#F59E0B" stroke-width="1" points="352,259 347,248 342,237 340,221 336,201 333,181 327,166 327,107 312,101 259,85 259,84 "/>
-<circle cx="352" cy="259" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<text x="358" y="259" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
+<circle cx="348" cy="82" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<polyline fill="none" opacity="1" stroke="#F59E0B" stroke-width="1" points="413,259 407,248 403,237 399,221 396,201 391,181 385,166 385,108 371,101 351,85 350,84 "/>
+<circle cx="413" cy="259" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<text x="419" y="259" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
 L-7
 </text>
-<circle cx="347" cy="248" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="342" cy="237" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="340" cy="221" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="336" cy="201" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="333" cy="181" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="327" cy="166" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<text x="333" y="166" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
+<circle cx="407" cy="248" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="403" cy="237" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="399" cy="221" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="396" cy="201" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="391" cy="181" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="385" cy="166" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<text x="391" y="166" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
 L-1
 </text>
-<circle cx="327" cy="107" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<text x="333" y="107" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
+<circle cx="385" cy="108" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<text x="391" y="108" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
 L1
 </text>
-<circle cx="312" cy="101" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="259" cy="85" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<text x="265" y="85" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
+<circle cx="371" cy="101" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="351" cy="85" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<text x="357" y="85" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
 L3
 </text>
-<circle cx="259" cy="84" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="350" cy="84" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
 <text x="450" y="350" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
 encode MB/s (log)
 </text>
@@ -219,54 +219,54 @@ L1
 L3
 </text>
 <circle cx="228" cy="448" r="3" opacity="1" fill="#60A5FA" stroke="none" stroke-width="1"/>
-<polyline fill="none" opacity="1" stroke="#F87171" stroke-width="1" points="382,627 355,578 338,563 324,548 302,524 297,517 290,509 272,488 259,478 241,472 222,450 "/>
-<circle cx="382" cy="627" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<text x="388" y="627" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
+<polyline fill="none" opacity="1" stroke="#F87171" stroke-width="1" points="383,627 357,578 339,563 323,548 303,524 298,517 291,509 277,488 266,478 248,472 232,450 "/>
+<circle cx="383" cy="627" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<text x="389" y="627" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
 L-7
 </text>
-<circle cx="355" cy="578" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="338" cy="563" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="324" cy="548" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="302" cy="524" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="297" cy="517" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="290" cy="509" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<text x="296" y="509" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
+<circle cx="357" cy="578" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="339" cy="563" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="323" cy="548" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="303" cy="524" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="298" cy="517" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="291" cy="509" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<text x="297" y="509" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
 L-1
 </text>
-<circle cx="272" cy="488" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<text x="278" y="488" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
+<circle cx="277" cy="488" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<text x="283" y="488" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
 L1
 </text>
-<circle cx="259" cy="478" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="241" cy="472" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<text x="247" y="472" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
+<circle cx="266" cy="478" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="248" cy="472" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<text x="254" y="472" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
 L3
 </text>
-<circle cx="222" cy="450" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<polyline fill="none" opacity="1" stroke="#F59E0B" stroke-width="1" points="308,606 304,602 298,594 291,585 280,575 275,564 264,553 243,492 220,468 151,454 148,447 "/>
-<circle cx="308" cy="606" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<text x="314" y="606" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
+<circle cx="232" cy="450" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<polyline fill="none" opacity="1" stroke="#F59E0B" stroke-width="1" points="359,606 354,602 348,594 341,585 334,575 326,564 314,553 307,492 280,468 244,453 244,446 "/>
+<circle cx="359" cy="606" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<text x="365" y="606" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
 L-7
 </text>
-<circle cx="304" cy="602" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="298" cy="594" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="291" cy="585" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="280" cy="575" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="275" cy="564" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="264" cy="553" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<text x="270" y="553" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
+<circle cx="354" cy="602" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="348" cy="594" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="341" cy="585" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="334" cy="575" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="326" cy="564" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="314" cy="553" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<text x="320" y="553" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
 L-1
 </text>
-<circle cx="243" cy="492" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<text x="249" y="492" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
+<circle cx="307" cy="492" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<text x="313" y="492" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
 L1
 </text>
-<circle cx="220" cy="468" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="151" cy="454" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<text x="157" y="454" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
+<circle cx="280" cy="468" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="244" cy="453" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<text x="250" y="453" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
 L3
 </text>
-<circle cx="148" cy="447" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="244" cy="446" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
 <text x="450" y="685" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
 encode MB/s (log)
 </text>
@@ -343,70 +343,70 @@ L1
 L3
 </text>
 <circle cx="153" cy="794" r="3" opacity="1" fill="#60A5FA" stroke="none" stroke-width="1"/>
-<polyline fill="none" opacity="1" stroke="#F87171" stroke-width="1" points="662,965 613,955 530,954 502,949 455,937 446,934 433,930 327,888 309,882 243,851 176,816 "/>
-<circle cx="662" cy="965" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<text x="668" y="965" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
+<polyline fill="none" opacity="1" stroke="#F87171" stroke-width="1" points="678,965 617,955 531,954 503,949 457,937 448,934 436,930 330,888 314,882 250,851 186,816 "/>
+<circle cx="678" cy="965" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<text x="684" y="965" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
 L-7
 </text>
-<circle cx="613" cy="955" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="530" cy="954" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="502" cy="949" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="455" cy="937" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="446" cy="934" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="433" cy="930" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<text x="439" y="930" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
+<circle cx="617" cy="955" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="531" cy="954" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="503" cy="949" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="457" cy="937" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="448" cy="934" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="436" cy="930" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<text x="442" y="930" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
 L-1
 </text>
-<circle cx="327" cy="888" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<text x="333" y="888" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
+<circle cx="330" cy="888" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<text x="336" y="888" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
 L1
 </text>
-<circle cx="309" cy="882" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<circle cx="243" cy="851" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<text x="249" y="851" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
+<circle cx="314" cy="882" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<circle cx="250" cy="851" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<text x="256" y="851" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F87171" font-weight="bold">
 L3
 </text>
-<circle cx="176" cy="816" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<polyline fill="none" opacity="1" stroke="#F59E0B" stroke-width="1" points="506,956 495,952 484,953 478,950 461,948 442,946 422,943 243,880 204,857 98,827 89,804 "/>
-<circle cx="506" cy="956" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<text x="512" y="956" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
+<circle cx="186" cy="816" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
+<polyline fill="none" opacity="1" stroke="#F59E0B" stroke-width="1" points="554,956 541,952 538,953 525,950 513,948 494,946 475,943 360,880 291,857 186,826 184,802 "/>
+<circle cx="554" cy="956" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<text x="560" y="956" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
 L-7
 </text>
-<circle cx="495" cy="952" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="484" cy="953" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="478" cy="950" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="461" cy="948" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="442" cy="946" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="422" cy="943" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<text x="428" y="943" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
+<circle cx="541" cy="952" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="538" cy="953" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="525" cy="950" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="513" cy="948" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="494" cy="946" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="475" cy="943" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<text x="481" y="943" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
 L-1
 </text>
-<circle cx="243" cy="880" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<text x="249" y="880" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
+<circle cx="360" cy="880" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<text x="366" y="880" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
 L1
 </text>
-<circle cx="204" cy="857" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<circle cx="98" cy="827" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
-<text x="104" y="827" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
+<circle cx="291" cy="857" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="186" cy="826" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<text x="192" y="826" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#F59E0B" font-weight="bold">
 L3
 </text>
-<circle cx="89" cy="804" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
+<circle cx="184" cy="802" r="3" opacity="1" fill="#F59E0B" stroke="none" stroke-width="1"/>
 <text x="450" y="1020" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
 encode MB/s (log)
 </text>
 <text x="16" y="526" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#E6EDF3" font-weight="bold" transform="rotate(270, 16, 526)">
 compression ratio
 </text>
-<rect x="93" y="1035" width="12" height="12" opacity="1" fill="#60A5FA" stroke="none"/>
-<text x="111" y="1041" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+<rect x="128" y="1035" width="12" height="12" opacity="1" fill="#60A5FA" stroke="none"/>
+<text x="146" y="1041" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
 C zstd 1.5.7 (libzstd wasm)
 </text>
-<rect x="338" y="1035" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
-<text x="356" y="1041" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-zrip (safe Rust, SIMD128)
+<rect x="373" y="1035" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
+<text x="391" y="1041" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+zrip (safe Rust)
 </text>
-<rect x="569" y="1035" width="12" height="12" opacity="1" fill="#F59E0B" stroke="none"/>
-<text x="587" y="1041" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-structured-zstd 0.0.48
+<rect x="541" y="1035" width="12" height="12" opacity="1" fill="#F59E0B" stroke="none"/>
+<text x="559" y="1041" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+structured-zstd 0.4.2
 </text>
 </svg>
