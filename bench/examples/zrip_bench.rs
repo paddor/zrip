@@ -348,6 +348,8 @@ fn bench_slices(
 
 fn bench_zrip(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> BenchResult {
     let mut ctx = zrip::CompressContext::new(level).unwrap();
+    // C zstd writes no content checksum by default; match it.
+    ctx.set_content_checksum(false);
     let mut dec_ctx = zrip::DecompressContext::new();
     bench_slices(
         ZRIP_CODEC,
@@ -480,6 +482,7 @@ fn bench_zrip_dict(
     let dict = zrip::dict::Dictionary::from_bytes(dict_bytes).unwrap();
     let mut ctx =
         zrip::CompressContext::with_dict_for_size(level, dict.clone(), slices[0].len()).unwrap();
+    ctx.set_content_checksum(false);
     bench_slices(
         "zrip+dict",
         slices,
@@ -520,7 +523,7 @@ fn bench_c_zstd_dict(
 
 /// Times `codec` decoding every frame of `frames` (C zstd's output for
 /// `slices`) per pass, after checking each decodes to its slice's length.
-/// The frames carry content checksums, which the decoders verify.
+/// C zstd writes no content checksums by default, so none are verified.
 fn bench_decode_only(
     codec: &str,
     frames: &[Vec<u8>],

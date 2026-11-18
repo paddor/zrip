@@ -7,6 +7,8 @@
 //! - `zenc`, `zdec`, `cenc`, `cdec`: time zrip or C zstd encode or decode,
 //!   in ns per frame.
 //! - `hbuild`: time the Huffman table build on each slice's histogram.
+//! - `hist`, `henc`: time the byte histogram, or the 4-stream Huffman encode
+//!   with each slice's own table.
 //! - `hash`: hash all zrip frames (plus full files at size 8192), to check
 //!   that an encoder change keeps the output identical.
 //! - `lits`: literal section stats of the first block, zrip vs C.
@@ -86,13 +88,15 @@ fn main() {
         println!("hash L{level} {size}: {:016x} {bytes}", h.finish());
         return;
     }
+    // C zstd writes no content checksum by default; match it.
     let mut zctx = zrip::CompressContext::new(level).unwrap();
+    zctx.set_content_checksum(false);
     let mut zdctx = zrip::DecompressContext::new();
     let mut cctx = zstd::bulk::Compressor::new(level).unwrap();
     let mut cdctx = zstd::bulk::Decompressor::new().unwrap();
     let zframes: Vec<Vec<u8>> = inputs
         .iter()
-        .map(|s| zrip::compress(s, level).unwrap())
+        .map(|s| zctx.compress(s).unwrap().into_owned())
         .collect();
     let cframes: Vec<Vec<u8>> = inputs.iter().map(|s| cctx.compress(s).unwrap()).collect();
     if mode == "lits" {
@@ -189,7 +193,28 @@ fn main() {
                 }
             })
         }
-        _ => panic!("mode: zenc, zdec, cenc, cdec, hbuild, hash, or lits"),
+        "hist" => {
+            use zrip_core::huffman::encode::byte_histogram;
+            run(secs, || {
+                for s in &inputs {
+                    black_box(byte_histogram(black_box(s)));
+                }
+            })
+        }
+        "henc" => {
+            use zrip_core::huffman::encode::{HuffmanEncodeTable, byte_histogram};
+            let tables: Vec<_> = inputs
+                .iter()
+                .map(|s| HuffmanEncodeTable::from_histogram(&byte_histogram(s)).unwrap())
+                .collect();
+            let mut out = Vec::new();
+            run(secs, || {
+                for (s, t) in inputs.iter().zip(&tables) {
+                    black_box(t.encode_4_streams_into(black_box(s), &mut out));
+                }
+            })
+        }
+        _ => panic!("mode: zenc, zdec, cenc, cdec, hbuild, hist, henc, hash, or lits"),
     };
     let frames = if mode.starts_with('z') {
         &zframes
