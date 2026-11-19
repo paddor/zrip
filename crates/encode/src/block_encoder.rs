@@ -149,6 +149,9 @@ pub(crate) struct FseEncodeTable {
     state_table: [u16; MAX_TABLE_SIZE],
     table_size: u32,
     table_log: u8,
+    /// Bit `s` is set when symbol `s` has a state. Encoding any other symbol
+    /// writes garbage, so repeat mode checks the block's codes first.
+    present: u64,
 }
 
 impl Default for FseEncodeTable {
@@ -161,8 +164,17 @@ impl Default for FseEncodeTable {
             state_table: [0; MAX_TABLE_SIZE],
             table_size: 0,
             table_log: 0,
+            present: 0,
         }
     }
+}
+
+/// Symbols with a nonzero count, as a bit set.
+fn present_mask(count: &[u32; MAX_SYMBOLS]) -> u64 {
+    count
+        .iter()
+        .enumerate()
+        .fold(0, |mask, (s, &c)| mask | u64::from(c > 0) << s)
 }
 
 /// Symbol slots per table: 53 codes rounded up to a power of two, so the
@@ -236,7 +248,16 @@ impl FseEncodeTable {
             state_table,
             table_size: table_size as u32,
             table_log,
+            present: present_mask(&count),
         }
+    }
+
+    /// Whether every symbol with a nonzero count in `freqs` has a state.
+    fn covers(&self, freqs: &[u32]) -> bool {
+        freqs
+            .iter()
+            .enumerate()
+            .all(|(s, &f)| f == 0 || (s < MAX_SYMBOLS && self.present >> s & 1 == 1))
     }
 
     #[allow(
@@ -359,6 +380,7 @@ impl FseEncodeTable {
         self.state_table[..table_size].fill(0);
         self.table_size = table_size as u32;
         self.table_log = table_log;
+        self.present = present_mask(&count);
 
         self.symbol_tt[..num_symbols].copy_from_slice(&symbol_tt[..num_symbols]);
 
@@ -515,8 +537,14 @@ fn encode_compressed_block_impl(
         policy,
     );
 
-    let has_repeat =
-        workspace.prev_ll.is_some() && workspace.prev_of.is_some() && workspace.prev_ml.is_some();
+    // Repeat mode reuses the dictionary's tables, which a literals-only block
+    // leaves in place, so they must hold every code this block uses: a far
+    // offset can need a code the dictionary never saw.
+    let f = &workspace.seq_freqs;
+    let has_repeat = match (&workspace.prev_ll, &workspace.prev_of, &workspace.prev_ml) {
+        (Some(ll), Some(of), Some(ml)) => ll.covers(&f.ll) && of.covers(&f.of) && ml.covers(&f.ml),
+        _ => false,
+    };
 
     if has_repeat {
         encode_seq_repeat(

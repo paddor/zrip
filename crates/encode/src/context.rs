@@ -1031,6 +1031,62 @@ mod tests {
         Dictionary::from_bytes(&fixture[4..4 + len]).unwrap()
     }
 
+    /// Blocks reuse a dictionary's sequence tables only when they hold every
+    /// code the block needs. Encoding a code a table lacks writes garbage.
+    #[test]
+    fn dictionary_tables_lacking_a_code_are_not_reused() {
+        use zrip_core::fse::table_builder::serialize_fse_table_description;
+        use zrip_core::fse::{LL_DEFAULT_ACCURACY, LL_DEFAULT_DIST};
+        use zrip_core::fse::{ML_DEFAULT_ACCURACY, ML_DEFAULT_DIST};
+        // Offset codes 0 to 10 only, as for offsets up to 2 KiB.
+        const OF_DIST: [i16; 11] = [1, 1, 1, 1, 3, 3, 3, 3, 6, 6, 4];
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&zrip_core::dict::DICT_MAGIC.to_le_bytes());
+        raw.extend_from_slice(&7u32.to_le_bytes());
+        raw.extend_from_slice(&[128 + 1, 0x11]);
+        raw.extend(serialize_fse_table_description(&OF_DIST, 5));
+        raw.extend(serialize_fse_table_description(
+            &ML_DEFAULT_DIST,
+            ML_DEFAULT_ACCURACY,
+        ));
+        raw.extend(serialize_fse_table_description(
+            &LL_DEFAULT_DIST,
+            LL_DEFAULT_ACCURACY,
+        ));
+        for rep in [1u32, 4, 8] {
+            raw.extend_from_slice(&rep.to_le_bytes());
+        }
+        raw.extend((0..1024u32).map(|i| (i * 7 % 251) as u8));
+        let dict = Dictionary::from_bytes(&raw).unwrap();
+        assert!(dict.of_table().is_some());
+
+        // Noise, then a copy from 5000 bytes back: offset code 12.
+        let mut x = 0x2545_f491u32;
+        let mut input: Vec<u8> = (0..5000)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                x as u8
+            })
+            .collect();
+        input.extend_from_within(..2048);
+        for level in [1, 3] {
+            let frames = [
+                CompressContext::with_dict(level, dict.clone())
+                    .unwrap()
+                    .compress(&input)
+                    .unwrap()
+                    .into_owned(),
+                crate::compress_with_dict(&input, level, &dict).unwrap(),
+            ];
+            for frame in &frames {
+                let out = zrip::decompress_with_dict(frame, &dict).unwrap();
+                assert!(out == input, "L{level}: frame decodes to another input");
+            }
+        }
+    }
+
     /// Tables built while a frame's input follows the dictionary in the
     /// buffer match tables built from the dictionary alone.
     #[test]
