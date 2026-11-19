@@ -419,6 +419,33 @@ pub(crate) fn prefill_hash_tables(
     }
 }
 
+/// Zeroes the short-table slots every position of `window` hashes to, as
+/// the match finder and prefill store them, and returns how many it wrote.
+pub(crate) fn zero_short_slots(
+    window: &[u8],
+    short_log: u32,
+    min_match: u32,
+    hash_short: &mut [u32],
+) -> usize {
+    let mls = short_mls(min_match);
+    // Every store hashes eight bytes read at the position.
+    let end = window.len().saturating_sub(7);
+    for p in 0..end {
+        hash_store!(hash_short, short_hash(rd64!(window, p), mls, short_log), 0);
+    }
+    end
+}
+
+/// Zeroes the long-table slots every position of `window` hashes to, and
+/// returns how many it wrote.
+pub(crate) fn zero_long_slots(window: &[u8], hash_log: u32, hash_long: &mut [u32]) -> usize {
+    let end = window.len().saturating_sub(7);
+    for p in 0..end {
+        hash_store!(hash_long, h8(rd64!(window, p), hash_log), 0);
+    }
+    end
+}
+
 pub(crate) fn compress_dfast_with_prefix(
     src: &[u8],
     params: &LevelParams,

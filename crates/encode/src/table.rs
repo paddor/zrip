@@ -67,9 +67,31 @@ impl MatchTable {
         };
         self.zeroed = true;
         #[cfg(test)]
-        audit::zeroed(self.id, len, zeroed);
+        audit::zeroed(self.id, len, zeroed, false);
         #[cfg(not(test))]
         let _ = zeroed;
+    }
+
+    /// Zeroes a dirty table through `zero_slots`, which must zero every
+    /// entry a position was stored in and return how many entries it wrote.
+    /// For tables that took few positions, this beats a whole clear. Tests
+    /// check that no entry escaped.
+    pub(crate) fn clear_slots(&mut self, zero_slots: impl FnOnce(&mut [u32]) -> usize) {
+        if self.zeroed {
+            return;
+        }
+        let written = zero_slots(&mut self.entries);
+        #[cfg(test)]
+        {
+            assert!(
+                self.entries.iter().all(|&e| e == 0),
+                "a stored position escaped the slot clear"
+            );
+            audit::zeroed(self.id, self.entries.len(), written, true);
+        }
+        #[cfg(not(test))]
+        let _ = written;
+        self.zeroed = true;
     }
 
     /// [`clear`](Self::clear), then the entries for writing.
@@ -122,7 +144,7 @@ pub(crate) mod audit {
         static LOG: RefCell<Option<Vec<Zeroing>>> = const { RefCell::new(None) };
     }
 
-    /// One [`clear`](super::MatchTable::clear) that wrote zeros.
+    /// One clear that wrote zeros.
     #[derive(Clone, Copy, Debug)]
     pub(crate) struct Zeroing {
         pub table: usize,
@@ -130,13 +152,16 @@ pub(crate) mod audit {
         pub len: usize,
         /// Entries zeroed, by the allocator or by writes.
         pub entries: usize,
+        /// A [`clear_slots`](super::MatchTable::clear_slots) instead of a
+        /// whole [`clear`](super::MatchTable::clear).
+        pub slots: bool,
     }
 
     pub(super) fn next_id() -> usize {
         NEXT_ID.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub(super) fn zeroed(table: usize, len: usize, entries: usize) {
+    pub(super) fn zeroed(table: usize, len: usize, entries: usize, slots: bool) {
         if entries == 0 {
             return;
         }
@@ -146,6 +171,7 @@ pub(crate) mod audit {
                     table,
                     len,
                     entries,
+                    slots,
                 });
             }
         });
@@ -253,13 +279,19 @@ mod per_frame {
         }
     }
 
-    /// Runs `f`, checks that it zeroed no table for more than its length,
-    /// and returns the bytes it zeroed.
-    fn frame(what: &str, f: impl FnOnce()) -> usize {
+    /// Runs `f`, checks that its whole clears zeroed no table for more than
+    /// its length, and returns the bytes whole clears zeroed and the entries
+    /// slot clears wrote.
+    fn frame_slots(what: &str, f: impl FnOnce()) -> (usize, usize) {
         let ((), log) = audit::record(f);
-        // Per table: entries zeroed, largest length.
+        // Per table: entries zeroed by whole clears, largest length.
         let mut tables = BTreeMap::<usize, (usize, usize)>::new();
+        let mut slots = 0;
         for z in &log {
+            if z.slots {
+                slots += z.entries;
+                continue;
+            }
             let t = tables.entry(z.table).or_default();
             t.0 += z.entries;
             t.1 = t.1.max(z.len);
@@ -270,7 +302,14 @@ mod per_frame {
                 "{what}: zeroed {entries} entries of a {len}-entry table"
             );
         }
-        tables.values().map(|(entries, _)| entries * 4).sum()
+        (tables.values().map(|(entries, _)| entries * 4).sum(), slots)
+    }
+
+    /// [`frame_slots`] for paths that never clear slots.
+    fn frame(what: &str, f: impl FnOnce()) -> usize {
+        let (whole, slots) = frame_slots(what, f);
+        assert_eq!(slots, 0, "{what}: slot clear");
+        whole
     }
 
     #[test]
@@ -314,17 +353,31 @@ mod per_frame {
                 let mut enc = PushEncoder::new(level).unwrap();
                 let mut out = Vec::new();
                 // A flush sends a block before the end, so the frame takes the
-                // block path with tables sized for the level.
+                // block path with tables sized for the level. The first frame
+                // gets fresh tables. A later one clears the slots of a small
+                // frame before it, else the whole tables.
                 let blocks = strategy::level_params(level).unwrap();
-                for n in 0..2 {
+                let tables = match blocks.strategy {
+                    Strategy::Fast => 1,
+                    Strategy::DFast => 2,
+                };
+                let entries = table_bytes(&blocks) / 4;
+                let slot_clear = crate::frame_state::slot_clear_pays(size, tables, entries);
+                for n in 0..3 {
                     let what = format!("push frame {n} with flush L{level} {size} B");
-                    let zeroed = frame(&what, || {
+                    let (whole, slots) = frame_slots(&what, || {
                         enc.encode_to_vec(&input, &mut out, EndOp::Continue)
                             .unwrap();
                         enc.encode_to_vec(&[], &mut out, EndOp::Flush).unwrap();
                         enc.encode_to_vec(&[], &mut out, EndOp::End).unwrap();
                     });
-                    assert_eq!(zeroed, table_bytes(&blocks), "{what}");
+                    if n > 0 && slot_clear {
+                        assert_eq!(whole, 0, "{what}");
+                        assert!(slots > 0, "{what}");
+                    } else {
+                        assert_eq!(whole, table_bytes(&blocks), "{what}");
+                        assert_eq!(slots, 0, "{what}");
+                    }
                 }
                 // A frame that ends before any block went out takes one pass
                 // with tables sized for the input.
@@ -388,13 +441,69 @@ mod per_frame {
 
                 let mut enc = PushEncoder::with_dict(level, dict.clone()).unwrap();
                 let mut out = Vec::new();
-                for n in 0..2 {
-                    frame(&format!("push with dict, frame {n} {at}"), || {
+                for n in 0..3 {
+                    frame_slots(&format!("push with dict, frame {n} {at}"), || {
                         enc.encode_to_vec(&input, &mut out, EndOp::Continue)
                             .unwrap();
                         enc.encode_to_vec(&[], &mut out, EndOp::Flush).unwrap();
                         enc.encode_to_vec(&[], &mut out, EndOp::End).unwrap();
                     });
+                }
+            }
+        }
+    }
+
+    /// Encodes `input` as one frame with a flush before the end.
+    fn push_frame(enc: &mut PushEncoder, input: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        enc.encode_to_vec(input, &mut out, EndOp::Continue).unwrap();
+        enc.encode_to_vec(&[], &mut out, EndOp::Flush).unwrap();
+        enc.encode_to_vec(&[], &mut out, EndOp::End).unwrap();
+        out
+    }
+
+    /// A reused encoder, which clears slots or whole tables between frames,
+    /// writes the same frames as a new one.
+    #[test]
+    fn reused_encoders_match_new_ones() {
+        // Small and large frames in turn, so slot and whole clears follow
+        // frames of either kind. Frame `i` uses a shifted copy of the sample
+        // so the frames hash to different slots.
+        const SEQUENCE: [usize; 7] = [1024, 300, 8 << 10, 200 << 10, 2048, 64 << 10, 700];
+        let base = sample(256 << 10);
+        let inputs: Vec<&[u8]> = SEQUENCE
+            .iter()
+            .enumerate()
+            .map(|(i, &size)| &base[i * 997..i * 997 + size])
+            .collect();
+        let dict = dict();
+        for level in LEVELS {
+            let mut reused = PushEncoder::new(level).unwrap();
+            let mut reused_dict = PushEncoder::with_dict(level, dict.clone()).unwrap();
+            for (i, input) in inputs.iter().enumerate() {
+                let fresh = push_frame(&mut PushEncoder::new(level).unwrap(), input);
+                assert_eq!(push_frame(&mut reused, input), fresh, "L{level} frame {i}");
+                let fresh = push_frame(
+                    &mut PushEncoder::with_dict(level, dict.clone()).unwrap(),
+                    input,
+                );
+                assert_eq!(
+                    push_frame(&mut reused_dict, input),
+                    fresh,
+                    "L{level} dict frame {i}"
+                );
+            }
+            #[cfg(feature = "std")]
+            {
+                use std::io::Write;
+                let mut reused = crate::streaming::FrameEncoder::new(Vec::new(), level).unwrap();
+                for (i, input) in inputs.iter().enumerate() {
+                    let mut fresh = crate::streaming::FrameEncoder::new(Vec::new(), level).unwrap();
+                    fresh.write_all(input).unwrap();
+                    let fresh = fresh.finish().unwrap();
+                    reused.write_all(input).unwrap();
+                    let frame = reused.reset(Vec::new()).unwrap();
+                    assert_eq!(frame, fresh, "L{level} frame encoder frame {i}");
                 }
             }
         }

@@ -1032,6 +1032,35 @@ pub(crate) fn prefill_hash_table(
     }
 }
 
+/// Zeroes the slots every position of `window` hashes to at `hash_log` and
+/// `min_match`, as the match finder and prefill store them, and returns how
+/// many it wrote. A table that took positions only from `window` is then
+/// all zero.
+pub(crate) fn zero_position_slots(
+    window: &[u8],
+    hash_log: u32,
+    min_match: u32,
+    hash_table: &mut [u32],
+) -> usize {
+    match min_match {
+        ..=4 => zero_slots::<4>(window, hash_log, hash_table),
+        5 => zero_slots::<5>(window, hash_log, hash_table),
+        6 => zero_slots::<6>(window, hash_log, hash_table),
+        7 => zero_slots::<7>(window, hash_log, hash_table),
+        _ => zero_slots::<8>(window, hash_log, hash_table),
+    }
+}
+
+fn zero_slots<const MLS: usize>(window: &[u8], hash_log: u32, hash_table: &mut [u32]) -> usize {
+    // `hash_pos` reads four bytes at MLS 4 and eight above.
+    let read = if MLS >= 5 { 8 } else { 4 };
+    let end = (window.len() + 1).saturating_sub(read);
+    for p in 0..end {
+        hash_store!(hash_table, hash_pos::<0, MLS>(window, p, hash_log), 0);
+    }
+    end
+}
+
 fn prefill<const MLS: usize>(
     combined: &[u8],
     prefix_len: usize,
