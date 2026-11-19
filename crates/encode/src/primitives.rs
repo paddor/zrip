@@ -99,60 +99,59 @@ fn cold_rep_panic(r0: u32, r1: u32) -> ! {
     panic!("rep offsets must be non-zero: r0={r0}, r1={r1}");
 }
 
-/// Forward bit-output buffer for sequence bitstreams.
+/// Forward bit-output buffer for sequence bitstreams, appended to the end of
+/// the vector it is given.
 ///
-/// The backing vector stays initialized up to its high-water mark across
-/// blocks, so every write is a plain in-bounds slice store. The logical length
-/// is tracked separately and only exposed through `as_slice`.
+/// `new` zero-fills `reserve` bytes past the vector's end, so every write
+/// within them is a plain in-bounds slice store; a write past them grows the
+/// vector. Positions count from where the stream starts, and `finish` cuts
+/// the vector to the stream's end.
 #[cfg(feature = "alloc")]
 pub(crate) struct BitstreamScratch<'a> {
     buf: &'a mut Vec<u8>,
-    len: usize,
+    base: usize,
 }
 
 #[cfg(feature = "alloc")]
 impl<'a> BitstreamScratch<'a> {
     #[inline(always)]
     pub(crate) fn new(buf: &'a mut Vec<u8>, reserve: usize) -> Self {
-        if buf.len() < reserve {
-            buf.resize(reserve, 0);
-        }
-        Self { buf, len: 0 }
+        let base = buf.len();
+        buf.resize(base + reserve, 0);
+        Self { buf, base }
     }
 
     #[inline(always)]
     pub(crate) fn flush(&mut self, pos: usize, bits: u64) {
-        match self.buf.get_mut(pos..pos + 8) {
+        let at = self.base + pos;
+        match self.buf.get_mut(at..at + 8) {
             Some(dst) => dst.copy_from_slice(&bits.to_le_bytes()),
-            None => self.grow_and_flush(pos, bits),
+            None => self.grow_and_flush(at, bits),
         }
     }
 
     #[cold]
     #[inline(never)]
-    fn grow_and_flush(&mut self, pos: usize, bits: u64) {
-        let needed = (pos + 8).max(self.buf.len() * 2);
+    fn grow_and_flush(&mut self, at: usize, bits: u64) {
+        let needed = (at + 8).max(self.buf.len() * 2);
         self.buf.resize(needed, 0);
-        self.buf[pos..pos + 8].copy_from_slice(&bits.to_le_bytes());
+        self.buf[at..at + 8].copy_from_slice(&bits.to_le_bytes());
     }
 
     #[inline(always)]
     pub(crate) fn write_byte(&mut self, pos: usize, val: u8) {
-        if pos >= self.buf.len() {
-            self.buf.resize(pos + 1, 0);
+        let at = self.base + pos;
+        if at >= self.buf.len() {
+            self.buf.resize(at + 1, 0);
         }
-        self.buf[pos] = val;
+        self.buf[at] = val;
     }
 
+    /// Ends the stream after `len` bytes.
     #[inline(always)]
-    pub(crate) fn finish(&mut self, len: usize) {
-        assert!(len <= self.buf.len());
-        self.len = len;
-    }
-
-    #[inline(always)]
-    pub(crate) fn as_slice(&self) -> &[u8] {
-        &self.buf[..self.len]
+    pub(crate) fn finish(self, len: usize) {
+        assert!(self.base + len <= self.buf.len());
+        self.buf.truncate(self.base + len);
     }
 }
 
