@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.8.19] - 2026-11-19
+
+### Changed
+
+- One-shot `compress` and new contexts allocate less. Sequence bitstreams
+  go straight into the block output, reserved from an exact bound instead of
+  zeroed worst-case scratch buffers, and the literal buffer is sized to the
+  block's literals. `CompressContext::new` allocates nothing until the first
+  frame, which sizes and zeroes the hash tables once. At 256 KiB, a one-shot
+  call takes 14-31% fewer page faults and runs about 6% faster. A context
+  made per call for 1-16 KiB inputs runs 1.2-3x faster, and a reused context
+  encodes about 1% slower. Output is unchanged.
+
 ## [0.8.18] - 2026-11-18
 
 ### Added
