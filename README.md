@@ -33,6 +33,13 @@ produced at any zstd compression level. The encoder supports levels -7 through
 ![small input decode throughput](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/small_decode.svg)
 </details>
 
+<details>
+<summary>x86_64 dictionaries (Silesia slices from 64 B to 1 MiB, with and without a dictionary)</summary>
+
+![dictionary sweep at level 1](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/sweep.svg)
+![dictionary sweep at level 3](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/sweep_l3.svg)
+</details>
+
 No current aarch64 charts. If you have an aarch64 machine, run the benchmark
 and chart commands from [`DEVELOPMENT.md`](DEVELOPMENT.md) and send a PR with
 `doc/charts/aarch64/`.

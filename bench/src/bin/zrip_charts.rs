@@ -122,6 +122,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             ChartKind::SmallEncode,
             ChartKind::SmallDecode,
             ChartKind::TinyMatrix,
+            ChartKind::Sweep,
         ]
     } else {
         vec![args.chart]
@@ -137,6 +138,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             ChartKind::SmallEncode => draw_small_encode(&cfg, &out_dir)?,
             ChartKind::SmallDecode => draw_small_decode(&cfg, &out_dir)?,
             ChartKind::TinyMatrix => draw_tiny_matrix(&cfg, &out_dir)?,
+            ChartKind::Sweep => draw_sweep(&cfg, &out_dir)?,
         }
     }
 
@@ -153,6 +155,7 @@ enum ChartKind {
     SmallEncode,
     SmallDecode,
     TinyMatrix,
+    Sweep,
 }
 
 struct Args {
@@ -196,7 +199,7 @@ impl Args {
 
 fn print_help() {
     println!(
-        "Usage: zrip_charts [all|scatter|summary|matrix|pipeline|small-encode|small-decode|tiny-matrix] [OUT_DIR] [--profile wasm32]"
+        "Usage: zrip_charts [all|scatter|summary|matrix|pipeline|small-encode|small-decode|tiny-matrix|sweep] [OUT_DIR] [--profile wasm32]"
     );
 }
 
@@ -210,6 +213,7 @@ fn parse_chart_kind(s: &str) -> Option<ChartKind> {
         "small-encode" => Some(ChartKind::SmallEncode),
         "small-decode" | "small_decode" => Some(ChartKind::SmallDecode),
         "tiny-matrix" => Some(ChartKind::TinyMatrix),
+        "sweep" => Some(ChartKind::Sweep),
         _ => None,
     }
 }
@@ -260,6 +264,12 @@ impl Config {
                 codec("ruzstd", "ruzstd v0.8.3 (safe)", 0x4ade80, 0x3aaf60),
                 codec("mzstd", "mzstd v0.2.14 (safe)", 0x2dd4bf, 0x22a896),
                 codec(
+                    "rusty_zstd",
+                    "rusty_zstd v0.5.0 (unsafe)",
+                    0xfde047,
+                    0xcab238,
+                ),
+                codec(
                     "lz4rip",
                     "lz4rip v0.12.1 (safe Rust, LZ4)",
                     0xc084fc,
@@ -271,19 +281,56 @@ impl Config {
                 "zrip",
                 "structured-zstd",
                 "mzstd",
+                "rusty_zstd",
                 "ruzstd",
                 "lz4rip",
             ],
-            summary_codecs: vec!["C zstd", "zrip", "structured-zstd", "mzstd", "ruzstd"],
-            matrix_codecs: vec!["C zstd", "zrip", "structured-zstd", "mzstd", "ruzstd"],
-            tiny_codecs: vec!["C zstd", "zrip", "structured-zstd", "mzstd", "lz4rip"],
-            pipeline_codecs: vec!["C zstd", "zrip", "structured-zstd", "mzstd", "ruzstd"],
-            small_codecs: vec!["C zstd", "zrip", "structured-zstd", "mzstd", "lz4rip"],
+            summary_codecs: vec![
+                "C zstd",
+                "zrip",
+                "structured-zstd",
+                "mzstd",
+                "rusty_zstd",
+                "ruzstd",
+            ],
+            matrix_codecs: vec![
+                "C zstd",
+                "zrip",
+                "structured-zstd",
+                "mzstd",
+                "rusty_zstd",
+                "ruzstd",
+            ],
+            tiny_codecs: vec![
+                "C zstd",
+                "zrip",
+                "structured-zstd",
+                "mzstd",
+                "rusty_zstd",
+                "lz4rip",
+            ],
+            pipeline_codecs: vec![
+                "C zstd",
+                "zrip",
+                "structured-zstd",
+                "mzstd",
+                "rusty_zstd",
+                "ruzstd",
+            ],
+            small_codecs: vec![
+                "C zstd",
+                "zrip",
+                "structured-zstd",
+                "mzstd",
+                "rusty_zstd",
+                "lz4rip",
+            ],
             small_decode_codecs: vec![
                 "C zstd",
                 "zrip",
                 "structured-zstd",
                 "mzstd",
+                "rusty_zstd",
                 "ruzstd",
                 "lz4rip",
             ],
@@ -676,7 +723,7 @@ fn small_names(suffixes: &[&str]) -> Vec<String> {
 fn supported_encode_levels(codec: &str) -> Vec<i32> {
     match codec {
         "zrip" => BAND_LEVELS.to_vec(),
-        "C zstd" | "structured-zstd" | "mzstd" => C_ZSTD_LEVELS.to_vec(),
+        "C zstd" | "structured-zstd" | "mzstd" | "rusty_zstd" => C_ZSTD_LEVELS.to_vec(),
         "ruzstd" | "lz4rip" => vec![LEVEL],
         _ => vec![LEVEL],
     }
@@ -745,6 +792,9 @@ fn missing_cache_hint(chart_name: &str) -> String {
         }
         "small decode" => {
             format!("Run `{BENCH} -- --small-only --decode-only --levels 3`.")
+        }
+        "sweep" => {
+            format!("Run `{BENCH} -- --sweep --impl all`.")
         }
         _ => {
             format!("Run `{BENCH} -- --impl all`.")
@@ -2501,6 +2551,301 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
 }
 
 #[allow(clippy::too_many_arguments)]
+// `sweep.svg` and `sweep_l3.svg`: slices of every Silesia file
+// (`zrip_bench --sweep`), each codec with and without a dictionary.
+const SWEEP_SIZES: &[usize] = &[
+    64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576,
+];
+const SWEEP_SIZE_LABELS: &[&str] = &[
+    "64", "128", "256", "512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K",
+    "1M",
+];
+const SWEEP_CODECS: &[&str] = &["C zstd", "zrip", "rusty_zstd"];
+/// The chart file for each sweep level.
+const SWEEP_CHARTS: &[(i32, &str)] = &[(1, "sweep.svg"), (3, "sweep_l3.svg")];
+
+/// Rows of `codec` at `level` from the sweep cache, the last per input.
+fn load_sweep_rows(cfg: &Config, codec: &str, level: i32) -> Vec<BenchRow> {
+    let mut rows = BTreeMap::new();
+    let path = cache_dir(cfg)
+        .join("sweep")
+        .join(format!("L{level}"))
+        .join(codec_file(codec));
+    let mut found = BTreeMap::new();
+    load_rows_from_path(&path, codec, 0, None, &mut found);
+    for row in found.into_values().flatten() {
+        rows.insert(row.input.clone(), row);
+    }
+    rows.into_values().collect()
+}
+
+fn geomean(values: impl Iterator<Item = f64>) -> Option<f64> {
+    let (n, sum) = values
+        .filter(|v| *v > 0.0)
+        .fold((0usize, 0.0), |(n, sum), v| (n + 1, sum + v.ln()));
+    (n > 0).then(|| (sum / n as f64).exp())
+}
+
+fn draw_sweep(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
+    for &(level, file) in SWEEP_CHARTS {
+        draw_sweep_level(cfg, out_dir, level, file)?;
+    }
+    Ok(())
+}
+
+/// One panel of the sweep chart: a measure per message, geomean over the
+/// corpus files at each size.
+struct SweepPanel {
+    title: &'static str,
+    axis: &'static str,
+    value: fn(&BenchRow) -> Option<f64>,
+}
+
+fn draw_sweep_level(
+    cfg: &Config,
+    out_dir: &Path,
+    level: i32,
+    file: &str,
+) -> Result<(), Box<dyn Error>> {
+    // Each codec, then the same codec with a dictionary.
+    let series: Vec<(&str, String, bool)> = SWEEP_CODECS
+        .iter()
+        .flat_map(|c| {
+            [
+                (*c, (*c).to_string(), false),
+                (*c, format!("{c}+dict"), true),
+            ]
+        })
+        .collect();
+    let mut data = BTreeMap::new();
+    for (_, key, _) in &series {
+        data.insert(key.clone(), load_sweep_rows(cfg, key, level));
+    }
+    let inputs: Vec<String> = MAIN_CORPUS
+        .iter()
+        .flat_map(|f| SWEEP_SIZES.iter().map(move |s| format!("{f}_{s}")))
+        .collect();
+    let keys: Vec<&str> = series.iter().map(|(_, k, _)| k.as_str()).collect();
+    require_named_rows(&data, &keys, &inputs, |_| vec![level], "sweep")?;
+
+    let panels = [
+        SweepPanel {
+            title: "Compress",
+            axis: "MB/s (log)",
+            value: enc_mbs,
+        },
+        SweepPanel {
+            title: "Roundtrip (compress + decompress)",
+            axis: "MB/s (log)",
+            value: |r| {
+                let ns = r.compress_ns + r.decompress_ns;
+                (ns > 0.0).then(|| r.input_size as f64 / ns * 1000.0)
+            },
+        },
+        SweepPanel {
+            title: "Compression ratio",
+            axis: "ratio (log)",
+            value: |r| Some(ratio(r)),
+        },
+    ];
+
+    let width = 830;
+    let panel_w = 680.0;
+    let panel_h = 200.0;
+    let top = if cfg.hw_label.is_some() { 84.0 } else { 66.0 };
+    let left = 90.0;
+    let gap = 56.0;
+    let total_h = panels.len() as f64 * panel_h + (panels.len() - 1) as f64 * gap;
+    let height = (top + total_h + 110.0) as u32;
+    let path = output_path(out_dir, file);
+    let area = root(&path, width, height)?;
+    chart_header(
+        &area,
+        width,
+        &format!("Dictionary Sweep: Silesia slices at level {level} (geomean of 12 files)"),
+        cfg.hw_label.as_deref(),
+        18,
+    )?;
+    text(
+        &area,
+        "64 consecutive slices per file and size; one 16 KiB dictionary per file, trained \
+         by C zstd past the slices up to 16 KiB",
+        px(width as f64 / 2.0),
+        px(top - 36.0),
+        9,
+        MUTED,
+        HPos::Center,
+        false,
+    )?;
+
+    let x_left = left;
+    let x_right = left + panel_w;
+    let map_x = |size: usize| {
+        x_left
+            + ((size as f64).log10() - 48.0_f64.log10())
+                / (1_400_000.0_f64.log10() - 48.0_f64.log10())
+                * (x_right - x_left)
+    };
+    for (pi, panel) in panels.iter().enumerate() {
+        let p_top = top + pi as f64 * (panel_h + gap);
+        let p_bot = p_top + panel_h;
+        // Per series, the geomean at each size.
+        let lines: Vec<Vec<(usize, f64)>> = series
+            .iter()
+            .map(|(_, key, _)| {
+                SWEEP_SIZES
+                    .iter()
+                    .filter_map(|&size| {
+                        let rows = data[key].iter().filter(|r| r.input_size == size);
+                        geomean(rows.filter_map(panel.value)).map(|v| (size, v))
+                    })
+                    .collect()
+            })
+            .collect();
+        let values = lines.iter().flatten().map(|(_, v)| *v);
+        let (lo, hi) = values.fold((f64::INFINITY, 0.0_f64), |(lo, hi), v| {
+            (lo.min(v), hi.max(v))
+        });
+        if !lo.is_finite() {
+            continue;
+        }
+        let y_min = lo / 1.15;
+        let y_max = hi * 1.15;
+        let map_y = |v: f64| {
+            p_bot - (v.log10() - y_min.log10()) / (y_max.log10() - y_min.log10()) * panel_h
+        };
+        draw_small_panel_frame(
+            &area,
+            panel.title,
+            x_left,
+            x_right,
+            p_top,
+            p_bot,
+            y_min,
+            y_max,
+            true,
+        )?;
+        draw_small_x_grid(
+            &area,
+            x_left,
+            x_right,
+            p_top,
+            p_bot,
+            map_x,
+            SWEEP_SIZES,
+            SWEEP_SIZE_LABELS,
+        )?;
+        let ticks = log_ticks(y_min, y_max);
+        // Ratios span about a decade, too few 1-2-5 ticks.
+        let ticks = if ticks.len() < 4 {
+            [
+                0.8, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 15.0, 20.0,
+            ]
+            .into_iter()
+            .filter(|t| y_min <= *t && *t <= y_max)
+            .collect()
+        } else {
+            ticks
+        };
+        for tick in ticks {
+            let y = map_y(tick);
+            if p_top + 5.0 < y && y < p_bot - 5.0 {
+                line(&area, x_left, y, x_right, y, GRID, 1)?;
+                text(
+                    &area,
+                    if tick < 10.0 {
+                        format!("{tick}")
+                    } else {
+                        format!("{tick:.0}")
+                    },
+                    px(x_left - 8.0),
+                    px(y),
+                    9,
+                    MUTED,
+                    HPos::Right,
+                    false,
+                )?;
+            }
+        }
+        vtext(
+            &area,
+            panel.axis,
+            px(x_left - 52.0),
+            px((p_top + p_bot) / 2.0),
+            10,
+            TEXT,
+        )?;
+        for ((base, _, dict), pts) in series.iter().zip(&lines) {
+            let Some(style) = cfg.style(base) else {
+                continue;
+            };
+            let pts: Vec<(f64, f64)> = pts.iter().map(|&(s, v)| (map_x(s), map_y(v))).collect();
+            polyline(&area, &pts, style.color, 2, 1.0, !dict)?;
+            if *dict {
+                for &(x, y) in &pts {
+                    dot(&area, x, y, 3, style.color)?;
+                }
+            }
+        }
+    }
+    text(
+        &area,
+        "slice size (bytes)",
+        px((x_left + x_right) / 2.0),
+        px(top + total_h + 34.0),
+        10,
+        TEXT,
+        HPos::Center,
+        true,
+    )?;
+    let y = top + total_h + 62.0;
+    let legend_rows = draw_marker_legend(
+        &area,
+        cfg,
+        SWEEP_CODECS,
+        width as f64 / 2.0,
+        y,
+        width as f64 - 50.0,
+        3,
+    )?;
+    let style_y = y + legend_rows as f64 * LEGEND_ROW_H + 10.0;
+    let mid = width as f64 / 2.0;
+    line(&area, mid - 200.0, style_y, mid - 180.0, style_y, MUTED, 2)?;
+    dot(&area, mid - 190.0, style_y, 3, MUTED)?;
+    text(
+        &area,
+        "solid = with dictionary",
+        px(mid - 172.0),
+        px(style_y),
+        10,
+        MUTED,
+        HPos::Left,
+        false,
+    )?;
+    dashed_line(
+        &area,
+        (mid + 30.0, style_y),
+        (mid + 50.0, style_y),
+        MUTED,
+        2,
+    )?;
+    text(
+        &area,
+        "dashed = no dictionary",
+        px(mid + 58.0),
+        px(style_y),
+        10,
+        MUTED,
+        HPos::Left,
+        false,
+    )?;
+    area.present()?;
+    drop(area);
+    finish_svg(&path, width, height)?;
+    println!("wrote {}", path.display());
+    Ok(())
+}
+
 fn draw_small_panel_frame(
     area: &Area<'_>,
     prefix: &str,
