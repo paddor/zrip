@@ -705,7 +705,7 @@ impl CompressContext {
 }
 
 #[allow(clippy::too_many_arguments, clippy::unnecessary_wraps)]
-fn compress_core<S: OutputSink>(
+pub(crate) fn compress_core<S: OutputSink>(
     input: &[u8],
     params: LevelParams,
     dict_id: Option<u32>,

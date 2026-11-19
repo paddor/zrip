@@ -8,6 +8,7 @@
 use alloc::vec::Vec;
 
 use crate::block_encoder::{self, BlockEncodeWorkspace};
+use crate::context;
 use crate::dfast;
 use crate::fast;
 #[cfg(feature = "ldm")]
@@ -20,6 +21,7 @@ use zrip_core::Sequence;
 use zrip_core::dict::Dictionary;
 use zrip_core::error::CompressError;
 use zrip_core::frame::MAX_BLOCK_SIZE;
+use zrip_core::huffman::encode::HuffmanEncodeTable;
 use zrip_core::xxhash::Xxh64State;
 
 /// Smallest growth step for the window once a frame spans blocks.
@@ -57,6 +59,9 @@ pub(crate) struct EncodeState {
     /// hold its positions and it was small: the next frame zeroes just the
     /// slots those positions went to instead of the whole tables.
     stale_window: Vec<u8>,
+    /// Buffers of frames encoded in one pass, kept for the next.
+    dict_hash: MatchTable,
+    combined: Vec<u8>,
     #[cfg(feature = "ldm")]
     ldm_state: Option<LdmState>,
 }
@@ -90,9 +95,66 @@ impl EncodeState {
             block_start,
             tables_ready: false,
             stale_window: Vec::new(),
+            dict_hash: MatchTable::new(),
+            combined: Vec::new(),
             #[cfg(feature = "ldm")]
             ldm_state,
         }
+    }
+
+    /// Encodes `input`, or the buffered input if `None`, as one whole frame
+    /// with its size known, as the one-shot API does, but in this state's
+    /// tables and buffers. Call [`Self::reset`] after it.
+    pub(crate) fn encode_one_pass(
+        &mut self,
+        input: Option<&[u8]>,
+        params: &LevelParams,
+        out: &mut Vec<u8>,
+    ) -> Result<(), CompressError> {
+        let src = match input {
+            Some(input) => input,
+            None => &self.window_buf[self.block_start..],
+        };
+        #[cfg(feature = "ldm")]
+        if params.ldm_params.is_some() {
+            return crate::compress_frame(src, params, out);
+        }
+        // Whole clears follow: the tables no longer hold just the last
+        // window's positions.
+        self.stale_window.clear();
+        let (dict_id, prefix, rep_offsets) = match &self.dict {
+            Some(d) => {
+                self.workspace.prev_ll = d
+                    .ll_table()
+                    .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 35));
+                self.workspace.prev_of = d
+                    .of_table()
+                    .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 31));
+                self.workspace.prev_ml = d
+                    .ml_table()
+                    .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 52));
+                self.workspace.prev_huffman = d
+                    .huf_table()
+                    .and_then(|(dt, tl)| HuffmanEncodeTable::from_decode_table(dt, tl));
+                (Some(d.id()), d.content(), *d.rep_offsets())
+            }
+            None => (None, &[][..], [1, 4, 8]),
+        };
+        context::compress_core(
+            src,
+            *params,
+            dict_id,
+            prefix,
+            rep_offsets,
+            &mut self.hash_table,
+            &mut self.hash_long,
+            &mut self.dict_hash,
+            &mut self.sequences,
+            out,
+            &mut self.workspace,
+            &mut self.combined,
+            true,
+        )
     }
 
     /// Starts a new frame, keeping allocations. Drops buffered input.
@@ -180,11 +242,6 @@ impl EncodeState {
         self.window_buf.len() - self.block_start
     }
 
-    /// The input waiting for the next block.
-    pub(crate) fn buffered_input(&self) -> &[u8] {
-        &self.window_buf[self.block_start..]
-    }
-
     pub(crate) fn dict(&self) -> Option<&Dictionary> {
         self.dict.as_ref()
     }
@@ -195,16 +252,16 @@ impl EncodeState {
         let n = (self.block_size() - self.buffered()).min(input.len());
         let needed = self.window_buf.len() + n;
         if needed > self.window_buf.capacity() {
-            // Room for one block first, so short frames stay small. Past
-            // that, jump toward the most the window holds (two windows and a
-            // block) in big steps: each doubling step copies the window and
-            // faults in fresh pages.
+            // Double up to one block, so short frames stay small. Past that,
+            // jump toward the most the window holds (two windows and a block)
+            // in big steps: each doubling step copies the window and faults
+            // in fresh pages.
             let window = 1usize << self.params.window_log;
             let dict_len = self.dict.as_ref().map_or(0, |d| d.content().len());
             let most = (2 * window).max(dict_len + window) + self.block_size();
             let first = dict_len + self.block_size();
             let target = if needed <= first {
-                first
+                (2 * self.window_buf.capacity()).min(first)
             } else {
                 (2 * self.window_buf.capacity()).max(GROW_STEP).min(most)
             }

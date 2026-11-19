@@ -330,7 +330,7 @@ pub(crate) fn compress_frame(
     } else {
         let mut rep_offsets = [1u32, 4, 8];
         let mut offset = 0;
-        let mut sequences = Vec::with_capacity(MAX_BLOCK_SIZE / 8);
+        let mut sequences = Vec::with_capacity(input.len().min(MAX_BLOCK_SIZE) / 8);
         let mut workspace = block_encoder::BlockEncodeWorkspace::new();
 
         #[cfg(feature = "ldm")]
