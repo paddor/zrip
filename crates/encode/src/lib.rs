@@ -112,7 +112,11 @@ fn write_frame_header_inner(
 ) -> Result<(), CompressError> {
     output.extend_from_slice(&ZSTD_MAGIC.to_le_bytes())?;
 
-    let single_segment = dict_id.is_none() && content_size.is_some_and(fits_single_segment);
+    // As in C zstd, a dictionary frame is single-segment when its window
+    // covers the content: decoders keep the dictionary beside the window.
+    let single_segment = content_size.is_some_and(|size| {
+        fits_single_segment(size) && (dict_id.is_none() || size <= 1usize << window_log)
+    });
     let fcs_size = content_size.map_or(0, |size| {
         frame_content_size_field_size(size, single_segment)
     });
@@ -928,18 +932,31 @@ mod tests {
     }
 
     #[test]
-    fn dict_frame_uses_window_descriptor_even_when_small() {
+    fn dict_frame_its_window_covers_is_single_segment() {
         let mut output = Vec::new();
 
         write_frame_header(&mut output, 12, Some(0x1234), 10).unwrap();
         let header = parse_frame_header(&output).unwrap();
 
-        assert!(!header.single_segment);
+        assert!(header.single_segment);
         assert_eq!(header.frame_content_size, Some(12));
-        assert_eq!(header.window_size, 1 << 10);
         assert_eq!(header.dict_id, Some(0x1234));
         assert!(header.content_checksum);
-        assert_eq!(header.header_size, 12);
+        assert_eq!(header.header_size, 8);
+    }
+
+    #[test]
+    fn dict_frame_past_its_window_uses_window_descriptor() {
+        let mut output = Vec::new();
+
+        write_frame_header(&mut output, 5000, Some(0x1234), 10).unwrap();
+        let header = parse_frame_header(&output).unwrap();
+
+        assert!(!header.single_segment);
+        assert_eq!(header.frame_content_size, Some(5000));
+        assert_eq!(header.window_size, 1 << 10);
+        assert_eq!(header.dict_id, Some(0x1234));
+        assert_eq!(header.header_size, 10);
     }
 
     #[test]

@@ -557,7 +557,9 @@ fn encode_compressed_block_impl(
         );
     }
 
-    let do_codes = policy.custom_tables && n >= 64;
+    // As C zstd at its fast strategies: with valid repeat tables, up to 1000
+    // sequences skip building custom ones.
+    let do_codes = policy.custom_tables && n >= 64 && !(has_repeat && n < 1000);
     let seq_data = if do_codes {
         let f = &workspace.seq_freqs;
         let ll_freq = f.ll.first_chunk::<36>().unwrap();
@@ -1060,7 +1062,11 @@ fn encode_literals_section(
         return true;
     }
     let reuse_bits = prev_huffman.as_ref().and_then(|p| p.estimate_bits(&freqs));
-    let fresh = if want_fresh {
+    // As C zstd at its fast strategies: short literals keep a table that can
+    // encode them. A fresh one rarely repays its description there, and
+    // building it costs more than encoding them.
+    let prefer_reuse = reuse_bits.is_some() && lits.len() <= 1024;
+    let fresh = if want_fresh && !prefer_reuse {
         HuffmanEncodeTable::from_histogram(&freqs).map(|t| {
             let bits = t.estimate_bits(&freqs).unwrap_or(u64::MAX)
                 + t.weights_description().len() as u64 * 8;
@@ -1078,11 +1084,14 @@ fn encode_literals_section(
         return true;
     }
 
+    // Huffman pays only when it beats the raw section, headers included:
+    // tiny sections need the longer Huffman header.
+    let raw_size = raw_literals_header_len(lits.len()) + lits.len();
     if let Some(bits) = reuse_bits
         && bits <= fresh_bits
     {
         let len = encode(prev_huffman.as_ref().unwrap(), huf_concat);
-        if len < lits.len() {
+        if huf_literals_header_len(lits.len(), len) + len < raw_size {
             encode_treeless_literals_header(lits.len(), len, use_4_streams, output);
             output.extend_from_slice(&huf_concat[..len]);
             return false;
@@ -1091,7 +1100,7 @@ fn encode_literals_section(
         let len = encode(&table, huf_concat);
         let tree_desc = table.weights_description();
         let compressed_size = tree_desc.len() + len;
-        if compressed_size < lits.len() {
+        if huf_literals_header_len(lits.len(), compressed_size) + compressed_size < raw_size {
             encode_compressed_literals_header(lits.len(), compressed_size, use_4_streams, output);
             output.extend_from_slice(tree_desc);
             output.extend_from_slice(&huf_concat[..len]);
@@ -1149,6 +1158,24 @@ fn encode_huf_literals_header(
         output.push((both >> 12) as u8);
         output.push((both >> 20) as u8);
         output.push((both >> 28) as u8);
+    }
+}
+
+/// Length of the header [`encode_raw_literals_header`] writes.
+fn raw_literals_header_len(size: usize) -> usize {
+    match size {
+        0..=31 => 1,
+        32..=4095 => 2,
+        _ => 3,
+    }
+}
+
+/// Length of the header [`encode_huf_literals_header`] writes.
+fn huf_literals_header_len(regen_size: usize, comp_size: usize) -> usize {
+    match regen_size.max(comp_size) {
+        0..=1023 => 3,
+        1024..=16383 => 4,
+        _ => 5,
     }
 }
 

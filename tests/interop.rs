@@ -1341,7 +1341,7 @@ fn roundtrip_dict_compress_c_decompress() {
 }
 
 #[test]
-fn dict_frame_header_has_bounded_window_and_c_decompresses() {
+fn dict_frame_header_matches_c_and_c_decompresses() {
     let (samples, dict_data) = make_dict_samples();
     let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
     let c_dict = zstd::dict::DecoderDictionary::copy(&dict_data);
@@ -1349,7 +1349,14 @@ fn dict_frame_header_has_bounded_window_and_c_decompresses() {
 
     let compressed = zrip::compress_with_dict(sample, 1, &dict).unwrap();
     let header = zrip::frame::header::parse_frame_header(&compressed).unwrap();
-    assert!(!header.single_segment);
+    // A frame its window covers is single-segment, as C zstd writes it.
+    let c_frame = zstd::bulk::Compressor::with_dictionary(1, &dict_data)
+        .unwrap()
+        .compress(sample)
+        .unwrap();
+    let c_header = zrip::frame::header::parse_frame_header(&c_frame).unwrap();
+    assert!(c_header.single_segment);
+    assert_eq!(header.single_segment, c_header.single_segment);
     assert_eq!(header.frame_content_size, Some(sample.len() as u64));
     assert_eq!(header.dict_id, Some(dict.id()));
     assert!(header.window_size <= zrip::frame::MAX_WINDOW_SIZE);
@@ -1360,6 +1367,67 @@ fn dict_frame_header_has_bounded_window_and_c_decompresses() {
     let mut decompressed = Vec::new();
     std::io::Read::read_to_end(&mut decoder, &mut decompressed).unwrap();
     assert_eq!(&decompressed, sample);
+}
+
+/// A reused dictionary decoder keeps the dictionary's tables over frames that
+/// only repeat them, and restores them after frames that replace them.
+#[test]
+fn dict_decoder_restores_tables_frames_replaced() {
+    let (samples, dict_data) = make_dict_samples();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let mut c = zstd::bulk::Compressor::with_dictionary(3, &dict_data).unwrap();
+    // A few records with noise between repeat the dictionary's tables,
+    // Huffman included. Long runs of eight letters build their own.
+    let mut x = 0x2545_f491u32;
+    let mut next = move || {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        x
+    };
+    let mut records = |n: usize| -> Vec<u8> {
+        let mut out = Vec::new();
+        for s in samples.iter().cycle().take(n) {
+            out.extend_from_slice(s);
+            out.extend((0..8).map(|_| b'0' + (next() % 10) as u8));
+        }
+        out
+    };
+    let short = [records(4), records(4), records(4), records(4)];
+    let mut letters = |n: usize| -> Vec<u8> { (0..n).map(|_| b'a' + (next() % 8) as u8).collect() };
+    let inputs = [
+        short[0].clone(),
+        letters(5000),
+        short[1].clone(),
+        short[2].clone(),
+        letters(9000),
+        letters(3000),
+        short[3].clone(),
+    ];
+    // Literals mode of the first block: 2 builds a table, 3 reuses one.
+    let lits_mode = |frame: &[u8]| {
+        let header = zrip::frame::header::parse_frame_header(frame).unwrap();
+        frame[header.header_size + 3] & 3
+    };
+    let modes: Vec<u8> = inputs
+        .iter()
+        .map(|i| lits_mode(&c.compress(i).unwrap()))
+        .collect();
+    assert!(
+        modes.windows(2).any(|w| w == [2, 3]),
+        "no frame reuses the dictionary's table after one built its own: {modes:?}"
+    );
+    let mut ctx = zrip::DecompressContext::with_dict(dict.clone());
+    let mut zctx = zrip::CompressContext::with_dict(3, dict).unwrap();
+    for (i, input) in inputs.iter().enumerate() {
+        let frame = c.compress(input).unwrap();
+        assert!(*ctx.decompress(&frame).unwrap() == input[..], "C frame {i}");
+        let frame = zctx.compress(input).unwrap().into_owned();
+        assert!(
+            *ctx.decompress(&frame).unwrap() == input[..],
+            "zrip frame {i}"
+        );
+    }
 }
 
 #[test]

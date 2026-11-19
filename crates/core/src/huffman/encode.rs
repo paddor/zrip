@@ -103,10 +103,6 @@ impl HuffmanEncodeTable {
             }
         }
 
-        if max_sym as usize > 128 {
-            return None;
-        }
-
         let mut syms = [0u8; MAX_SYMBOL_VALUE + 1];
         let mut n = 0usize;
         let mut weights = [0u8; MAX_SYMBOL_VALUE + 1];
@@ -123,6 +119,8 @@ impl HuffmanEncodeTable {
             return None;
         }
 
+        // Tables from a decoder, such as a dictionary's, are only reused, so
+        // weights past the compressed form's 127 bytes may go undescribed.
         let explicit = &weights[..max_sym as usize];
         let description =
             describe_weights(explicit, &weight_histogram(explicit)).unwrap_or_default();

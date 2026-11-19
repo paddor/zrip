@@ -117,14 +117,103 @@ fn dfast_block<const HASH_LOG: u32, const SHORT_LOG: u32, const MLS: u32>(
     hash_long: &mut [u32],
     sequences: &mut Vec<Sequence>,
 ) {
-    simd_body!(compress_dfast_block_impl::<HASH_LOG, SHORT_LOG, MLS>(
-        src,
-        block_start,
+    simd_body!(
+        compress_dfast_block_impl::<HASH_LOG, SHORT_LOG, MLS, false>(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_short,
+            hash_long,
+            AttachedDfastDict::NONE,
+            sequences,
+        )
+    );
+}
+
+/// Read-only DFast tables of dictionary content kept beside the input's own
+/// tables. Their positions lie below `prefix_len` in the combined buffer.
+#[derive(Clone, Copy)]
+pub(crate) struct AttachedDfastDict<'a> {
+    pub(crate) short: &'a [u32],
+    pub(crate) long: &'a [u32],
+    pub(crate) short_log: u32,
+    pub(crate) long_log: u32,
+    pub(crate) prefix_len: usize,
+}
+
+impl AttachedDfastDict<'_> {
+    const NONE: AttachedDfastDict<'static> = AttachedDfastDict {
+        short: &[],
+        long: &[],
+        short_log: 0,
+        long_log: 0,
+        prefix_len: 0,
+    };
+}
+
+/// DFast search over `combined[dict.prefix_len..block_end]`: the input's
+/// positions go into `hash_short` and `hash_long`, and a miss there falls
+/// back to the dictionary's tables, as in C zstd's `dictMatchState` mode.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compress_dfast_block_attached(
+    combined: &[u8],
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    dict: AttachedDfastDict<'_>,
+    hash_short: &mut [u32],
+    hash_long: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    crate::rebase::debug_assert_fits(block_end, params.window_log);
+    if short_mls(params.min_match) == 4 {
+        dfast_block_attached::<4>(
+            combined,
+            block_end,
+            params,
+            rep_offsets,
+            dict,
+            hash_short,
+            hash_long,
+            sequences,
+        );
+    } else {
+        dfast_block_attached::<5>(
+            combined,
+            block_end,
+            params,
+            rep_offsets,
+            dict,
+            hash_short,
+            hash_long,
+            sequences,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn dfast_block_attached<const MLS: u32>(
+    combined: &[u8],
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    dict: AttachedDfastDict<'_>,
+    hash_short: &mut [u32],
+    hash_long: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    simd_body!(compress_dfast_block_impl::<0, 0, MLS, true>(
+        combined,
+        dict.prefix_len,
         block_end,
         params,
         rep_offsets,
         hash_short,
         hash_long,
+        dict,
         sequences,
     ));
 }
@@ -144,10 +233,17 @@ fn second4(v: u64) -> u32 {
 /// Each position probes the long table (8-byte hash) and the short table
 /// (`MLS`-byte hash) and checks rep 0 one byte ahead. A short match also
 /// tries the long table at the next position. The step between positions
-/// grows by one every `1 << search_strength` bytes without a match.
+/// grows by one every `1 << search_strength` bytes without a match. With
+/// `DICT`, a probe that misses the input's tables looks up the attached
+/// dictionary's.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const MLS: u32>(
+fn compress_dfast_block_impl<
+    const HASH_LOG: u32,
+    const SHORT_LOG: u32,
+    const MLS: u32,
+    const DICT: bool,
+>(
     src: &[u8],
     block_start: usize,
     block_end: usize,
@@ -155,6 +251,7 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
     rep_offsets: &[u32; 3],
     hash_short: &mut [u32],
     hash_long: &mut [u32],
+    dict: AttachedDfastDict<'_>,
     sequences: &mut Vec<Sequence>,
 ) {
     sequences.clear();
@@ -190,6 +287,15 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
     // end, as in C zstd.
     let low = block_end.saturating_sub(max_distance);
     let in_window = |m: usize| m >= low;
+    // With a dictionary attached, the input's tables hold input positions
+    // only: an entry below them is a cleared slot. Dictionary entries lie
+    // below the input.
+    let input_low = if DICT { low.max(dict.prefix_len) } else { low };
+    let in_input = |m: usize| m >= input_low;
+    let in_dict = |m: usize| m < dict.prefix_len && in_window(m);
+    // The dictionary's long, then short, candidate for the eight bytes `v`.
+    let dict_long = |v: u64| hash_load!(dict.long, h8(v, dict.long_log)) as usize;
+    let dict_short = |v: u64| hash_load!(dict.short, short_hash(v, MLS, dict.short_log)) as usize;
 
     'outer: loop {
         let mut step = 1usize;
@@ -245,29 +351,44 @@ fn compress_dfast_block_impl<const HASH_LOG: u32, const SHORT_LOG: u32, const ML
             let hl1 = h8(v1, hash_log);
 
             // Long match at ip.
-            let found = if in_window(idxl0) & (rd64!(src, idxl0.min(ilimit)) == v0) {
-                let ml = count_match!(src, ip + 8, idxl0 + 8, block_end) + 8;
-                Some((ip, idxl0, ml))
+            let long0 = if in_input(idxl0) & (rd64!(src, idxl0.min(ilimit)) == v0) {
+                Some(idxl0)
+            } else if DICT {
+                let d = dict_long(v0);
+                (in_dict(d) && rd64!(src, d) == v0).then_some(d)
             } else {
                 None
             };
+            let found = long0.map(|m| (ip, m, count_match!(src, ip + 8, m + 8, block_end) + 8));
 
             let idxl1 = hash_load!(hash_long, hl1) as usize;
 
             // Short match at ip, then a long match at ip1 if it is longer.
             let found = found.or_else(|| {
-                if in_window(idxs0) & (rd32!(src, idxs0.min(ilimit)) == first4(v0)) {
-                    let ml = count_match!(src, ip + 4, idxs0 + 4, block_end) + 4;
-                    if in_window(idxl1) & (rd64!(src, idxl1.min(ilimit)) == v1) {
-                        let l1 = count_match!(src, ip1 + 8, idxl1 + 8, block_end) + 8;
-                        if l1 > ml {
-                            return Some((ip1, idxl1, l1));
-                        }
-                    }
-                    Some((ip, idxs0, ml))
+                let short0 = if in_input(idxs0) & (rd32!(src, idxs0.min(ilimit)) == first4(v0)) {
+                    Some(idxs0)
+                } else if DICT {
+                    let d = dict_short(v0);
+                    (in_dict(d) && rd32!(src, d) == first4(v0)).then_some(d)
                 } else {
                     None
+                }?;
+                let ml = count_match!(src, ip + 4, short0 + 4, block_end) + 4;
+                let long1 = if in_input(idxl1) & (rd64!(src, idxl1.min(ilimit)) == v1) {
+                    Some(idxl1)
+                } else if DICT {
+                    let d = dict_long(v1);
+                    (in_dict(d) && rd64!(src, d) == v1).then_some(d)
+                } else {
+                    None
+                };
+                if let Some(m1) = long1 {
+                    let l1 = count_match!(src, ip1 + 8, m1 + 8, block_end) + 8;
+                    if l1 > ml {
+                        return Some((ip1, m1, l1));
+                    }
                 }
+                Some((ip, short0, ml))
             });
 
             if let Some((mip, m, ml)) = found {

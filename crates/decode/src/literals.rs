@@ -207,6 +207,7 @@ pub(crate) fn decode_literals_ws(
                 )?;
                 let can_reuse = ws.huf_last_weights_valid && ws.huf_weights == ws.huf_last_weights;
                 if !can_reuse {
+                    ws.huf_is_dict = false;
                     ws.huf_table_log = build_huffman_decode_table_into(
                         &ws.huf_weights,
                         &mut ws.huf_table,
