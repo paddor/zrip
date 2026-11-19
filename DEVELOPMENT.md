@@ -273,6 +273,7 @@ Rust chart generation lives in the `bench` crate and reads
 | `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- small-encode` | `small_encode.svg` | Encode speed vs input size |
 | `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- small-decode` | `small_decode.svg` | Small decode comparison |
 | `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- tiny-matrix` | `tiny_matrix.svg` | Geomean pipeline stacks for random 512 B to 8 KiB Silesia slices, Fast levels |
+| `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- sweep` | `sweep.svg`, `sweep_l3.svg` | Compress, roundtrip and ratio vs slice size, with and without a dictionary, at levels 1 and 3 |
 
 Chart refresh means benchmark first, appending new rows to the cache, then run
 the chart tool. Re-running the chart tool against old cache data only replots;
@@ -325,7 +326,8 @@ predictor learn it and distorts results. `small_decode.svg` draws each
 implementation decoding C zstd's L3 frames (thick) and its own L3 output
 (thin, from the small encode rows).
 
-`small_encode.svg` includes zrip, C zstd, structured-zstd, mzstd, and lz4rip.
+`small_encode.svg` includes zrip, C zstd, structured-zstd, mzstd, rusty_zstd,
+and lz4rip.
 Default `--small-only` benchmarks zrip only:
 
 ```bash
@@ -348,6 +350,23 @@ cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
 cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- tiny-matrix
 ```
 
+### Dictionary sweep
+
+`--sweep` runs zrip, C zstd, structured-zstd and rusty_zstd, each with and
+without a dictionary, on 64 consecutive slices of 64 B to 1 MiB from every
+Silesia file, at levels 1 and 3. Each file gets one 16 KiB dictionary, trained
+by C zstd on 1 KiB samples past the first MiB, so the slices up to 16 KiB are
+not in its training set. Codecs reuse their compressor and decoder, except
+rusty_zstd, which has neither. Rows hold per-message means and go to
+`~/.cache/zrip/<arch>/sweep/`. `sweep.svg` (level 1) and `sweep_l3.svg`
+(level 3) plot the geomean over the files:
+
+```bash
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --sweep --impl all
+cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- sweep
+```
+
 ### All-implementation benchmark + chart workflow
 
 Use this only when refreshing all baselines, validating a benchmark harness
@@ -362,6 +381,8 @@ cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
   --small-only --decode-only --levels 3
 cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
   --tiny --impl all --levels -7,-6,-5,-4,-3,-2,-1,1,2
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --sweep --impl all
 export ZRIP_HW_EXTRAS="performance governor,turbo off"
 cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- all
 ```

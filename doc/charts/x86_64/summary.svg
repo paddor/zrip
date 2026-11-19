@@ -22,34 +22,40 @@ seconds / GB
 30.0
 </text>
 <polyline fill="none" opacity="1" stroke="#30363D" stroke-width="2" points="70,313 680,313 "/>
-<rect x="111" y="293" width="80" height="20" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="111" y="260" width="80" height="33" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="111" y="255" width="80" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
-<text x="151" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
+<rect x="90" y="293" width="72" height="20" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="90" y="260" width="72" height="33" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="90" y="255" width="72" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
+<text x="126" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 C zstd
 </text>
-<rect x="223" y="295" width="80" height="18" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="223" y="264" width="80" height="31" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="223" y="258" width="80" height="6" opacity="1" fill="#F87171" stroke="none"/>
-<text x="263" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
+<rect x="190" y="295" width="71" height="18" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="190" y="264" width="71" height="31" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="190" y="258" width="71" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<text x="226" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 zrip
 </text>
-<rect x="335" y="293" width="80" height="20" opacity="1" fill="#F59E0B" stroke="none"/>
-<rect x="335" y="260" width="80" height="33" opacity="1" fill="#C47D08" stroke="none"/>
-<rect x="335" y="254" width="80" height="6" opacity="1" fill="#F59E0B" stroke="none"/>
-<text x="375" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
+<rect x="290" y="293" width="71" height="20" opacity="1" fill="#F59E0B" stroke="none"/>
+<rect x="290" y="260" width="71" height="33" opacity="1" fill="#C47D08" stroke="none"/>
+<rect x="290" y="254" width="71" height="6" opacity="1" fill="#F59E0B" stroke="none"/>
+<text x="325" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 structured-zstd
 </text>
-<rect x="447" y="292" width="80" height="21" opacity="1" fill="#2DD4BF" stroke="none"/>
-<rect x="447" y="260" width="80" height="32" opacity="1" fill="#22A896" stroke="none"/>
-<rect x="447" y="254" width="80" height="6" opacity="1" fill="#2DD4BF" stroke="none"/>
-<text x="487" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
+<rect x="389" y="292" width="71" height="21" opacity="1" fill="#2DD4BF" stroke="none"/>
+<rect x="389" y="260" width="71" height="32" opacity="1" fill="#22A896" stroke="none"/>
+<rect x="389" y="254" width="71" height="6" opacity="1" fill="#2DD4BF" stroke="none"/>
+<text x="425" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 mzstd
 </text>
-<rect x="559" y="162" width="80" height="151" opacity="1" fill="#4ADE80" stroke="none"/>
-<rect x="559" y="127" width="80" height="35" opacity="1" fill="#3AAF60" stroke="none"/>
-<rect x="559" y="96" width="80" height="31" opacity="1" fill="#4ADE80" stroke="none"/>
-<text x="599" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
+<rect x="489" y="287" width="71" height="26" opacity="1" fill="#FDE047" stroke="none"/>
+<rect x="489" y="258" width="71" height="29" opacity="1" fill="#CAB238" stroke="none"/>
+<rect x="489" y="243" width="71" height="15" opacity="1" fill="#FDE047" stroke="none"/>
+<text x="524" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
+rusty_zstd
+</text>
+<rect x="589" y="162" width="71" height="151" opacity="1" fill="#4ADE80" stroke="none"/>
+<rect x="589" y="127" width="71" height="35" opacity="1" fill="#3AAF60" stroke="none"/>
+<rect x="589" y="96" width="71" height="31" opacity="1" fill="#4ADE80" stroke="none"/>
+<text x="624" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 ruzstd
 </text>
 <rect x="115" y="359" width="12" height="12" opacity="1" fill="#60A5FA" stroke="none"/>
@@ -68,8 +74,12 @@ structured-zstd v0.4.2 (unsafe)
 <text x="403" y="365" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
 mzstd v0.2.14 (safe)
 </text>
-<rect x="385" y="379" width="12" height="12" opacity="1" fill="#4ADE80" stroke="none"/>
+<rect x="385" y="379" width="12" height="12" opacity="1" fill="#FDE047" stroke="none"/>
 <text x="403" y="385" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+rusty_zstd v0.5.0 (unsafe)
+</text>
+<rect x="385" y="399" width="12" height="12" opacity="1" fill="#4ADE80" stroke="none"/>
+<text x="403" y="405" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
 ruzstd v0.8.3 (safe)
 </text>
 <text x="140" y="443" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.064516129032258" opacity="1" fill="#E6EDF3">

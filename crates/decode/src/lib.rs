@@ -65,6 +65,11 @@ pub(crate) struct BlockDecodeWorkspace {
     pub cached_dict_tables: Option<Box<SequenceDecodeTables>>,
     pub cached_dict_rep: [u32; 3],
     pub cached_dict_huf: Option<(Vec<HuffmanDecodeEntry>, u8)>,
+    /// `huf_table` and `seq_tables` still hold the cached dictionary's
+    /// tables, unchanged since a frame restored them, so the next frame
+    /// needs no copy. Every write to them clears these.
+    pub huf_is_dict: bool,
+    pub seq_is_dict: bool,
 }
 
 impl BlockDecodeWorkspace {
@@ -93,6 +98,8 @@ impl BlockDecodeWorkspace {
             cached_dict_tables: None,
             cached_dict_rep: [1, 4, 8],
             cached_dict_huf: None,
+            huf_is_dict: false,
+            seq_is_dict: false,
         }
     }
 
@@ -103,6 +110,7 @@ impl BlockDecodeWorkspace {
     /// Records that `huf_table` was replaced, so the cached Huffman header and
     /// weights no longer describe it.
     pub(crate) fn huffman_table_replaced(&mut self) {
+        self.huf_is_dict = false;
         self.huf_pairs_valid = false;
         self.huf_last_weights_valid = false;
         self.huf_last_header_valid = false;
@@ -112,6 +120,7 @@ impl BlockDecodeWorkspace {
     /// match `seq_table_cache`, so the next cache hit copies the cached
     /// tables instead of only their repeat flags.
     pub(crate) fn seq_tables_replaced(&mut self) {
+        self.seq_is_dict = false;
         self.seq_table_cache_tables_current = false;
     }
 
@@ -291,11 +300,15 @@ fn decompress_frame_with_header(
     let mut rep_offsets = [1u32, 4, 8];
     ws.reset_huffman_state();
     if let Some((ref t, l)) = ws.cached_dict_huf {
-        ws.huf_table.clear();
-        ws.huf_table.extend_from_slice(t);
+        // Frames that only reuse the dictionary's table leave it in place.
+        if !ws.huf_is_dict {
+            ws.huf_table.clear();
+            ws.huf_table.extend_from_slice(t);
+            ws.huffman_table_replaced();
+            ws.huf_is_dict = true;
+        }
         ws.huf_table_log = l;
         ws.huf_valid = true;
-        ws.huffman_table_replaced();
     } else if let Some(d) = dict
         && let Some((t, l)) = d.huf_table()
     {
@@ -443,8 +456,17 @@ fn initial_sequence_state(
     dict: Option<&zrip_core::dict::Dictionary>,
 ) -> [u32; 3] {
     if let Some(ref cached) = ws.cached_dict_tables {
-        tables.clone_from(cached);
-        ws.seq_tables_replaced();
+        // Frames that only repeat the dictionary's tables leave them in
+        // place. A frame without a dictionary may have cleared their flags.
+        if ws.seq_is_dict {
+            tables.ll_set = cached.ll_set;
+            tables.of_set = cached.of_set;
+            tables.ml_set = cached.ml_set;
+        } else {
+            tables.clone_from(cached);
+            ws.seq_tables_replaced();
+            ws.seq_is_dict = true;
+        }
         ws.cached_dict_rep
     } else if let Some(d) = dict {
         tables.reset_default();

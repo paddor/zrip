@@ -1,8 +1,6 @@
 #[cfg(feature = "alloc")]
 use alloc::borrow::Cow;
 #[cfg(feature = "alloc")]
-use alloc::vec;
-#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 use crate::block_encoder::{self, BlockEncodeWorkspace};
@@ -10,6 +8,7 @@ use crate::fast::AttachedDict;
 use crate::output::{OutputSink, SliceSink};
 use crate::rebase::{self, PositionBase};
 use crate::strategy::{self, LevelParams, Strategy};
+use crate::table::MatchTable;
 use crate::{dfast, fast, skip_match_search, write_frame_header_with_checksum};
 use zrip_core::Sequence;
 use zrip_core::dict::Dictionary;
@@ -18,24 +17,57 @@ use zrip_core::frame::MAX_BLOCK_SIZE;
 use zrip_core::huffman::encode::HuffmanEncodeTable;
 use zrip_core::xxhash::{Xxh64State, xxh64};
 
-/// Largest Fast-strategy input that keeps the dictionary in its own table
-/// instead of copying the prefilled table, as C zstd does for its fast
-/// strategy.
+/// Largest input that keeps the dictionary in its own tables instead of
+/// copying the prefilled ones, as C zstd does for its fast and dfast
+/// strategies. Past it, copying the tables costs less than the dictionary
+/// probes.
 const ATTACH_THRESHOLD: usize = 8192;
+
+/// Largest DFast input that attaches the dictionary when its prefilled
+/// tables are sized for other inputs.
+const DFAST_ATTACH_LIMIT: usize = 16 * 1024;
+
+/// Dictionary tables for attached inputs at one minimum match, sized to the
+/// dictionary content: the Fast table, or the DFast short and long tables.
+/// Empty until built.
+struct Attached {
+    min_match: u32,
+    table: Vec<u32>,
+    long: Vec<u32>,
+}
+
+/// The log of an attached table for a `prefix_len`-byte dictionary, at most
+/// `cap`.
+fn attached_log(prefix_len: usize, cap: u32) -> u32 {
+    if prefix_len >= 2 {
+        (strategy::src_log(prefix_len) + 1)
+            .clamp(strategy::HASH_LOG_MIN, cap.max(strategy::HASH_LOG_MIN))
+    } else {
+        strategy::HASH_LOG_MIN
+    }
+}
 
 /// Pre-computed dictionary state for hot-loop compression.
 ///
-/// Built once from a [`Dictionary`] + [`LevelParams`]. Caches the pre-filled
-/// hash table(s) and a combined buffer with the dict prefix already loaded,
-/// plus encode-side entropy tables built from the dict's decode tables.
+/// Built once from a [`Dictionary`] + [`LevelParams`]. Holds a combined
+/// buffer with the dict prefix already loaded and encode-side entropy tables
+/// built from the dict's decode tables. The prefilled hash tables are built
+/// by the first input that uses them, so a context that compresses only
+/// inputs of other sizes never builds them.
 pub(crate) struct PreparedDict {
     combined: Vec<u8>,
+    /// The parameters the snapshots are prefilled for.
+    params: LevelParams,
+    /// Empty until built.
     hash_snapshot: Vec<u32>,
     hash_long_snapshot: Vec<u32>,
-    /// Fast-strategy dictionary tables for attached inputs, one per minimum
-    /// match the level uses, sized to the dictionary content.
-    attached: Vec<(u32, Vec<u32>)>,
+    /// Dictionary tables for attached inputs, one set per minimum match the
+    /// level uses.
+    attached: Vec<Attached>,
+    /// Logs of the attached Fast or DFast short tables, and of the DFast
+    /// long tables.
     attached_hash_log: u32,
+    attached_long_log: u32,
     prefix_len: usize,
     rep_offsets: [u32; 3],
     dict_id: u32,
@@ -50,69 +82,32 @@ impl PreparedDict {
         let prefix = dict.content();
         let prefix_len = prefix.len();
 
-        let mut combined = Vec::with_capacity(prefix_len + MAX_BLOCK_SIZE);
+        // Inputs that take the per-call prefix path never use it, so it grows
+        // to the input on first use.
+        let mut combined = Vec::with_capacity(prefix_len);
         combined.extend_from_slice(prefix);
 
-        let attached_hash_log = if prefix_len >= 2 {
-            let src_log = strategy::src_log(prefix_len);
-            (src_log + 1).clamp(
-                strategy::HASH_LOG_MIN,
-                params.hash_log.max(strategy::HASH_LOG_MIN),
-            )
-        } else {
-            strategy::HASH_LOG_MIN
+        let (attached_hash_log, attached_long_log) = match params.strategy {
+            Strategy::Fast => (attached_log(prefix_len, params.hash_log), 0),
+            Strategy::DFast => (
+                attached_log(prefix_len, params.chain_log),
+                attached_log(prefix_len, params.hash_log),
+            ),
         };
-        let mut attached: Vec<(u32, Vec<u32>)> = Vec::new();
-        if params.strategy == Strategy::Fast {
-            // Small inputs at negative levels search with a shorter match.
-            for size in [1, ATTACH_THRESHOLD, MAX_BLOCK_SIZE] {
-                let min_match = strategy::level_params_for_size(level, prefix_len + size)
-                    .expect("level validated by the caller")
-                    .min_match;
-                if attached.iter().all(|(mls, _)| *mls != min_match) {
-                    let mut table = vec![0u32; 1 << attached_hash_log];
-                    fast::prefill_hash_table(
-                        &combined,
-                        prefix_len,
-                        attached_hash_log,
-                        min_match,
-                        &mut table,
-                    );
-                    attached.push((min_match, table));
-                }
+        let mut attached: Vec<Attached> = Vec::new();
+        // Small inputs at negative levels search with a shorter match.
+        for size in [1, ATTACH_THRESHOLD, MAX_BLOCK_SIZE] {
+            let min_match = strategy::level_params_for_size(level, prefix_len + size)
+                .expect("level validated by the caller")
+                .min_match;
+            if attached.iter().all(|a| a.min_match != min_match) {
+                attached.push(Attached {
+                    min_match,
+                    table: Vec::new(),
+                    long: Vec::new(),
+                });
             }
         }
-
-        let (hash_snapshot, hash_long_snapshot) = match params.strategy {
-            Strategy::Fast => {
-                let hash_size = 1usize << params.hash_log;
-                let mut hash_table = vec![0u32; hash_size];
-                fast::prefill_hash_table(
-                    &combined,
-                    prefix_len,
-                    params.hash_log,
-                    params.min_match,
-                    &mut hash_table,
-                );
-                (hash_table, Vec::new())
-            }
-            Strategy::DFast => {
-                let short_size = 1usize << params.chain_log;
-                let long_size = 1usize << params.hash_log;
-                let mut hash_short = vec![0u32; short_size];
-                let mut hash_long = vec![0u32; long_size];
-                dfast::prefill_hash_tables(
-                    &combined,
-                    prefix_len,
-                    params.hash_log,
-                    params.chain_log,
-                    params.min_match,
-                    &mut hash_short,
-                    &mut hash_long,
-                );
-                (hash_short, hash_long)
-            }
-        };
 
         let huf_table = dict
             .huf_table()
@@ -130,10 +125,12 @@ impl PreparedDict {
 
         Self {
             combined,
-            hash_snapshot,
-            hash_long_snapshot,
+            params: *params,
+            hash_snapshot: Vec::new(),
+            hash_long_snapshot: Vec::new(),
             attached,
             attached_hash_log,
+            attached_long_log,
             prefix_len,
             rep_offsets: *dict.rep_offsets(),
             dict_id: dict.id(),
@@ -144,12 +141,94 @@ impl PreparedDict {
         }
     }
 
-    /// The attached dictionary table hashed for `min_match`.
-    fn attached_table(&self, min_match: u32) -> Option<&[u32]> {
-        self.attached
-            .iter()
-            .find(|(mls, _)| *mls == min_match)
-            .map(|(_, table)| table.as_slice())
+    /// Whether `params` use the table sizes the snapshots are built for.
+    fn snapshot_matches(&self, params: &LevelParams) -> bool {
+        let p = &self.params;
+        match params.strategy {
+            Strategy::Fast => params.hash_log == p.hash_log,
+            Strategy::DFast => params.chain_log == p.chain_log && params.hash_log == p.hash_log,
+        }
+    }
+
+    /// The tables prefilled with the dictionary, built on first use.
+    fn snapshots(&mut self) -> (&[u32], &[u32]) {
+        if self.hash_snapshot.is_empty() {
+            let p = &self.params;
+            // The buffer may still hold the last input after the prefix, and
+            // the Fast prefill hashes up to the end of what it is given.
+            let prefix = &self.combined[..self.prefix_len];
+            let mut hash_table = MatchTable::new();
+            match p.strategy {
+                Strategy::Fast => {
+                    fast::prefill_hash_table(
+                        prefix,
+                        self.prefix_len,
+                        p.hash_log,
+                        p.min_match,
+                        &mut hash_table,
+                    );
+                }
+                Strategy::DFast => {
+                    let mut hash_long = MatchTable::new();
+                    dfast::prefill_hash_tables(
+                        prefix,
+                        self.prefix_len,
+                        p.hash_log,
+                        p.chain_log,
+                        p.min_match,
+                        &mut hash_table,
+                        &mut hash_long,
+                    );
+                    self.hash_long_snapshot = hash_long.into_vec();
+                }
+            }
+            self.hash_snapshot = hash_table.into_vec();
+        }
+        (&self.hash_snapshot, &self.hash_long_snapshot)
+    }
+
+    /// Whether the level uses attached tables hashed for `min_match`.
+    fn has_attached(&self, min_match: u32) -> bool {
+        self.attached.iter().any(|a| a.min_match == min_match)
+    }
+
+    /// Builds the attached tables hashed for `min_match` if they are missing.
+    fn build_attached(&mut self, min_match: u32) {
+        // Only the prefix, as in `snapshots`.
+        let prefix = &self.combined[..self.prefix_len];
+        let (hash_log, long_log) = (self.attached_hash_log, self.attached_long_log);
+        let strategy = self.params.strategy;
+        if let Some(a) = self
+            .attached
+            .iter_mut()
+            .find(|a| a.min_match == min_match && a.table.is_empty())
+        {
+            let mut table = MatchTable::new();
+            match strategy {
+                Strategy::Fast => {
+                    fast::prefill_hash_table(prefix, prefix.len(), hash_log, min_match, &mut table);
+                }
+                Strategy::DFast => {
+                    let mut long = MatchTable::new();
+                    dfast::prefill_hash_tables(
+                        prefix,
+                        prefix.len(),
+                        long_log,
+                        hash_log,
+                        min_match,
+                        &mut table,
+                        &mut long,
+                    );
+                    a.long = long.into_vec();
+                }
+            }
+            a.table = table.into_vec();
+        }
+    }
+
+    /// The attached dictionary tables hashed for `min_match`, once built.
+    fn attached(&self, min_match: u32) -> Option<&Attached> {
+        self.attached.iter().find(|a| a.min_match == min_match)
     }
 }
 
@@ -173,10 +252,13 @@ pub struct CompressContext {
     /// level change.
     dict: Option<(Dictionary, usize)>,
     prepared: Option<PreparedDict>,
-    hash_table: Vec<u32>,
-    hash_long: Vec<u32>,
-    dict_hash: Vec<u32>,
-    small_hash: Vec<u32>,
+    hash_table: MatchTable,
+    hash_long: MatchTable,
+    dict_hash: MatchTable,
+    /// The input's own tables beside attached dictionary tables: the Fast
+    /// or DFast short table, and the DFast long table.
+    small_hash: MatchTable,
+    small_long: MatchTable,
     sequences: Vec<Sequence>,
     output: Vec<u8>,
     workspace: BlockEncodeWorkspace,
@@ -195,10 +277,11 @@ impl CompressContext {
             content_checksum: true,
             dict: None,
             prepared: None,
-            hash_table: Vec::new(),
-            hash_long: Vec::new(),
-            dict_hash: Vec::new(),
-            small_hash: Vec::new(),
+            hash_table: MatchTable::new(),
+            hash_long: MatchTable::new(),
+            dict_hash: MatchTable::new(),
+            small_hash: MatchTable::new(),
+            small_long: MatchTable::new(),
             sequences: Vec::new(),
             output: Vec::new(),
             workspace: BlockEncodeWorkspace::new(),
@@ -208,10 +291,10 @@ impl CompressContext {
 
     /// Creates a new context with a pre-loaded dictionary.
     ///
-    /// The prepared hash table snapshot is built for the T0 (>256 KB)
-    /// parameter tier. Inputs whose tiered params match T0's hash sizes
-    /// use the fast snapshot-restore path; others fall back to per-call
-    /// prefix hashing.
+    /// The prepared hash table snapshot is for the T0 (>256 KB) parameter
+    /// tier, built by the first input that uses it. Inputs whose tiered
+    /// params match T0's hash sizes use the fast snapshot-restore path;
+    /// others fall back to per-call prefix hashing.
     ///
     /// Use [`with_dict_for_size`] to build the snapshot for a specific
     /// input size tier.
@@ -222,9 +305,9 @@ impl CompressContext {
     /// Creates a new context with a pre-loaded dictionary, optimized for
     /// inputs of approximately `expected_size` bytes.
     ///
-    /// The prepared hash table snapshot is built for the parameter tier
-    /// matching `expected_size`. Inputs in the same tier use the fast
-    /// snapshot-restore path.
+    /// The prepared hash table snapshot is for the parameter tier matching
+    /// `expected_size`, built by the first input that uses it. Inputs in
+    /// the same tier use the fast snapshot-restore path.
     pub fn with_dict_for_size(
         level: i32,
         dict: Dictionary,
@@ -234,16 +317,16 @@ impl CompressContext {
         let params = strategy::level_params_for_size(level, total_window)
             .ok_or(CompressError::InvalidLevel(level))?;
         let prepared = PreparedDict::new(&dict, level, &params);
-        // Frames restore the tables from the prepared snapshots before use.
         Ok(Self {
             level,
             content_checksum: true,
             dict: Some((dict, expected_size)),
             prepared: Some(prepared),
-            hash_table: Vec::new(),
-            hash_long: Vec::new(),
-            dict_hash: Vec::new(),
-            small_hash: Vec::new(),
+            hash_table: MatchTable::new(),
+            hash_long: MatchTable::new(),
+            dict_hash: MatchTable::new(),
+            small_hash: MatchTable::new(),
+            small_long: MatchTable::new(),
             sequences: Vec::new(),
             output: Vec::new(),
             workspace: BlockEncodeWorkspace::new(),
@@ -395,22 +478,20 @@ impl CompressContext {
 
         let dict_id = prep.dict_id;
         let prefix_len = prep.prefix_len;
-        let snapshot_matches = match params.strategy {
-            Strategy::Fast => (1usize << params.hash_log) == prep.hash_snapshot.len(),
-            Strategy::DFast => {
-                (1usize << params.chain_log) == prep.hash_snapshot.len()
-                    && (1usize << params.hash_log) == prep.hash_long_snapshot.len()
-            }
-        };
-        // A one-block input also attaches when the snapshot is sized for
-        // another tier: that beats prefilling a table per call.
-        let attached = (params.strategy == Strategy::Fast
-            && !input.is_empty()
+        let snapshot_matches = prep.snapshot_matches(&params);
+        // An input the snapshot is not sized for also attaches, which beats
+        // prefilling tables per call: any one-block input for Fast, and for
+        // DFast, which probes two dictionary tables per position, up to
+        // C zstd's cutoff for its dfast strategy.
+        let other_tier = !snapshot_matches
+            && match params.strategy {
+                Strategy::Fast => true,
+                Strategy::DFast => input.len() <= DFAST_ATTACH_LIMIT,
+            };
+        let use_attached = !input.is_empty()
             && input.len() <= MAX_BLOCK_SIZE
-            && (input.len() <= ATTACH_THRESHOLD || !snapshot_matches))
-            .then(|| prep.attached_table(params.min_match))
-            .flatten();
-        let use_attached = attached.is_some();
+            && (input.len() <= ATTACH_THRESHOLD || other_tier)
+            && prep.has_attached(params.min_match);
 
         if !use_attached && !snapshot_matches {
             return self.compress_with_dict_fallback(input, dict_id, prefix_len, output);
@@ -418,14 +499,15 @@ impl CompressContext {
 
         {
             let prep = self.prepared.as_mut().unwrap();
-            if !use_attached {
+            if use_attached {
+                prep.build_attached(params.min_match);
+            } else {
                 // The per-call prefix path resizes these tables for its own
                 // parameter tier, so restore length and contents together.
-                self.hash_table.clear();
-                self.hash_table.extend_from_slice(&prep.hash_snapshot);
-                if !prep.hash_long_snapshot.is_empty() {
-                    self.hash_long.clear();
-                    self.hash_long.extend_from_slice(&prep.hash_long_snapshot);
+                let (short, long) = prep.snapshots();
+                self.hash_table.copy_from(short);
+                if !long.is_empty() {
+                    self.hash_long.copy_from(long);
                 }
             }
             prep.combined.truncate(prep.prefix_len);
@@ -461,36 +543,63 @@ impl CompressContext {
         if input.is_empty() {
             block_encoder::encode_raw_block(&[], true, output)?;
         } else if use_attached {
-            let input_hash_log = if input.len() >= 2 {
-                let src_log = strategy::src_log(input.len());
-                params.hash_log.min(src_log).max(strategy::HASH_LOG_MIN)
-            } else {
-                strategy::HASH_LOG_MIN
-            };
-            let input_hash_size = 1usize << input_hash_log;
-            self.small_hash.resize(input_hash_size, 0);
-            self.small_hash.fill(0);
-
-            let mut rep_offsets = prep.rep_offsets;
-            let dict = AttachedDict {
-                table: prep.attached_table(params.min_match).unwrap(),
-                hash_log: prep.attached_hash_log,
-                prefix_len,
+            // The input's own tables, sized to it.
+            let input_log = |cap: u32| {
+                if input.len() >= 2 {
+                    cap.min(strategy::src_log(input.len()))
+                        .max(strategy::HASH_LOG_MIN)
+                } else {
+                    strategy::HASH_LOG_MIN
+                }
             };
             let input_params = LevelParams {
-                hash_log: input_hash_log,
+                hash_log: input_log(params.hash_log),
+                chain_log: input_log(params.chain_log),
                 ..params
             };
-
-            fast::compress_fast_block_attached(
-                &prep.combined,
-                prefix_len + input.len(),
-                &input_params,
-                &prep.rep_offsets,
-                dict,
-                &mut self.small_hash,
-                &mut self.sequences,
-            );
+            let mut rep_offsets = prep.rep_offsets;
+            let tables = prep.attached(params.min_match).unwrap();
+            let block_end = prefix_len + input.len();
+            match params.strategy {
+                Strategy::Fast => {
+                    self.small_hash.clear(1usize << input_params.hash_log);
+                    let dict = AttachedDict {
+                        table: &tables.table,
+                        hash_log: prep.attached_hash_log,
+                        prefix_len,
+                    };
+                    fast::compress_fast_block_attached(
+                        &prep.combined,
+                        block_end,
+                        &input_params,
+                        &prep.rep_offsets,
+                        dict,
+                        &mut self.small_hash,
+                        &mut self.sequences,
+                    );
+                }
+                Strategy::DFast => {
+                    self.small_hash.clear(1usize << input_params.chain_log);
+                    self.small_long.clear(1usize << input_params.hash_log);
+                    let dict = dfast::AttachedDfastDict {
+                        short: &tables.table,
+                        long: &tables.long,
+                        short_log: prep.attached_hash_log,
+                        long_log: prep.attached_long_log,
+                        prefix_len,
+                    };
+                    dfast::compress_dfast_block_attached(
+                        &prep.combined,
+                        block_end,
+                        &input_params,
+                        &prep.rep_offsets,
+                        dict,
+                        &mut self.small_hash,
+                        &mut self.small_long,
+                        &mut self.sequences,
+                    );
+                }
+            }
 
             if params.force_raw_literals {
                 block_encoder::encode_compressed_block_raw(
@@ -678,15 +787,15 @@ impl CompressContext {
 }
 
 #[allow(clippy::too_many_arguments, clippy::unnecessary_wraps)]
-fn compress_core<S: OutputSink>(
+pub(crate) fn compress_core<S: OutputSink>(
     input: &[u8],
     params: LevelParams,
     dict_id: Option<u32>,
     prefix: &[u8],
     init_rep_offsets: [u32; 3],
-    hash_table: &mut Vec<u32>,
-    hash_long: &mut Vec<u32>,
-    dict_hash: &mut Vec<u32>,
+    hash_table: &mut MatchTable,
+    hash_long: &mut MatchTable,
+    dict_hash: &mut MatchTable,
     sequences: &mut Vec<Sequence>,
     output: &mut S,
     workspace: &mut BlockEncodeWorkspace,
@@ -728,18 +837,9 @@ fn compress_core<S: OutputSink>(
         let mut offset = 0;
         let mut positions = PositionBase::new(params.window_log);
 
-        // A table grown from empty is zeroed already.
-        let short_zeroed = hash_table.is_empty();
-        if hash_table.len() != hash_size {
-            hash_table.resize(hash_size, 0);
-        }
-
         match params.strategy {
             Strategy::Fast => {
                 if has_prefix && input.len() <= MAX_BLOCK_SIZE {
-                    if dict_hash.len() != hash_size {
-                        dict_hash.resize(hash_size, 0);
-                    }
                     fast::compress_fast_with_prefix_reuse(
                         input,
                         &params,
@@ -824,9 +924,7 @@ fn compress_core<S: OutputSink>(
                         offset += chunk_size;
                     }
                 } else {
-                    if !short_zeroed {
-                        hash_table.fill(0);
-                    }
+                    hash_table.clear(hash_size);
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let block_end = offset + chunk_size;
@@ -879,10 +977,6 @@ fn compress_core<S: OutputSink>(
                 }
             }
             Strategy::DFast => {
-                let long_zeroed = hash_long.is_empty();
-                if hash_long.len() != long_size {
-                    hash_long.resize(long_size, 0);
-                }
                 if has_prefix && input.len() <= MAX_BLOCK_SIZE {
                     dfast::compress_dfast_with_prefix_reuse(
                         input,
@@ -950,12 +1044,8 @@ fn compress_core<S: OutputSink>(
                         offset += chunk_size;
                     }
                 } else {
-                    if !short_zeroed {
-                        hash_table.fill(0);
-                    }
-                    if !long_zeroed {
-                        hash_long.fill(0);
-                    }
+                    hash_table.clear(hash_size);
+                    hash_long.clear(long_size);
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let block_end = offset + chunk_size;
@@ -1011,4 +1101,98 @@ fn compress_core<S: OutputSink>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dict() -> Dictionary {
+        let fixture = include_bytes!("../../../tests/fixtures/corpus_dict_roundtrip.bin");
+        let len = u32::from_le_bytes([fixture[0], fixture[1], fixture[2], fixture[3]]) as usize;
+        Dictionary::from_bytes(&fixture[4..4 + len]).unwrap()
+    }
+
+    /// Blocks reuse a dictionary's sequence tables only when they hold every
+    /// code the block needs. Encoding a code a table lacks writes garbage.
+    #[test]
+    fn dictionary_tables_lacking_a_code_are_not_reused() {
+        use zrip_core::fse::table_builder::serialize_fse_table_description;
+        use zrip_core::fse::{LL_DEFAULT_ACCURACY, LL_DEFAULT_DIST};
+        use zrip_core::fse::{ML_DEFAULT_ACCURACY, ML_DEFAULT_DIST};
+        // Offset codes 0 to 10 only, as for offsets up to 2 KiB.
+        const OF_DIST: [i16; 11] = [1, 1, 1, 1, 3, 3, 3, 3, 6, 6, 4];
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&zrip_core::dict::DICT_MAGIC.to_le_bytes());
+        raw.extend_from_slice(&7u32.to_le_bytes());
+        raw.extend_from_slice(&[128 + 1, 0x11]);
+        raw.extend(serialize_fse_table_description(&OF_DIST, 5));
+        raw.extend(serialize_fse_table_description(
+            &ML_DEFAULT_DIST,
+            ML_DEFAULT_ACCURACY,
+        ));
+        raw.extend(serialize_fse_table_description(
+            &LL_DEFAULT_DIST,
+            LL_DEFAULT_ACCURACY,
+        ));
+        for rep in [1u32, 4, 8] {
+            raw.extend_from_slice(&rep.to_le_bytes());
+        }
+        raw.extend((0..1024u32).map(|i| (i * 7 % 251) as u8));
+        let dict = Dictionary::from_bytes(&raw).unwrap();
+        assert!(dict.of_table().is_some());
+
+        // Noise, then a copy from 5000 bytes back: offset code 12.
+        let mut x = 0x2545_f491u32;
+        let mut input: Vec<u8> = (0..5000)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                x as u8
+            })
+            .collect();
+        input.extend_from_within(..2048);
+        for level in [1, 3] {
+            let frames = [
+                CompressContext::with_dict(level, dict.clone())
+                    .unwrap()
+                    .compress(&input)
+                    .unwrap()
+                    .into_owned(),
+                crate::compress_with_dict(&input, level, &dict).unwrap(),
+            ];
+            for frame in &frames {
+                let out = zrip::decompress_with_dict(frame, &dict).unwrap();
+                assert!(out == input, "L{level}: frame decodes to another input");
+            }
+        }
+    }
+
+    /// Tables built while a frame's input follows the dictionary in the
+    /// buffer match tables built from the dictionary alone.
+    #[test]
+    fn dictionary_tables_ignore_buffered_input() {
+        let dict = dict();
+        let input: Vec<u8> = (0..4096u32)
+            .map(|i| (i.wrapping_mul(0x9e37_79b1) >> 24) as u8)
+            .collect();
+        for level in -7..=4 {
+            let params = strategy::level_params(level).unwrap();
+            let mut clean = PreparedDict::new(&dict, level, &params);
+            let mut stale = PreparedDict::new(&dict, level, &params);
+            stale.combined.extend_from_slice(&input);
+            assert!(clean.snapshots() == stale.snapshots(), "L{level} snapshots");
+            let mlss: Vec<u32> = clean.attached.iter().map(|a| a.min_match).collect();
+            for mls in mlss {
+                clean.build_attached(mls);
+                stale.build_attached(mls);
+                let (c, s) = (clean.attached(mls).unwrap(), stale.attached(mls).unwrap());
+                assert!(
+                    c.table == s.table && c.long == s.long,
+                    "L{level} attached tables for min match {mls}"
+                );
+            }
+        }
+    }
 }

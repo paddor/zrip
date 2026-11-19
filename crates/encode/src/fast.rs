@@ -1,11 +1,11 @@
 #[cfg(feature = "alloc")]
-use alloc::vec;
-#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 use crate::primitives;
 use crate::primitives::first4;
 use crate::strategy::LevelParams;
+#[cfg(feature = "alloc")]
+use crate::table::MatchTable;
 use zrip_core::Sequence;
 use zrip_core::hash::{PRIME32_1, PRIME64_1};
 use zrip_core::hint::unlikely;
@@ -51,8 +51,7 @@ pub(crate) fn compress_fast(
     params: &LevelParams,
     rep_offsets: &[u32; 3],
 ) -> Vec<Sequence> {
-    let hash_size = 1usize << params.hash_log;
-    let mut hash_table = vec![0u32; hash_size];
+    let mut hash_table = MatchTable::zeroed(1usize << params.hash_log);
     let mut sequences = Vec::new();
     compress_fast_block(
         src,
@@ -1013,15 +1012,17 @@ fn rep2_match_loop<const HASH_LOG: u32, const MLS: usize>(
     }
 }
 
-/// Fills `hash_table` with dictionary positions below `prefix_len`, hashed
-/// like the match finder at `min_match`.
+/// Clears `hash_table` to `1 << hash_log` entries and fills it with
+/// dictionary positions below `prefix_len`, hashed like the match finder at
+/// `min_match`.
 pub(crate) fn prefill_hash_table(
     combined: &[u8],
     prefix_len: usize,
     hash_log: u32,
     min_match: u32,
-    hash_table: &mut [u32],
+    hash_table: &mut MatchTable,
 ) {
+    let hash_table = hash_table.cleared(1usize << hash_log);
     match min_match {
         ..=4 => prefill::<4>(combined, prefix_len, hash_log, hash_table),
         5 => prefill::<5>(combined, prefix_len, hash_log, hash_table),
@@ -1031,13 +1032,41 @@ pub(crate) fn prefill_hash_table(
     }
 }
 
+/// Zeroes the slots every position of `window` hashes to at `hash_log` and
+/// `min_match`, as the match finder and prefill store them, and returns how
+/// many it wrote. A table that took positions only from `window` is then
+/// all zero.
+pub(crate) fn zero_position_slots(
+    window: &[u8],
+    hash_log: u32,
+    min_match: u32,
+    hash_table: &mut [u32],
+) -> usize {
+    match min_match {
+        ..=4 => zero_slots::<4>(window, hash_log, hash_table),
+        5 => zero_slots::<5>(window, hash_log, hash_table),
+        6 => zero_slots::<6>(window, hash_log, hash_table),
+        7 => zero_slots::<7>(window, hash_log, hash_table),
+        _ => zero_slots::<8>(window, hash_log, hash_table),
+    }
+}
+
+fn zero_slots<const MLS: usize>(window: &[u8], hash_log: u32, hash_table: &mut [u32]) -> usize {
+    // `hash_pos` reads four bytes at MLS 4 and eight above.
+    let read = if MLS >= 5 { 8 } else { 4 };
+    let end = (window.len() + 1).saturating_sub(read);
+    for p in 0..end {
+        hash_store!(hash_table, hash_pos::<0, MLS>(window, p, hash_log), 0);
+    }
+    end
+}
+
 fn prefill<const MLS: usize>(
     combined: &[u8],
     prefix_len: usize,
     hash_log: u32,
     hash_table: &mut [u32],
 ) {
-    hash_table.fill(0);
     // Positions whose eight-byte read stays inside the buffer.
     let end = prefix_len.min(combined.len().saturating_sub(7));
     let step = (prefix_len / hash_table.len()).max(1);
@@ -1068,9 +1097,8 @@ pub(crate) fn compress_fast_with_prefix(
     if prefix.is_empty() {
         return compress_fast(src, params, rep_offsets);
     }
-    let hash_size = 1usize << params.hash_log;
-    let mut dict_hash = vec![0u32; hash_size];
-    let mut input_hash = vec![0u32; hash_size];
+    let mut dict_hash = MatchTable::new();
+    let mut input_hash = MatchTable::new();
     let mut sequences = Vec::new();
     let mut combined = Vec::new();
     compress_fast_with_prefix_reuse(
@@ -1087,15 +1115,15 @@ pub(crate) fn compress_fast_with_prefix(
 }
 
 /// Compresses `src` after `prefix` with the prefix in a frozen table beside
-/// the input's. Both tables are `1 << params.hash_log` entries.
+/// the input's. Clears both tables to `1 << params.hash_log` entries.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compress_fast_with_prefix_reuse(
     src: &[u8],
     params: &LevelParams,
     rep_offsets: &[u32; 3],
     prefix: &[u8],
-    dict_hash: &mut [u32],
-    hash_table: &mut [u32],
+    dict_hash: &mut MatchTable,
+    hash_table: &mut MatchTable,
     sequences: &mut Vec<Sequence>,
     combined: &mut Vec<u8>,
 ) {
@@ -1111,7 +1139,7 @@ pub(crate) fn compress_fast_with_prefix_reuse(
         params.min_match,
         dict_hash,
     );
-    hash_table.fill(0);
+    hash_table.clear(1usize << params.hash_log);
     let dict = AttachedDict {
         table: dict_hash,
         hash_log: params.hash_log,

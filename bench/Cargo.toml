@@ -12,6 +12,7 @@ lz4rip = "0.12.1"
 ruzstd = "0.8"
 structured-zstd = "0.4.2"
 mzstd = "0.2.14"
+rusty_zstd = "0.5.0"
 libc = "0.2"
 plotters = { version = "0.3", default-features = false, features = ["svg_backend", "line_series"] }
 serde = { version = "1", features = ["derive"] }

@@ -270,14 +270,14 @@ impl PushEncoder {
         if op == EndOp::End && !self.header_written {
             let rest = &input[*consumed..];
             if self.frame.buffered() == 0 {
-                self.one_pass(rest, out)?;
+                self.one_pass(Some(rest), out)?;
                 *consumed = input.len();
                 self.frame_done = true;
                 return Ok(true);
             }
             if self.frame.buffered() + rest.len() <= self.frame.block_size() {
                 *consumed += self.frame.take_input(rest);
-                self.one_pass(self.frame.buffered_input(), out)?;
+                self.one_pass(None, out)?;
                 self.frame_done = true;
                 return Ok(true);
             }
@@ -309,17 +309,19 @@ impl PushEncoder {
         Ok(true)
     }
 
-    /// Appends `src` as one whole frame, like the one-shot API.
-    fn one_pass(&self, src: &[u8], out: &mut Vec<u8>) -> Result<(), CompressError> {
-        if let Some(dict) = self.frame.dict() {
-            return crate::compress_with_dict_to(src, self.level, dict, out);
+    /// Appends `input`, or the buffered input if `None`, as one whole frame,
+    /// like the one-shot API but in the encoder's tables and buffers.
+    fn one_pass(&mut self, input: Option<&[u8]>, out: &mut Vec<u8>) -> Result<(), CompressError> {
+        let len = input.map_or_else(|| self.frame.buffered(), <[u8]>::len);
+        let params = match (self.frame.dict(), &self.opts) {
+            (Some(dict), _) => {
+                strategy::level_params_with_prefix(self.level, dict.content().len(), len)
+            }
+            (None, Some(opts)) => Some(crate::params_with_options(self.level, len, opts)?),
+            (None, None) => strategy::level_params_for_size(self.level, len),
         }
-        let params = match &self.opts {
-            Some(opts) => crate::params_with_options(self.level, src.len(), opts)?,
-            None => strategy::level_params_for_size(self.level, src.len())
-                .ok_or(CompressError::InvalidLevel(self.level))?,
-        };
-        crate::compress_frame(src, &params, out)
+        .ok_or(CompressError::InvalidLevel(self.level))?;
+        self.frame.encode_one_pass(input, &params, out)
     }
 
     fn end_frame(&mut self) {

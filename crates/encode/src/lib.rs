@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "nightly", feature(optimize_attribute))]
 #![forbid(unsafe_code)]
+// Tests build tables and buffers freely; the library goes through `MatchTable`.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -51,9 +53,11 @@ pub(crate) mod rebase;
 pub mod strategy;
 #[cfg(feature = "std")]
 pub mod streaming;
+#[cfg(feature = "alloc")]
+pub(crate) mod table;
 
 #[cfg(feature = "alloc")]
-use alloc::vec;
+use crate::table::MatchTable;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
@@ -108,7 +112,11 @@ fn write_frame_header_inner(
 ) -> Result<(), CompressError> {
     output.extend_from_slice(&ZSTD_MAGIC.to_le_bytes())?;
 
-    let single_segment = dict_id.is_none() && content_size.is_some_and(fits_single_segment);
+    // As in C zstd, a dictionary frame is single-segment when its window
+    // covers the content: decoders keep the dictionary beside the window.
+    let single_segment = content_size.is_some_and(|size| {
+        fits_single_segment(size) && (dict_id.is_none() || size <= 1usize << window_log)
+    });
     let fcs_size = content_size.map_or(0, |size| {
         frame_content_size_field_size(size, single_segment)
     });
@@ -326,7 +334,7 @@ pub(crate) fn compress_frame(
     } else {
         let mut rep_offsets = [1u32, 4, 8];
         let mut offset = 0;
-        let mut sequences = Vec::with_capacity(MAX_BLOCK_SIZE / 8);
+        let mut sequences = Vec::with_capacity(input.len().min(MAX_BLOCK_SIZE) / 8);
         let mut workspace = block_encoder::BlockEncodeWorkspace::new();
 
         #[cfg(feature = "ldm")]
@@ -338,7 +346,7 @@ pub(crate) fn compress_frame(
         match params.strategy {
             Strategy::Fast => {
                 let hash_size = 1usize << params.hash_log;
-                let mut hash_table = vec![0u32; hash_size];
+                let mut hash_table = MatchTable::zeroed(hash_size);
                 while offset < input.len() {
                     let chunk_size = (input.len() - offset).min(block_size);
                     let block_end = offset + chunk_size;
@@ -418,8 +426,8 @@ pub(crate) fn compress_frame(
             Strategy::DFast => {
                 let short_size = 1usize << params.chain_log;
                 let long_size = 1usize << params.hash_log;
-                let mut hash_short = vec![0u32; short_size];
-                let mut hash_long = vec![0u32; long_size];
+                let mut hash_short = MatchTable::zeroed(short_size);
+                let mut hash_long = MatchTable::zeroed(long_size);
                 while offset < input.len() {
                     let chunk_size = (input.len() - offset).min(block_size);
                     let block_end = offset + chunk_size;
@@ -577,7 +585,7 @@ pub(crate) fn compress_with_dict_to(
 
             match params.strategy {
                 Strategy::Fast => {
-                    let mut hash_table = vec![0u32; hash_size];
+                    let mut hash_table = MatchTable::zeroed(hash_size);
                     fast::prefill_hash_table(
                         &combined,
                         plen,
@@ -630,8 +638,8 @@ pub(crate) fn compress_with_dict_to(
                 Strategy::DFast => {
                     let short_size = 1usize << params.chain_log;
                     let long_size = 1usize << params.hash_log;
-                    let mut hash_short = vec![0u32; short_size];
-                    let mut hash_long = vec![0u32; long_size];
+                    let mut hash_short = MatchTable::zeroed(short_size);
+                    let mut hash_long = MatchTable::zeroed(long_size);
                     dfast::prefill_hash_tables(
                         &combined,
                         plen,
@@ -924,18 +932,31 @@ mod tests {
     }
 
     #[test]
-    fn dict_frame_uses_window_descriptor_even_when_small() {
+    fn dict_frame_its_window_covers_is_single_segment() {
         let mut output = Vec::new();
 
         write_frame_header(&mut output, 12, Some(0x1234), 10).unwrap();
         let header = parse_frame_header(&output).unwrap();
 
-        assert!(!header.single_segment);
+        assert!(header.single_segment);
         assert_eq!(header.frame_content_size, Some(12));
-        assert_eq!(header.window_size, 1 << 10);
         assert_eq!(header.dict_id, Some(0x1234));
         assert!(header.content_checksum);
-        assert_eq!(header.header_size, 12);
+        assert_eq!(header.header_size, 8);
+    }
+
+    #[test]
+    fn dict_frame_past_its_window_uses_window_descriptor() {
+        let mut output = Vec::new();
+
+        write_frame_header(&mut output, 5000, Some(0x1234), 10).unwrap();
+        let header = parse_frame_header(&output).unwrap();
+
+        assert!(!header.single_segment);
+        assert_eq!(header.frame_content_size, Some(5000));
+        assert_eq!(header.window_size, 1 << 10);
+        assert_eq!(header.dict_id, Some(0x1234));
+        assert_eq!(header.header_size, 10);
     }
 
     #[test]

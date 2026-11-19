@@ -419,6 +419,44 @@ fn bench_structured_zstd(slices: &[&[u8]], name: &str, level: i32, target_ns: u6
     )
 }
 
+/// structured-zstd with one reused compressor and decoder, as the sweep's
+/// other codecs, and `dict` attached to both when given.
+fn bench_structured_zstd_reused(
+    slices: &[&[u8]],
+    name: &str,
+    level: i32,
+    target_ns: u64,
+    dict: Option<&[u8]>,
+) -> BenchResult {
+    use structured_zstd::decoding::{Dictionary, FrameDecoder};
+    use structured_zstd::encoding::{CompressionLevel, FrameCompressor};
+    let mut enc: FrameCompressor = FrameCompressor::new(CompressionLevel::Level(level));
+    let mut dec = FrameDecoder::new();
+    if let Some(d) = dict {
+        enc.set_dictionary_from_bytes(d).unwrap();
+        dec.add_dict(Dictionary::decode_dict(d).unwrap()).unwrap();
+    }
+    let max_len = slices.iter().map(|s| s.len()).max().unwrap_or(0);
+    let mut out = vec![0u8; max_len + 1024];
+    bench_slices(
+        if dict.is_some() {
+            "structured-zstd+dict"
+        } else {
+            "structured-zstd"
+        },
+        slices,
+        name,
+        level,
+        target_ns,
+        |s| enc.compress_independent_frame(s),
+        |f, len| {
+            let n = dec.decode_all(f, &mut out).unwrap();
+            assert_eq!(n, len);
+            std::hint::black_box(&out[..n]);
+        },
+    )
+}
+
 fn bench_mzstd(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> BenchResult {
     let config = mzstd::EncoderConfig::default().with_level(mzstd::Level::try_from(level).unwrap());
     let mut compressor = mzstd::Compressor::new(config).unwrap();
@@ -458,6 +496,199 @@ fn bench_c_zstd(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> Ben
     )
 }
 
+/// rusty_zstd's options at `level`, without the content checksum C zstd
+/// leaves out by default.
+fn rusty_zstd_options(level: i32) -> rusty_zstd::CompressOptions {
+    rusty_zstd::CompressOptions {
+        level,
+        checksum: false,
+    }
+}
+
+fn bench_rusty_zstd(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> BenchResult {
+    let mut buf = Vec::new();
+    bench_slices(
+        "rusty_zstd",
+        slices,
+        name,
+        level,
+        target_ns,
+        |s| rusty_zstd::compress_with(s, rusty_zstd_options(level)).unwrap(),
+        |f, len| {
+            buf.clear();
+            buf.reserve(len + 1024);
+            std::hint::black_box(rusty_zstd::decompress_into(&mut buf, f).unwrap());
+        },
+    )
+}
+
+fn bench_rusty_zstd_dict(
+    slices: &[&[u8]],
+    name: &str,
+    level: i32,
+    target_ns: u64,
+    dict_bytes: &[u8],
+) -> BenchResult {
+    let dict = rusty_zstd::Dictionary::from_bytes(dict_bytes).unwrap();
+    bench_slices(
+        "rusty_zstd+dict",
+        slices,
+        name,
+        level,
+        target_ns,
+        |s| {
+            rusty_zstd::compress_using_dict_with(s, &dict, rusty_zstd_options(level), true).unwrap()
+        },
+        |f, _| {
+            std::hint::black_box(rusty_zstd::decompress_using_dict(f, &dict).unwrap());
+        },
+    )
+}
+
+/// Benchmarks `codec` on `slices`, or returns `None` for a dictionary codec
+/// without a dictionary.
+fn bench_codec(
+    codec: &str,
+    slices: &[&[u8]],
+    name: &str,
+    level: i32,
+    target_ns: u64,
+    dict: Option<&[u8]>,
+) -> Option<BenchResult> {
+    Some(match codec {
+        "C zstd" => bench_c_zstd(slices, name, level, target_ns),
+        "zrip" => bench_zrip(slices, name, level, target_ns),
+        "ruzstd" => bench_ruzstd(slices, name, level, target_ns),
+        "structured-zstd" => bench_structured_zstd(slices, name, level, target_ns),
+        "mzstd" => bench_mzstd(slices, name, level, target_ns),
+        "rusty_zstd" => bench_rusty_zstd(slices, name, level, target_ns),
+        "lz4rip" => bench_lz4rip(slices, name, level, target_ns),
+        "zrip+dict" => bench_zrip_dict(slices, name, level, target_ns, dict?),
+        "C zstd+dict" => bench_c_zstd_dict(slices, name, level, target_ns, dict?),
+        "rusty_zstd+dict" => bench_rusty_zstd_dict(slices, name, level, target_ns, dict?),
+        _ => unreachable!("unknown codec {codec}"),
+    })
+}
+
+/// Slice sizes for `--sweep`.
+const SWEEP_SIZES: &[usize] = &[
+    64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131_072, 262_144, 524_288,
+    1_048_576,
+];
+/// Consecutive slices per file and size for `--sweep`, from the start.
+const SWEEP_SLICES: usize = 64;
+/// `--sweep` levels unless `--levels` picks others: zrip's default level and
+/// C zstd's.
+const SWEEP_LEVELS: &[i32] = &[1, 3];
+const SWEEP_DICT_SIZE: usize = 16 * 1024;
+/// The sweep dictionaries train past this many bytes of each file, so the
+/// slices of up to 16 KiB, where dictionaries help most, are not in their
+/// training set.
+const SWEEP_TRAIN_SKIP: usize = SWEEP_SLICES * 16 * 1024;
+
+/// A dictionary for `--sweep`, trained by C zstd on up to 2048 samples of
+/// 1 KiB spread over the file past `SWEEP_TRAIN_SKIP`.
+fn train_sweep_dict(data: &[u8]) -> Vec<u8> {
+    let rest = &data[SWEEP_TRAIN_SKIP.min(data.len())..];
+    let stride = (rest.len() / 1024 / 2048).max(1);
+    let mut concat = Vec::new();
+    let mut sizes = Vec::new();
+    for chunk in rest.as_chunks::<1024>().0.iter().step_by(stride).take(2048) {
+        concat.extend_from_slice(chunk);
+        sizes.push(chunk.len());
+    }
+    let mut buf = vec![0u8; SWEEP_DICT_SIZE];
+    let n = zstd_safe::train_from_buffer(&mut buf, &concat, &sizes).expect("dict training failed");
+    buf.truncate(n);
+    buf
+}
+
+/// A row for one message out of a pass over `n` slices: sizes and times are
+/// means. Other modes keep pass totals.
+fn per_message(mut r: BenchResult, n: usize) -> BenchResult {
+    r.input_size /= n;
+    r.compressed_size = (r.compressed_size + n / 2) / n;
+    r.compress_ns /= n as f64;
+    r.decompress_ns /= n as f64;
+    r
+}
+
+/// `--sweep`: every codec with and without a per-file dictionary, on
+/// `SWEEP_SLICES` slices of each size from every corpus file, appending
+/// per-message rows to the `sweep` cache after each file.
+fn run_sweep(
+    file_filter: &[String],
+    level_filter: &[i32],
+    codecs: &[&str],
+    target_ns: u64,
+    cached_keys: &HashSet<(String, i32, String, Option<String>)>,
+) {
+    let levels = if level_filter.is_empty() {
+        SWEEP_LEVELS
+    } else {
+        level_filter
+    };
+    for entry in BASE_CORPUS {
+        if !name_matches_filter(entry.label, file_filter) {
+            continue;
+        }
+        let (base, _) = load_corpus_entry(entry).unwrap_or_else(|e| {
+            eprintln!("corpus setup failed: {e}");
+            std::process::exit(1);
+        });
+        let dict = train_sweep_dict(&base);
+        eprintln!("{}: {} byte dictionary", entry.label, dict.len());
+        let mut results = Vec::new();
+        for &size in SWEEP_SIZES {
+            let slices: Vec<&[u8]> = base.chunks_exact(size).take(SWEEP_SLICES).collect();
+            if slices.is_empty() {
+                continue;
+            }
+            let name = format!("{}_{size}", entry.label);
+            let mut hasher = Sha256::new();
+            for s in &slices {
+                hasher.update(s);
+            }
+            let sha256 = format!("{:x}", hasher.finalize());
+            for &level in levels {
+                let mut batch = Vec::new();
+                for &codec in codecs {
+                    let key = (codec.to_string(), level, name.clone(), Some(sha256.clone()));
+                    if cached_keys.contains(&key) {
+                        continue;
+                    }
+                    // The other modes time structured-zstd's one-shot
+                    // functions; here it reuses its compressor and decoder.
+                    let r = match codec {
+                        "structured-zstd" => Some(bench_structured_zstd_reused(
+                            &slices, &name, level, target_ns, None,
+                        )),
+                        "structured-zstd+dict" => Some(bench_structured_zstd_reused(
+                            &slices,
+                            &name,
+                            level,
+                            target_ns,
+                            Some(&dict),
+                        )),
+                        _ => bench_codec(codec, &slices, &name, level, target_ns, Some(&dict)),
+                    };
+                    let Some(mut r) = r else {
+                        continue;
+                    };
+                    r.input_sha256.clone_from(&sha256);
+                    batch.push(per_message(r, slices.len()));
+                }
+                if !batch.is_empty() {
+                    let refs: Vec<&BenchResult> = batch.iter().collect();
+                    print_live_line(&name, level, &refs);
+                    results.extend(batch);
+                }
+            }
+        }
+        write_cache(&results, Some("sweep"));
+    }
+}
+
 fn train_dict_for_file(data: &[u8], dict_size: usize) -> Vec<u8> {
     let chunk_size = 1024usize;
     let mut concat = Vec::new();
@@ -483,6 +714,8 @@ fn bench_zrip_dict(
     let mut ctx =
         zrip::CompressContext::with_dict_for_size(level, dict.clone(), slices[0].len()).unwrap();
     ctx.set_content_checksum(false);
+    // A reused decoder, as C zstd's below.
+    let mut dec_ctx = zrip::DecompressContext::with_dict(dict);
     bench_slices(
         "zrip+dict",
         slices,
@@ -491,7 +724,7 @@ fn bench_zrip_dict(
         target_ns,
         |s| ctx.compress(s).unwrap().to_vec(),
         |f, _| {
-            std::hint::black_box(zrip::decompress_with_dict(f, &dict).unwrap());
+            std::hint::black_box(dec_ctx.decompress(f).unwrap());
         },
     )
 }
@@ -581,6 +814,14 @@ fn bench_decode_only(
                 buf.clear();
                 buf.reserve(len + 1024);
                 decompressor.decompress_into(f, &mut buf).unwrap().len()
+            })
+        }
+        "rusty_zstd" => {
+            let mut buf = Vec::new();
+            run(frames, slices, target_ns, |f, len| {
+                buf.clear();
+                buf.reserve(len + 1024);
+                rusty_zstd::decompress_into(&mut buf, f).unwrap()
             })
         }
         _ => unreachable!("unsupported codec for decode-only: {}", codec),
@@ -973,17 +1214,37 @@ const CODECS: &[&str] = &[
     "ruzstd",
     "structured-zstd",
     "mzstd",
+    "rusty_zstd",
     "lz4rip",
 ];
-const DECODE_CODECS: &[&str] = &["C zstd", ZRIP_CODEC, "ruzstd", "structured-zstd", "mzstd"];
-const DICT_CODECS: &[&str] = &["C zstd+dict", "zrip+dict"];
+const DECODE_CODECS: &[&str] = &[
+    "C zstd",
+    ZRIP_CODEC,
+    "ruzstd",
+    "structured-zstd",
+    "mzstd",
+    "rusty_zstd",
+];
+const DICT_CODECS: &[&str] = &["C zstd+dict", "zrip+dict", "rusty_zstd+dict"];
+/// Each codec with and without a dictionary, for `--sweep`.
+const SWEEP_CODECS: &[&str] = &[
+    ZRIP_CODEC,
+    "zrip+dict",
+    "C zstd",
+    "C zstd+dict",
+    "rusty_zstd",
+    "rusty_zstd+dict",
+    "structured-zstd",
+    "structured-zstd+dict",
+];
 
 fn levels_for_codec<'a>(codec: &str, level_filter: &'a [i32]) -> &'a [i32] {
     match codec {
         "ruzstd" | "lz4rip" => &[1],
         _ if !level_filter.is_empty() => level_filter,
         "zrip" | "zrip+dict" => ZRIP_LEVELS,
-        "C zstd" | "C zstd+dict" | "structured-zstd" | "mzstd" => C_ZSTD_LEVELS,
+        "C zstd" | "C zstd+dict" | "structured-zstd" | "mzstd" | "rusty_zstd"
+        | "rusty_zstd+dict" => C_ZSTD_LEVELS,
         _ => &[1],
     }
 }
@@ -1000,8 +1261,11 @@ fn fmt_mbs(input_size: usize, ns: f64) -> String {
 fn display_codec(codec: &str) -> &str {
     match codec {
         "structured-zstd" => "s-zstd",
+        "structured-zstd+dict" => "s-zstd+d",
         "C zstd+dict" => "Czstd+d",
         "zrip+dict" => "zrip+d",
+        "rusty_zstd" => "rusty",
+        "rusty_zstd+dict" => "rusty+d",
         other => other,
     }
 }
@@ -1110,6 +1374,8 @@ Options:
   --small-only        Run the small-file corpus
   --tiny              Run 64 random 512 B to 8 KiB slices of every corpus file
   --dict              Run dictionary benchmarks
+  --sweep             Run 64 B to 1 MiB slices of every corpus file, each codec
+                      with and without a dictionary, at levels 1 and 3
   --decode-only       Run decode-only benchmark set
   --reuse             Reuse cached results when available
   -h, --help          Print this help
@@ -1128,6 +1394,7 @@ fn main() {
     let mut extra_files: Vec<String> = Vec::new();
     let mut small_only = false;
     let mut tiny = false;
+    let mut sweep = false;
     let mut dict_mode = false;
     let mut decode_only = false;
     let mut reuse_cached = false;
@@ -1177,6 +1444,7 @@ fn main() {
             }
             "--small-only" => small_only = true,
             "--tiny" => tiny = true,
+            "--sweep" => sweep = true,
             "--dict" => dict_mode = true,
             "--decode-only" => decode_only = true,
             "--reuse" => reuse_cached = true,
@@ -1194,13 +1462,46 @@ fn main() {
         eprintln!("--tiny does not combine with --small-only or --dict");
         std::process::exit(2);
     }
-    let scope = if tiny {
+    if sweep && (tiny || small_only || dict_mode || decode_only || !extra_files.is_empty()) {
+        eprintln!("--sweep does not combine with other input sets or --decode-only");
+        std::process::exit(2);
+    }
+    let scope = if sweep {
+        Some("sweep")
+    } else if tiny {
         Some("tiny")
     } else if small_only {
         Some("small")
     } else {
         None
     };
+
+    if sweep {
+        let cached_keys = if reuse_cached {
+            load_cached_keys(scope, false)
+        } else {
+            HashSet::new()
+        };
+        let codecs: Vec<&str> = SWEEP_CODECS
+            .iter()
+            .copied()
+            .filter(|c| {
+                if impl_specified {
+                    only.iter().any(|o| o == "all" || c.contains(o.as_str()))
+                } else {
+                    c.contains(ZRIP_CODEC)
+                }
+            })
+            .collect();
+        run_sweep(
+            &file_filter,
+            &level_filter,
+            &codecs,
+            20_000_000,
+            &cached_keys,
+        );
+        return;
+    }
 
     let all_inputs = match load_benchmark_inputs(small_only, tiny, &file_filter, &extra_files) {
         Ok(inputs) => inputs,
@@ -1355,28 +1656,15 @@ fn main() {
                         continue;
                     }
 
-                    let mut r = match codec {
-                        "C zstd" => bench_c_zstd(slices, name, level, target_ns),
-                        "zrip" => bench_zrip(slices, name, level, target_ns),
-                        "ruzstd" => bench_ruzstd(slices, name, level, target_ns),
-                        "structured-zstd" => bench_structured_zstd(slices, name, level, target_ns),
-                        "mzstd" => bench_mzstd(slices, name, level, target_ns),
-                        "lz4rip" => bench_lz4rip(slices, name, level, target_ns),
-                        "zrip+dict" => {
-                            if let Some(db) = dict_bytes {
-                                bench_zrip_dict(slices, name, level, target_ns, db)
-                            } else {
-                                continue;
-                            }
-                        }
-                        "C zstd+dict" => {
-                            if let Some(db) = dict_bytes {
-                                bench_c_zstd_dict(slices, name, level, target_ns, db)
-                            } else {
-                                continue;
-                            }
-                        }
-                        _ => unreachable!(),
+                    let Some(mut r) = bench_codec(
+                        codec,
+                        slices,
+                        name,
+                        level,
+                        target_ns,
+                        dict_bytes.map(Vec::as_slice),
+                    ) else {
+                        continue;
                     };
                     r.input_sha256.clone_from(&input.sha256);
                     level_batch.push(r);

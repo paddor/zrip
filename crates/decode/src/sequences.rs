@@ -298,6 +298,9 @@ pub(crate) fn parse_sequence_tables_ws(
     let of_mode = (mode_byte >> 4) & 0x03;
     let ml_mode = (mode_byte >> 2) & 0x03;
     let cacheable = ll_mode != 3 && of_mode != 3 && ml_mode != 3;
+    if ll_mode != 3 || of_mode != 3 || ml_mode != 3 {
+        ws.seq_is_dict = false;
+    }
 
     if cacheable
         && let Some(cached) = &ws.seq_table_cache

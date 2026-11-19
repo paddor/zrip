@@ -380,6 +380,10 @@ pub struct LdmState {
 }
 
 impl LdmState {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "LDM tables are filled once here and cleared only by `reset`"
+    )]
     pub fn new(params: &LdmParams) -> Self {
         let num_entries = 1usize << params.hash_log;
         let num_buckets = num_entries >> params.bucket_size_log;
@@ -394,6 +398,10 @@ impl LdmState {
         }
     }
 
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "clears a used state for the next frame"
+    )]
     pub fn reset(&mut self) {
         self.table.fill(LdmEntry::default());
         self.bucket_offsets.fill(0);

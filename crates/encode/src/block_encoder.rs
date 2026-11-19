@@ -149,6 +149,9 @@ pub(crate) struct FseEncodeTable {
     state_table: [u16; MAX_TABLE_SIZE],
     table_size: u32,
     table_log: u8,
+    /// Bit `s` is set when symbol `s` has a state. Encoding any other symbol
+    /// writes garbage, so repeat mode checks the block's codes first.
+    present: u64,
 }
 
 impl Default for FseEncodeTable {
@@ -161,8 +164,17 @@ impl Default for FseEncodeTable {
             state_table: [0; MAX_TABLE_SIZE],
             table_size: 0,
             table_log: 0,
+            present: 0,
         }
     }
+}
+
+/// Symbols with a nonzero count, as a bit set.
+fn present_mask(count: &[u32; MAX_SYMBOLS]) -> u64 {
+    count
+        .iter()
+        .enumerate()
+        .fold(0, |mask, (s, &c)| mask | u64::from(c > 0) << s)
 }
 
 /// Symbol slots per table: 53 codes rounded up to a power of two, so the
@@ -236,9 +248,22 @@ impl FseEncodeTable {
             state_table,
             table_size: table_size as u32,
             table_log,
+            present: present_mask(&count),
         }
     }
 
+    /// Whether every symbol with a nonzero count in `freqs` has a state.
+    fn covers(&self, freqs: &[u32]) -> bool {
+        freqs
+            .iter()
+            .enumerate()
+            .all(|(s, &f)| f == 0 || (s < MAX_SYMBOLS && self.present >> s & 1 == 1))
+    }
+
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "rebuilds a small FSE table in place"
+    )]
     fn build_from_distribution_into(
         &mut self,
         distribution: &[i16],
@@ -355,6 +380,7 @@ impl FseEncodeTable {
         self.state_table[..table_size].fill(0);
         self.table_size = table_size as u32;
         self.table_log = table_log;
+        self.present = present_mask(&count);
 
         self.symbol_tt[..num_symbols].copy_from_slice(&symbol_tt[..num_symbols]);
 
@@ -511,8 +537,14 @@ fn encode_compressed_block_impl(
         policy,
     );
 
-    let has_repeat =
-        workspace.prev_ll.is_some() && workspace.prev_of.is_some() && workspace.prev_ml.is_some();
+    // Repeat mode reuses the dictionary's tables, which a literals-only block
+    // leaves in place, so they must hold every code this block uses: a far
+    // offset can need a code the dictionary never saw.
+    let f = &workspace.seq_freqs;
+    let has_repeat = match (&workspace.prev_ll, &workspace.prev_of, &workspace.prev_ml) {
+        (Some(ll), Some(of), Some(ml)) => ll.covers(&f.ll) && of.covers(&f.of) && ml.covers(&f.ml),
+        _ => false,
+    };
 
     if has_repeat {
         encode_seq_repeat(
@@ -525,7 +557,16 @@ fn encode_compressed_block_impl(
         );
     }
 
-    let do_codes = policy.custom_tables && n >= 64;
+    // As C zstd at its fast strategies: with valid repeat tables, up to 1000
+    // sequences skip building custom ones, unless the repeat tables fit them
+    // badly. Custom tables cost about the codes' order-0 entropy plus their
+    // descriptions, so within 20% and 32 bytes of it they rarely pay off.
+    let do_codes = policy.custom_tables
+        && n >= 64
+        && !(has_repeat
+            && n < 1000
+            && workspace.repeat_seq.len() * 5
+                <= sequence_entropy_bytes(&workspace.seq_freqs, n) * 6 + 160);
     let seq_data = if do_codes {
         let f = &workspace.seq_freqs;
         let ll_freq = f.ll.first_chunk::<36>().unwrap();
@@ -771,9 +812,9 @@ fn pack_sequences_and_literals_impl<const COUNT: bool>(
     let lit_buf = &mut workspace.lit_buf[..lit_total + 32];
     let freqs = &mut workspace.seq_freqs;
     if COUNT {
-        freqs.ll.fill(0);
-        freqs.ml.fill(0);
-        freqs.of.fill(0);
+        freqs.ll = [0; 256];
+        freqs.ml = [0; 256];
+        freqs.of = [0; 256];
     }
     let mut extra_bits_total = 0u64;
     let mut lit_pos = 0usize;
@@ -937,13 +978,29 @@ fn histogram_too_dense(counts: &[u32; 256], limit_fp8: u32) -> bool {
     if n == 0 {
         return false;
     }
+    entropy_bits_fp8(counts, n) > u64::from(limit_fp8) * u64::from(n)
+}
+
+/// Order-0 entropy of symbols with these counts, summing to `n`, in bits
+/// (8.8 fixed point).
+fn entropy_bits_fp8(counts: &[u32], n: u32) -> u64 {
     let log2_n = log2_fp8(n);
-    let bits_fp8: u64 = counts
+    counts
         .iter()
         .filter(|&&c| c > 0)
         .map(|&c| u64::from(c) * u64::from(log2_n - log2_fp8(c)))
-        .sum();
-    bits_fp8 > u64::from(limit_fp8) * u64::from(n)
+        .sum()
+}
+
+/// The order-0 entropy of the `n` sequences' codes plus their extra bits, in
+/// bytes: about the least custom tables can code them in.
+fn sequence_entropy_bytes(f: &SeqFreqs, n: usize) -> usize {
+    let n = n as u32;
+    let code_bits = (entropy_bits_fp8(&f.ll[..36], n)
+        + entropy_bits_fp8(&f.ml[..53], n)
+        + entropy_bits_fp8(&f.of[..32], n))
+        / 256;
+    (code_bits + f.extra_bits).div_ceil(8) as usize
 }
 
 /// Literals sampled from each end before the full histogram when they look
@@ -1028,7 +1085,11 @@ fn encode_literals_section(
         return true;
     }
     let reuse_bits = prev_huffman.as_ref().and_then(|p| p.estimate_bits(&freqs));
-    let fresh = if want_fresh {
+    // As C zstd at its fast strategies: short literals keep a table that can
+    // encode them. A fresh one rarely repays its description there, and
+    // building it costs more than encoding them.
+    let prefer_reuse = reuse_bits.is_some() && lits.len() <= 1024;
+    let fresh = if want_fresh && !prefer_reuse {
         HuffmanEncodeTable::from_histogram(&freqs).map(|t| {
             let bits = t.estimate_bits(&freqs).unwrap_or(u64::MAX)
                 + t.weights_description().len() as u64 * 8;
@@ -1046,11 +1107,14 @@ fn encode_literals_section(
         return true;
     }
 
+    // Huffman pays only when it beats the raw section, headers included:
+    // tiny sections need the longer Huffman header.
+    let raw_size = raw_literals_header_len(lits.len()) + lits.len();
     if let Some(bits) = reuse_bits
         && bits <= fresh_bits
     {
         let len = encode(prev_huffman.as_ref().unwrap(), huf_concat);
-        if len < lits.len() {
+        if huf_literals_header_len(lits.len(), len) + len < raw_size {
             encode_treeless_literals_header(lits.len(), len, use_4_streams, output);
             output.extend_from_slice(&huf_concat[..len]);
             return false;
@@ -1059,7 +1123,7 @@ fn encode_literals_section(
         let len = encode(&table, huf_concat);
         let tree_desc = table.weights_description();
         let compressed_size = tree_desc.len() + len;
-        if compressed_size < lits.len() {
+        if huf_literals_header_len(lits.len(), compressed_size) + compressed_size < raw_size {
             encode_compressed_literals_header(lits.len(), compressed_size, use_4_streams, output);
             output.extend_from_slice(tree_desc);
             output.extend_from_slice(&huf_concat[..len]);
@@ -1117,6 +1181,24 @@ fn encode_huf_literals_header(
         output.push((both >> 12) as u8);
         output.push((both >> 20) as u8);
         output.push((both >> 28) as u8);
+    }
+}
+
+/// Length of the header [`encode_raw_literals_header`] writes.
+fn raw_literals_header_len(size: usize) -> usize {
+    match size {
+        0..=31 => 1,
+        32..=4095 => 2,
+        _ => 3,
+    }
+}
+
+/// Length of the header [`encode_huf_literals_header`] writes.
+fn huf_literals_header_len(regen_size: usize, comp_size: usize) -> usize {
+    match regen_size.max(comp_size) {
+        0..=1023 => 3,
+        1024..=16383 => 4,
+        _ => 5,
     }
 }
 
@@ -1378,6 +1460,8 @@ fn normalize_counts_into(freqs: &[u32], accuracy_log: u8, dist: &mut Vec<i16>) {
     let total: u64 = freqs.iter().map(|&f| f as u64).sum();
 
     dist.resize(freqs.len(), 0);
+    // Measured faster on tiny inputs than clearing, then resizing.
+    #[allow(clippy::disallowed_methods, reason = "a few dozen entries per table")]
     dist.fill(0);
 
     if total == 0 {

@@ -5,25 +5,38 @@
 //! tables carried across them, and appends frame bytes to a caller's `Vec`.
 #![forbid(unsafe_code)]
 
-use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::block_encoder::{self, BlockEncodeWorkspace};
+use crate::context;
 use crate::dfast;
 use crate::fast;
 #[cfg(feature = "ldm")]
 use crate::ldm::LdmState;
 use crate::rebase::reduce_hash_table;
 use crate::strategy::{self, LevelParams, Strategy};
+use crate::table::MatchTable;
 use crate::write_frame_header_without_content_size;
 use zrip_core::Sequence;
 use zrip_core::dict::Dictionary;
 use zrip_core::error::CompressError;
 use zrip_core::frame::MAX_BLOCK_SIZE;
+use zrip_core::huffman::encode::HuffmanEncodeTable;
 use zrip_core::xxhash::Xxh64State;
 
 /// Smallest growth step for the window once a frame spans blocks.
 const GROW_STEP: usize = 8 << 20;
+
+/// How many table entries a whole clear must zero per slot store before
+/// rehashing a window to zero just the slots its positions went to pays.
+/// Measured break-even: 16-23 entries per store.
+const SLOT_CLEAR_RATIO: usize = 24;
+
+/// Whether rehashing a `window`-byte window into `tables` tables to zero the
+/// slots it filled beats clearing their `entries` entries whole.
+pub(crate) fn slot_clear_pays(window: usize, tables: usize, entries: usize) -> bool {
+    window.saturating_mul(tables * SLOT_CLEAR_RATIO) <= entries
+}
 
 pub(crate) struct EncodeState {
     params: LevelParams,
@@ -32,13 +45,23 @@ pub(crate) struct EncodeState {
     workspace: BlockEncodeWorkspace,
     dict: Option<Dictionary>,
     first_block: bool,
-    hash_table: Vec<u32>,
-    hash_long: Vec<u32>,
+    hash_table: MatchTable,
+    hash_long: MatchTable,
     sequences: Vec<Sequence>,
     /// The window: dictionary, then input, then the next block's input from
     /// `block_start`. Input goes straight here, so blocks need no copy.
     window_buf: Vec<u8>,
     block_start: usize,
+    /// The tables are clean or hold this frame's positions. Set by the
+    /// frame's first block that searches for matches.
+    tables_ready: bool,
+    /// A copy of the last window that wrote the tables, while they still
+    /// hold its positions and it was small: the next frame zeroes just the
+    /// slots those positions went to instead of the whole tables.
+    stale_window: Vec<u8>,
+    /// Buffers of frames encoded in one pass, kept for the next.
+    dict_hash: MatchTable,
+    combined: Vec<u8>,
     #[cfg(feature = "ldm")]
     ldm_state: Option<LdmState>,
 }
@@ -65,18 +88,86 @@ impl EncodeState {
             first_block,
             // Allocated by the first block, so frames that never need them
             // (see `PushEncoder`) skip zeroing them.
-            hash_table: Vec::new(),
-            hash_long: Vec::new(),
+            hash_table: MatchTable::new(),
+            hash_long: MatchTable::new(),
             sequences: Vec::new(),
             window_buf,
             block_start,
+            tables_ready: false,
+            stale_window: Vec::new(),
+            dict_hash: MatchTable::new(),
+            combined: Vec::new(),
             #[cfg(feature = "ldm")]
             ldm_state,
         }
     }
 
+    /// Encodes `input`, or the buffered input if `None`, as one whole frame
+    /// with its size known, as the one-shot API does, but in this state's
+    /// tables and buffers. Call [`Self::reset`] after it.
+    pub(crate) fn encode_one_pass(
+        &mut self,
+        input: Option<&[u8]>,
+        params: &LevelParams,
+        out: &mut Vec<u8>,
+    ) -> Result<(), CompressError> {
+        let src = match input {
+            Some(input) => input,
+            None => &self.window_buf[self.block_start..],
+        };
+        #[cfg(feature = "ldm")]
+        if params.ldm_params.is_some() {
+            return crate::compress_frame(src, params, out);
+        }
+        // Whole clears follow: the tables no longer hold just the last
+        // window's positions.
+        self.stale_window.clear();
+        let (dict_id, prefix, rep_offsets) = match &self.dict {
+            Some(d) => {
+                self.workspace.prev_ll = d
+                    .ll_table()
+                    .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 35));
+                self.workspace.prev_of = d
+                    .of_table()
+                    .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 31));
+                self.workspace.prev_ml = d
+                    .ml_table()
+                    .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 52));
+                self.workspace.prev_huffman = d
+                    .huf_table()
+                    .and_then(|(dt, tl)| HuffmanEncodeTable::from_decode_table(dt, tl));
+                (Some(d.id()), d.content(), *d.rep_offsets())
+            }
+            None => (None, &[][..], [1, 4, 8]),
+        };
+        context::compress_core(
+            src,
+            *params,
+            dict_id,
+            prefix,
+            rep_offsets,
+            &mut self.hash_table,
+            &mut self.hash_long,
+            &mut self.dict_hash,
+            &mut self.sequences,
+            out,
+            &mut self.workspace,
+            &mut self.combined,
+            true,
+        )
+    }
+
     /// Starts a new frame, keeping allocations. Drops buffered input.
     pub(crate) fn reset(&mut self) {
+        // The tables keep this frame's positions until the next frame uses
+        // them. A small window is kept to zero just their slots then.
+        if self.tables_ready {
+            self.stale_window.clear();
+            if self.slot_clear_pays() {
+                self.stale_window.extend_from_slice(&self.window_buf);
+            }
+            self.tables_ready = false;
+        }
         self.first_block = self.dict.is_some();
         self.rep_offsets = match &self.dict {
             Some(d) => *d.rep_offsets(),
@@ -95,6 +186,52 @@ impl EncodeState {
         }
     }
 
+    /// Whether the window's positions are few enough next to the table
+    /// entries to zero their slots instead of the whole tables.
+    fn slot_clear_pays(&self) -> bool {
+        #[cfg(feature = "ldm")]
+        if self.ldm_state.is_some() {
+            return false;
+        }
+        let tables = if self.hash_long.is_empty() { 1 } else { 2 };
+        slot_clear_pays(
+            self.window_buf.len(),
+            tables,
+            self.hash_table.len() + self.hash_long.len(),
+        )
+    }
+
+    /// Readies the tables for the frame's first match search: zero, at the
+    /// sizes the parameters use. Zeroes the slots of the stale window's
+    /// positions if there is one, else whole tables that are dirty.
+    fn ready_tables(&mut self) {
+        let p = &self.params;
+        if !self.stale_window.is_empty() {
+            let window = &self.stale_window;
+            match p.strategy {
+                Strategy::Fast => self
+                    .hash_table
+                    .clear_slots(|t| fast::zero_position_slots(window, p.hash_log, p.min_match, t)),
+                Strategy::DFast => {
+                    self.hash_table.clear_slots(|t| {
+                        dfast::zero_short_slots(window, p.chain_log, p.min_match, t)
+                    });
+                    self.hash_long
+                        .clear_slots(|t| dfast::zero_long_slots(window, p.hash_log, t));
+                }
+            }
+            self.stale_window.clear();
+        }
+        match p.strategy {
+            Strategy::Fast => self.hash_table.clear(1usize << p.hash_log),
+            Strategy::DFast => {
+                self.hash_table.clear(1usize << p.chain_log);
+                self.hash_long.clear(1usize << p.hash_log);
+            }
+        }
+        self.tables_ready = true;
+    }
+
     /// Largest block this frame uses: 128 KiB, or the window if smaller.
     pub(crate) fn block_size(&self) -> usize {
         MAX_BLOCK_SIZE.min(1usize << self.params.window_log)
@@ -103,11 +240,6 @@ impl EncodeState {
     /// Bytes waiting for the next block.
     pub(crate) fn buffered(&self) -> usize {
         self.window_buf.len() - self.block_start
-    }
-
-    /// The input waiting for the next block.
-    pub(crate) fn buffered_input(&self) -> &[u8] {
-        &self.window_buf[self.block_start..]
     }
 
     pub(crate) fn dict(&self) -> Option<&Dictionary> {
@@ -120,16 +252,16 @@ impl EncodeState {
         let n = (self.block_size() - self.buffered()).min(input.len());
         let needed = self.window_buf.len() + n;
         if needed > self.window_buf.capacity() {
-            // Room for one block first, so short frames stay small. Past
-            // that, jump toward the most the window holds (two windows and a
-            // block) in big steps: each doubling step copies the window and
-            // faults in fresh pages.
+            // Double up to one block, so short frames stay small. Past that,
+            // jump toward the most the window holds (two windows and a block)
+            // in big steps: each doubling step copies the window and faults
+            // in fresh pages.
             let window = 1usize << self.params.window_log;
             let dict_len = self.dict.as_ref().map_or(0, |d| d.content().len());
             let most = (2 * window).max(dict_len + window) + self.block_size();
             let first = dict_len + self.block_size();
             let target = if needed <= first {
-                first
+                (2 * self.window_buf.capacity()).min(first)
             } else {
                 (2 * self.window_buf.capacity()).max(GROW_STEP).min(most)
             }
@@ -172,15 +304,19 @@ impl EncodeState {
             return Ok(());
         }
 
-        if self.hash_table.is_empty() {
-            (self.hash_table, self.hash_long) = alloc_hash_tables(&self.params);
-        }
         let seed_dict = self.first_block && self.dict.is_some();
         let plen = self.block_start;
+        out.reserve(self.buffered() + 32);
+        let raw = {
+            let chunk = &self.window_buf[plen..];
+            crate::skip_match_search(&self.params, chunk.len(), chunk)
+        };
+        if !raw && !self.tables_ready {
+            self.ready_tables();
+        }
         let chunk = &self.window_buf[plen..];
 
-        out.reserve(chunk.len() + 32);
-        if crate::skip_match_search(&self.params, chunk.len(), chunk) {
+        if raw {
             block_encoder::encode_raw_block(chunk, last, out)?;
         } else {
             if seed_dict {
@@ -205,11 +341,6 @@ impl EncodeState {
                             &mut self.hash_long,
                         );
                     }
-                }
-            } else if plen == 0 {
-                self.hash_table.fill(0);
-                if !self.hash_long.is_empty() {
-                    self.hash_long.fill(0);
                 }
             }
 
@@ -301,15 +432,5 @@ impl EncodeState {
         self.block_start = self.window_buf.len();
         self.first_block = false;
         Ok(())
-    }
-}
-
-fn alloc_hash_tables(params: &LevelParams) -> (Vec<u32>, Vec<u32>) {
-    match params.strategy {
-        Strategy::Fast => (vec![0u32; 1usize << params.hash_log], Vec::new()),
-        Strategy::DFast => (
-            vec![0u32; 1usize << params.chain_log],
-            vec![0u32; 1usize << params.hash_log],
-        ),
     }
 }
