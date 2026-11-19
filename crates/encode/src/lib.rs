@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "nightly", feature(optimize_attribute))]
 #![forbid(unsafe_code)]
+// Tests build tables and buffers freely; the library goes through `MatchTable`.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -51,9 +53,11 @@ pub(crate) mod rebase;
 pub mod strategy;
 #[cfg(feature = "std")]
 pub mod streaming;
+#[cfg(feature = "alloc")]
+pub(crate) mod table;
 
 #[cfg(feature = "alloc")]
-use alloc::vec;
+use crate::table::MatchTable;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
@@ -338,7 +342,7 @@ pub(crate) fn compress_frame(
         match params.strategy {
             Strategy::Fast => {
                 let hash_size = 1usize << params.hash_log;
-                let mut hash_table = vec![0u32; hash_size];
+                let mut hash_table = MatchTable::zeroed(hash_size);
                 while offset < input.len() {
                     let chunk_size = (input.len() - offset).min(block_size);
                     let block_end = offset + chunk_size;
@@ -418,8 +422,8 @@ pub(crate) fn compress_frame(
             Strategy::DFast => {
                 let short_size = 1usize << params.chain_log;
                 let long_size = 1usize << params.hash_log;
-                let mut hash_short = vec![0u32; short_size];
-                let mut hash_long = vec![0u32; long_size];
+                let mut hash_short = MatchTable::zeroed(short_size);
+                let mut hash_long = MatchTable::zeroed(long_size);
                 while offset < input.len() {
                     let chunk_size = (input.len() - offset).min(block_size);
                     let block_end = offset + chunk_size;
@@ -577,7 +581,7 @@ pub(crate) fn compress_with_dict_to(
 
             match params.strategy {
                 Strategy::Fast => {
-                    let mut hash_table = vec![0u32; hash_size];
+                    let mut hash_table = MatchTable::zeroed(hash_size);
                     fast::prefill_hash_table(
                         &combined,
                         plen,
@@ -630,8 +634,8 @@ pub(crate) fn compress_with_dict_to(
                 Strategy::DFast => {
                     let short_size = 1usize << params.chain_log;
                     let long_size = 1usize << params.hash_log;
-                    let mut hash_short = vec![0u32; short_size];
-                    let mut hash_long = vec![0u32; long_size];
+                    let mut hash_short = MatchTable::zeroed(short_size);
+                    let mut hash_long = MatchTable::zeroed(long_size);
                     dfast::prefill_hash_tables(
                         &combined,
                         plen,

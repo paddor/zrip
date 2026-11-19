@@ -1,8 +1,6 @@
 #[cfg(feature = "alloc")]
 use alloc::borrow::Cow;
 #[cfg(feature = "alloc")]
-use alloc::vec;
-#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 use crate::block_encoder::{self, BlockEncodeWorkspace};
@@ -10,6 +8,7 @@ use crate::fast::AttachedDict;
 use crate::output::{OutputSink, SliceSink};
 use crate::rebase::{self, PositionBase};
 use crate::strategy::{self, LevelParams, Strategy};
+use crate::table::MatchTable;
 use crate::{dfast, fast, skip_match_search, write_frame_header_with_checksum};
 use zrip_core::Sequence;
 use zrip_core::dict::Dictionary;
@@ -70,7 +69,7 @@ impl PreparedDict {
                     .expect("level validated by the caller")
                     .min_match;
                 if attached.iter().all(|(mls, _)| *mls != min_match) {
-                    let mut table = vec![0u32; 1 << attached_hash_log];
+                    let mut table = MatchTable::new();
                     fast::prefill_hash_table(
                         &combined,
                         prefix_len,
@@ -78,15 +77,14 @@ impl PreparedDict {
                         min_match,
                         &mut table,
                     );
-                    attached.push((min_match, table));
+                    attached.push((min_match, table.into_vec()));
                 }
             }
         }
 
         let (hash_snapshot, hash_long_snapshot) = match params.strategy {
             Strategy::Fast => {
-                let hash_size = 1usize << params.hash_log;
-                let mut hash_table = vec![0u32; hash_size];
+                let mut hash_table = MatchTable::new();
                 fast::prefill_hash_table(
                     &combined,
                     prefix_len,
@@ -94,13 +92,11 @@ impl PreparedDict {
                     params.min_match,
                     &mut hash_table,
                 );
-                (hash_table, Vec::new())
+                (hash_table.into_vec(), Vec::new())
             }
             Strategy::DFast => {
-                let short_size = 1usize << params.chain_log;
-                let long_size = 1usize << params.hash_log;
-                let mut hash_short = vec![0u32; short_size];
-                let mut hash_long = vec![0u32; long_size];
+                let mut hash_short = MatchTable::new();
+                let mut hash_long = MatchTable::new();
                 dfast::prefill_hash_tables(
                     &combined,
                     prefix_len,
@@ -110,7 +106,7 @@ impl PreparedDict {
                     &mut hash_short,
                     &mut hash_long,
                 );
-                (hash_short, hash_long)
+                (hash_short.into_vec(), hash_long.into_vec())
             }
         };
 
@@ -173,10 +169,10 @@ pub struct CompressContext {
     /// level change.
     dict: Option<(Dictionary, usize)>,
     prepared: Option<PreparedDict>,
-    hash_table: Vec<u32>,
-    hash_long: Vec<u32>,
-    dict_hash: Vec<u32>,
-    small_hash: Vec<u32>,
+    hash_table: MatchTable,
+    hash_long: MatchTable,
+    dict_hash: MatchTable,
+    small_hash: MatchTable,
     sequences: Vec<Sequence>,
     output: Vec<u8>,
     workspace: BlockEncodeWorkspace,
@@ -195,10 +191,10 @@ impl CompressContext {
             content_checksum: true,
             dict: None,
             prepared: None,
-            hash_table: Vec::new(),
-            hash_long: Vec::new(),
-            dict_hash: Vec::new(),
-            small_hash: Vec::new(),
+            hash_table: MatchTable::new(),
+            hash_long: MatchTable::new(),
+            dict_hash: MatchTable::new(),
+            small_hash: MatchTable::new(),
             sequences: Vec::new(),
             output: Vec::new(),
             workspace: BlockEncodeWorkspace::new(),
@@ -240,10 +236,10 @@ impl CompressContext {
             content_checksum: true,
             dict: Some((dict, expected_size)),
             prepared: Some(prepared),
-            hash_table: Vec::new(),
-            hash_long: Vec::new(),
-            dict_hash: Vec::new(),
-            small_hash: Vec::new(),
+            hash_table: MatchTable::new(),
+            hash_long: MatchTable::new(),
+            dict_hash: MatchTable::new(),
+            small_hash: MatchTable::new(),
             sequences: Vec::new(),
             output: Vec::new(),
             workspace: BlockEncodeWorkspace::new(),
@@ -421,11 +417,9 @@ impl CompressContext {
             if !use_attached {
                 // The per-call prefix path resizes these tables for its own
                 // parameter tier, so restore length and contents together.
-                self.hash_table.clear();
-                self.hash_table.extend_from_slice(&prep.hash_snapshot);
+                self.hash_table.copy_from(&prep.hash_snapshot);
                 if !prep.hash_long_snapshot.is_empty() {
-                    self.hash_long.clear();
-                    self.hash_long.extend_from_slice(&prep.hash_long_snapshot);
+                    self.hash_long.copy_from(&prep.hash_long_snapshot);
                 }
             }
             prep.combined.truncate(prep.prefix_len);
@@ -468,8 +462,7 @@ impl CompressContext {
                 strategy::HASH_LOG_MIN
             };
             let input_hash_size = 1usize << input_hash_log;
-            self.small_hash.resize(input_hash_size, 0);
-            self.small_hash.fill(0);
+            self.small_hash.clear(input_hash_size);
 
             let mut rep_offsets = prep.rep_offsets;
             let dict = AttachedDict {
@@ -684,9 +677,9 @@ fn compress_core<S: OutputSink>(
     dict_id: Option<u32>,
     prefix: &[u8],
     init_rep_offsets: [u32; 3],
-    hash_table: &mut Vec<u32>,
-    hash_long: &mut Vec<u32>,
-    dict_hash: &mut Vec<u32>,
+    hash_table: &mut MatchTable,
+    hash_long: &mut MatchTable,
+    dict_hash: &mut MatchTable,
     sequences: &mut Vec<Sequence>,
     output: &mut S,
     workspace: &mut BlockEncodeWorkspace,
@@ -728,18 +721,9 @@ fn compress_core<S: OutputSink>(
         let mut offset = 0;
         let mut positions = PositionBase::new(params.window_log);
 
-        // A table grown from empty is zeroed already.
-        let short_zeroed = hash_table.is_empty();
-        if hash_table.len() != hash_size {
-            hash_table.resize(hash_size, 0);
-        }
-
         match params.strategy {
             Strategy::Fast => {
                 if has_prefix && input.len() <= MAX_BLOCK_SIZE {
-                    if dict_hash.len() != hash_size {
-                        dict_hash.resize(hash_size, 0);
-                    }
                     fast::compress_fast_with_prefix_reuse(
                         input,
                         &params,
@@ -824,9 +808,7 @@ fn compress_core<S: OutputSink>(
                         offset += chunk_size;
                     }
                 } else {
-                    if !short_zeroed {
-                        hash_table.fill(0);
-                    }
+                    hash_table.clear(hash_size);
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let block_end = offset + chunk_size;
@@ -879,10 +861,6 @@ fn compress_core<S: OutputSink>(
                 }
             }
             Strategy::DFast => {
-                let long_zeroed = hash_long.is_empty();
-                if hash_long.len() != long_size {
-                    hash_long.resize(long_size, 0);
-                }
                 if has_prefix && input.len() <= MAX_BLOCK_SIZE {
                     dfast::compress_dfast_with_prefix_reuse(
                         input,
@@ -950,12 +928,8 @@ fn compress_core<S: OutputSink>(
                         offset += chunk_size;
                     }
                 } else {
-                    if !short_zeroed {
-                        hash_table.fill(0);
-                    }
-                    if !long_zeroed {
-                        hash_long.fill(0);
-                    }
+                    hash_table.clear(hash_size);
+                    hash_long.clear(long_size);
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let block_end = offset + chunk_size;

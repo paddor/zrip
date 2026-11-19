@@ -239,6 +239,10 @@ impl FseEncodeTable {
         }
     }
 
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "rebuilds a small FSE table in place"
+    )]
     fn build_from_distribution_into(
         &mut self,
         distribution: &[i16],
@@ -771,9 +775,9 @@ fn pack_sequences_and_literals_impl<const COUNT: bool>(
     let lit_buf = &mut workspace.lit_buf[..lit_total + 32];
     let freqs = &mut workspace.seq_freqs;
     if COUNT {
-        freqs.ll.fill(0);
-        freqs.ml.fill(0);
-        freqs.of.fill(0);
+        freqs.ll = [0; 256];
+        freqs.ml = [0; 256];
+        freqs.of = [0; 256];
     }
     let mut extra_bits_total = 0u64;
     let mut lit_pos = 0usize;
@@ -1377,8 +1381,8 @@ fn normalize_counts_into(freqs: &[u32], accuracy_log: u8, dist: &mut Vec<i16>) {
     let table_size = 1i32 << accuracy_log;
     let total: u64 = freqs.iter().map(|&f| f as u64).sum();
 
+    dist.clear();
     dist.resize(freqs.len(), 0);
-    dist.fill(0);
 
     if total == 0 {
         return;

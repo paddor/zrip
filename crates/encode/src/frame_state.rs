@@ -5,7 +5,6 @@
 //! tables carried across them, and appends frame bytes to a caller's `Vec`.
 #![forbid(unsafe_code)]
 
-use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::block_encoder::{self, BlockEncodeWorkspace};
@@ -15,6 +14,7 @@ use crate::fast;
 use crate::ldm::LdmState;
 use crate::rebase::reduce_hash_table;
 use crate::strategy::{self, LevelParams, Strategy};
+use crate::table::MatchTable;
 use crate::write_frame_header_without_content_size;
 use zrip_core::Sequence;
 use zrip_core::dict::Dictionary;
@@ -32,8 +32,8 @@ pub(crate) struct EncodeState {
     workspace: BlockEncodeWorkspace,
     dict: Option<Dictionary>,
     first_block: bool,
-    hash_table: Vec<u32>,
-    hash_long: Vec<u32>,
+    hash_table: MatchTable,
+    hash_long: MatchTable,
     sequences: Vec<Sequence>,
     /// The window: dictionary, then input, then the next block's input from
     /// `block_start`. Input goes straight here, so blocks need no copy.
@@ -65,8 +65,8 @@ impl EncodeState {
             first_block,
             // Allocated by the first block, so frames that never need them
             // (see `PushEncoder`) skip zeroing them.
-            hash_table: Vec::new(),
-            hash_long: Vec::new(),
+            hash_table: MatchTable::new(),
+            hash_long: MatchTable::new(),
             sequences: Vec::new(),
             window_buf,
             block_start,
@@ -92,6 +92,18 @@ impl EncodeState {
         #[cfg(feature = "ldm")]
         if let Some(ref mut ldm) = self.ldm_state {
             ldm.reset();
+        }
+    }
+
+    /// Zeroes the match tables at the sizes the parameters use. Tables not
+    /// written since they were zeroed cost nothing.
+    fn clear_tables(params: &LevelParams, hash_table: &mut MatchTable, hash_long: &mut MatchTable) {
+        match params.strategy {
+            Strategy::Fast => hash_table.clear(1usize << params.hash_log),
+            Strategy::DFast => {
+                hash_table.clear(1usize << params.chain_log);
+                hash_long.clear(1usize << params.hash_log);
+            }
         }
     }
 
@@ -173,7 +185,7 @@ impl EncodeState {
         }
 
         if self.hash_table.is_empty() {
-            (self.hash_table, self.hash_long) = alloc_hash_tables(&self.params);
+            Self::clear_tables(&self.params, &mut self.hash_table, &mut self.hash_long);
         }
         let seed_dict = self.first_block && self.dict.is_some();
         let plen = self.block_start;
@@ -207,10 +219,7 @@ impl EncodeState {
                     }
                 }
             } else if plen == 0 {
-                self.hash_table.fill(0);
-                if !self.hash_long.is_empty() {
-                    self.hash_long.fill(0);
-                }
+                Self::clear_tables(&self.params, &mut self.hash_table, &mut self.hash_long);
             }
 
             #[cfg(feature = "ldm")]
@@ -301,15 +310,5 @@ impl EncodeState {
         self.block_start = self.window_buf.len();
         self.first_block = false;
         Ok(())
-    }
-}
-
-fn alloc_hash_tables(params: &LevelParams) -> (Vec<u32>, Vec<u32>) {
-    match params.strategy {
-        Strategy::Fast => (vec![0u32; 1usize << params.hash_log], Vec::new()),
-        Strategy::DFast => (
-            vec![0u32; 1usize << params.chain_log],
-            vec![0u32; 1usize << params.hash_log],
-        ),
     }
 }

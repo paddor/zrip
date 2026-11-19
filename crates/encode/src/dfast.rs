@@ -1,11 +1,11 @@
 #[cfg(feature = "alloc")]
-use alloc::vec;
-#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 use crate::primitives;
 use crate::primitives::first4;
 use crate::strategy::LevelParams;
+#[cfg(feature = "alloc")]
+use crate::table::MatchTable;
 use zrip_core::Sequence;
 use zrip_core::hash::{PRIME32_1, PRIME64_1};
 use zrip_core::hint::unlikely;
@@ -51,10 +51,8 @@ pub(crate) fn compress_dfast(
     params: &LevelParams,
     rep_offsets: &[u32; 3],
 ) -> Vec<Sequence> {
-    let short_size = 1usize << params.chain_log;
-    let long_size = 1usize << params.hash_log;
-    let mut hash_short = vec![0u32; short_size];
-    let mut hash_long = vec![0u32; long_size];
+    let mut hash_short = MatchTable::zeroed(1usize << params.chain_log);
+    let mut hash_long = MatchTable::zeroed(1usize << params.hash_log);
     let mut sequences = Vec::new();
     compress_dfast_block(
         src,
@@ -385,17 +383,20 @@ fn after_match(
     }
 }
 
+/// Clears `hash_short` to `1 << short_log` entries and `hash_long` to
+/// `1 << hash_log`, and fills them with dictionary positions below
+/// `prefix_len`.
 pub(crate) fn prefill_hash_tables(
     combined: &[u8],
     prefix_len: usize,
     hash_log: u32,
     short_log: u32,
     min_match: u32,
-    hash_short: &mut [u32],
-    hash_long: &mut [u32],
+    hash_short: &mut MatchTable,
+    hash_long: &mut MatchTable,
 ) {
-    hash_short.fill(0);
-    hash_long.fill(0);
+    let hash_short = hash_short.cleared(1usize << short_log);
+    let hash_long = hash_long.cleared(1usize << hash_log);
     if prefix_len < 8 {
         return;
     }
@@ -427,10 +428,8 @@ pub(crate) fn compress_dfast_with_prefix(
     if prefix.is_empty() {
         return compress_dfast(src, params, rep_offsets);
     }
-    let short_size = 1usize << params.chain_log;
-    let long_size = 1usize << params.hash_log;
-    let mut hash_short = vec![0u32; short_size];
-    let mut hash_long = vec![0u32; long_size];
+    let mut hash_short = MatchTable::new();
+    let mut hash_long = MatchTable::new();
     let mut sequences = Vec::new();
     let mut combined = Vec::new();
     compress_dfast_with_prefix_reuse(
@@ -446,14 +445,16 @@ pub(crate) fn compress_dfast_with_prefix(
     sequences
 }
 
+/// Compresses `src` after `prefix`, with both tables cleared and prefilled
+/// from the prefix.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compress_dfast_with_prefix_reuse(
     src: &[u8],
     params: &LevelParams,
     rep_offsets: &[u32; 3],
     prefix: &[u8],
-    hash_short: &mut [u32],
-    hash_long: &mut [u32],
+    hash_short: &mut MatchTable,
+    hash_long: &mut MatchTable,
     sequences: &mut Vec<Sequence>,
     combined: &mut Vec<u8>,
 ) {

@@ -1,0 +1,7 @@
+# Match tables go through `table::MatchTable`, which zeroes each table at most
+# once per frame. Raw fills and zeroed vectors bypass it; other uses need an
+# `allow` with a reason.
+disallowed-methods = [
+    { path = "slice::fill", reason = "zero match tables with `MatchTable::clear`" },
+    { path = "alloc::vec::from_elem", reason = "allocate match tables as `MatchTable`" },
+]
