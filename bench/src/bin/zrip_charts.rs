@@ -2560,7 +2560,7 @@ const SWEEP_SIZE_LABELS: &[&str] = &[
     "64", "128", "256", "512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K",
     "1M",
 ];
-const SWEEP_CODECS: &[&str] = &["C zstd", "zrip", "rusty_zstd"];
+const SWEEP_CODECS: &[&str] = &["C zstd", "zrip", "structured-zstd", "rusty_zstd"];
 /// The chart file for each sweep level.
 const SWEEP_CHARTS: &[(i32, &str)] = &[(1, "sweep.svg"), (3, "sweep_l3.svg")];
 
@@ -2656,7 +2656,9 @@ fn draw_sweep_level(
     let left = 90.0;
     let gap = 56.0;
     let total_h = panels.len() as f64 * panel_h + (panels.len() - 1) as f64 * gap;
-    let height = (top + total_h + 110.0) as u32;
+    // The legend takes up to three codecs per row.
+    let legend_h = SWEEP_CODECS.len().div_ceil(3) as f64 * LEGEND_ROW_H;
+    let height = (top + total_h + 90.0 + legend_h) as u32;
     let path = output_path(out_dir, file);
     let area = root(&path, width, height)?;
     chart_header(

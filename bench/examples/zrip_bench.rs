@@ -419,6 +419,44 @@ fn bench_structured_zstd(slices: &[&[u8]], name: &str, level: i32, target_ns: u6
     )
 }
 
+/// structured-zstd with one reused compressor and decoder, as the sweep's
+/// other codecs, and `dict` attached to both when given.
+fn bench_structured_zstd_reused(
+    slices: &[&[u8]],
+    name: &str,
+    level: i32,
+    target_ns: u64,
+    dict: Option<&[u8]>,
+) -> BenchResult {
+    use structured_zstd::decoding::{Dictionary, FrameDecoder};
+    use structured_zstd::encoding::{CompressionLevel, FrameCompressor};
+    let mut enc: FrameCompressor = FrameCompressor::new(CompressionLevel::Level(level));
+    let mut dec = FrameDecoder::new();
+    if let Some(d) = dict {
+        enc.set_dictionary_from_bytes(d).unwrap();
+        dec.add_dict(Dictionary::decode_dict(d).unwrap()).unwrap();
+    }
+    let max_len = slices.iter().map(|s| s.len()).max().unwrap_or(0);
+    let mut out = vec![0u8; max_len + 1024];
+    bench_slices(
+        if dict.is_some() {
+            "structured-zstd+dict"
+        } else {
+            "structured-zstd"
+        },
+        slices,
+        name,
+        level,
+        target_ns,
+        |s| enc.compress_independent_frame(s),
+        |f, len| {
+            let n = dec.decode_all(f, &mut out).unwrap();
+            assert_eq!(n, len);
+            std::hint::black_box(&out[..n]);
+        },
+    )
+}
+
 fn bench_mzstd(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> BenchResult {
     let config = mzstd::EncoderConfig::default().with_level(mzstd::Level::try_from(level).unwrap());
     let mut compressor = mzstd::Compressor::new(config).unwrap();
@@ -619,9 +657,22 @@ fn run_sweep(
                     if cached_keys.contains(&key) {
                         continue;
                     }
-                    let Some(mut r) =
-                        bench_codec(codec, &slices, &name, level, target_ns, Some(&dict))
-                    else {
+                    // The other modes time structured-zstd's one-shot
+                    // functions; here it reuses its compressor and decoder.
+                    let r = match codec {
+                        "structured-zstd" => Some(bench_structured_zstd_reused(
+                            &slices, &name, level, target_ns, None,
+                        )),
+                        "structured-zstd+dict" => Some(bench_structured_zstd_reused(
+                            &slices,
+                            &name,
+                            level,
+                            target_ns,
+                            Some(&dict),
+                        )),
+                        _ => bench_codec(codec, &slices, &name, level, target_ns, Some(&dict)),
+                    };
+                    let Some(mut r) = r else {
                         continue;
                     };
                     r.input_sha256.clone_from(&sha256);
@@ -1183,6 +1234,8 @@ const SWEEP_CODECS: &[&str] = &[
     "C zstd+dict",
     "rusty_zstd",
     "rusty_zstd+dict",
+    "structured-zstd",
+    "structured-zstd+dict",
 ];
 
 fn levels_for_codec<'a>(codec: &str, level_filter: &'a [i32]) -> &'a [i32] {
@@ -1208,6 +1261,7 @@ fn fmt_mbs(input_size: usize, ns: f64) -> String {
 fn display_codec(codec: &str) -> &str {
     match codec {
         "structured-zstd" => "s-zstd",
+        "structured-zstd+dict" => "s-zstd+d",
         "C zstd+dict" => "Czstd+d",
         "zrip+dict" => "zrip+d",
         "rusty_zstd" => "rusty",
