@@ -558,8 +558,15 @@ fn encode_compressed_block_impl(
     }
 
     // As C zstd at its fast strategies: with valid repeat tables, up to 1000
-    // sequences skip building custom ones.
-    let do_codes = policy.custom_tables && n >= 64 && !(has_repeat && n < 1000);
+    // sequences skip building custom ones, unless the repeat tables fit them
+    // badly. Custom tables cost about the codes' order-0 entropy plus their
+    // descriptions, so within 20% and 32 bytes of it they rarely pay off.
+    let do_codes = policy.custom_tables
+        && n >= 64
+        && !(has_repeat
+            && n < 1000
+            && workspace.repeat_seq.len() * 5
+                <= sequence_entropy_bytes(&workspace.seq_freqs, n) * 6 + 160);
     let seq_data = if do_codes {
         let f = &workspace.seq_freqs;
         let ll_freq = f.ll.first_chunk::<36>().unwrap();
@@ -971,13 +978,29 @@ fn histogram_too_dense(counts: &[u32; 256], limit_fp8: u32) -> bool {
     if n == 0 {
         return false;
     }
+    entropy_bits_fp8(counts, n) > u64::from(limit_fp8) * u64::from(n)
+}
+
+/// Order-0 entropy of symbols with these counts, summing to `n`, in bits
+/// (8.8 fixed point).
+fn entropy_bits_fp8(counts: &[u32], n: u32) -> u64 {
     let log2_n = log2_fp8(n);
-    let bits_fp8: u64 = counts
+    counts
         .iter()
         .filter(|&&c| c > 0)
         .map(|&c| u64::from(c) * u64::from(log2_n - log2_fp8(c)))
-        .sum();
-    bits_fp8 > u64::from(limit_fp8) * u64::from(n)
+        .sum()
+}
+
+/// The order-0 entropy of the `n` sequences' codes plus their extra bits, in
+/// bytes: about the least custom tables can code them in.
+fn sequence_entropy_bytes(f: &SeqFreqs, n: usize) -> usize {
+    let n = n as u32;
+    let code_bits = (entropy_bits_fp8(&f.ll[..36], n)
+        + entropy_bits_fp8(&f.ml[..53], n)
+        + entropy_bits_fp8(&f.of[..32], n))
+        / 256;
+    (code_bits + f.extra_bits).div_ceil(8) as usize
 }
 
 /// Literals sampled from each end before the full histogram when they look
