@@ -422,9 +422,11 @@ mod per_frame {
                 });
 
                 let mut ctx = None;
-                frame(&format!("context with_dict {at}"), || {
+                let zeroed = frame(&format!("context with_dict {at}"), || {
                     ctx = Some(CompressContext::with_dict(level, dict.clone()).unwrap());
                 });
+                // The frames that use the dictionary tables build them.
+                assert_eq!(zeroed, 0, "context with_dict {at}");
                 let ctx = ctx.as_mut().unwrap();
                 for n in 0..2 {
                     frame(&format!("context with dict, frame {n} {at}"), || {
@@ -478,6 +480,18 @@ mod per_frame {
             .collect();
         let dict = dict();
         for level in LEVELS {
+            // The dictionary tables are built by the first frame that uses
+            // each, after other frames left their input in the buffer.
+            let mut reused_ctx = CompressContext::with_dict(level, dict.clone()).unwrap();
+            for (i, input) in inputs.iter().enumerate() {
+                let mut fresh = CompressContext::with_dict(level, dict.clone()).unwrap();
+                assert_eq!(
+                    reused_ctx.compress(input).unwrap(),
+                    fresh.compress(input).unwrap(),
+                    "L{level} dict context frame {i}"
+                );
+            }
+
             let mut reused = PushEncoder::new(level).unwrap();
             let mut reused_dict = PushEncoder::with_dict(level, dict.clone()).unwrap();
             for (i, input) in inputs.iter().enumerate() {

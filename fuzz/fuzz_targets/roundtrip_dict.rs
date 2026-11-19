@@ -30,5 +30,26 @@ fuzz_target!(|data: &[u8]| {
                 .expect("failed to decompress dict-compressed output");
             assert_eq!(payload, &decompressed[..]);
         }
+
+        // A reused context builds its dictionary tables on first use, after
+        // earlier frames left their input in its buffer. Its frames must
+        // match a new context's.
+        let mut ctx = zrip::CompressContext::with_dict(level, dict.clone()).unwrap();
+        let half = payload.len() / 2;
+        for (i, part) in [&payload[..half], payload, &payload[half..]]
+            .iter()
+            .enumerate()
+        {
+            let fresh = zrip::CompressContext::with_dict(level, dict.clone())
+                .unwrap()
+                .compress(part)
+                .unwrap()
+                .into_owned();
+            let frame = ctx.compress(part).unwrap();
+            assert_eq!(&frame[..], &fresh[..], "L{level} frame {i}");
+            let decompressed = zrip::decompress_with_dict(&frame, &dict)
+                .expect("failed to decompress dict context output");
+            assert_eq!(*part, &decompressed[..]);
+        }
     }
 });
