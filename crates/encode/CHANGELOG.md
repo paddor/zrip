@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-11-19
+
+- Sequence bitstreams go straight into the block output, reserved from an
+  exact bound, and the literal buffer is sized to the block's literals, so
+  one-shot calls zero and copy less.
+- `CompressContext::new` allocates nothing; the first frame sizes the hash
+  tables and zeroes them once. A context made per call for 1-16 KiB inputs
+  runs 1.2-3x faster.
+
 ## [0.9.6] - 2026-11-18
 
 - Add `push::PushEncoder` with `EndOp`: push-style (sans-io) encoding into
