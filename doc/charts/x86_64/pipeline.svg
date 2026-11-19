@@ -173,8 +173,8 @@ osdb
 <rect x="71" y="573" width="20" height="17" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="71" y="567" width="20" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="91" y="587" width="19" height="25" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="91" y="570" width="19" height="17" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="91" y="563" width="19" height="7" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="91" y="569" width="19" height="18" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="91" y="563" width="19" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="110" y="589" width="19" height="23" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="110" y="571" width="19" height="18" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="110" y="564" width="19" height="7" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -194,8 +194,8 @@ reymont
 <rect x="200" y="585" width="20" height="14" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="200" y="581" width="20" height="4" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="220" y="597" width="19" height="15" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="220" y="584" width="19" height="13" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="220" y="579" width="19" height="5" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="220" y="583" width="19" height="14" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="220" y="579" width="19" height="4" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="239" y="598" width="19" height="14" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="239" y="585" width="19" height="13" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="239" y="580" width="19" height="5" opacity="1" fill="#F59E0B" stroke="none"/>
