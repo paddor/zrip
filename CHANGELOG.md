@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+## [0.8.20] - 2026-11-19
+
+### Fixed
+
+- Compressing with a dictionary could panic or write a corrupt frame. A
+  block could repeat the dictionary's sequence tables when its offset codes
+  went past what they hold, as a far match can. Repeat mode now needs the
+  tables to hold every code of the block, as C zstd checks.
+
+### Changed
+
+- Small dictionary frames encode and decode as in C zstd. Levels 3 and 4
+  keep the dictionary in its own tables beside small input tables instead
+  of clearing and prefilling 256 KiB per frame. Literals up to 1 KiB reuse
+  the dictionary's Huffman table, blocks reuse its sequence tables unless
+  they fit badly, and frames within their window are single-segment. With a
+  16 KiB dictionary, a 64 B frame at level 3 takes 2 µs instead of 43 and
+  1 KiB takes 9 µs instead of 63. 64 B frames are 11-13% smaller and decode
+  in 0.37 µs instead of 1.01.
+- `CompressContext::with_dict` builds its tables on first use. Made per call
+  for 16 KiB inputs at level 3, it takes 97 µs instead of 705.
+- Match tables are zeroed at most once per frame, and a reused `PushEncoder`
+  or `FrameEncoder` clears only the slots a small frame wrote. A reused
+  encoder that flushes 1 KiB frames runs 2.5x faster at level 3 and 5x at
+  level 4.
+- One-shot frames reserve sequences for their input instead of 192 KiB, and
+  streams grow their window by doubling instead of reserving a block for
+  their first byte.
+
 ## [0.8.19] - 2026-11-19
 
 ### Changed

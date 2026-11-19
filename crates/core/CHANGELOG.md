@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-19
+
+- `HuffmanEncodeTable::from_decode_table` keeps tables with symbols past 128,
+  such as a dictionary's. Their weights may go undescribed, so such tables
+  are only reused.
+
 ## [0.12.0] - 2026-11-18
 
 - Breaking: `HuffmanEncodeTable::encode_4_streams_into` no longer takes a

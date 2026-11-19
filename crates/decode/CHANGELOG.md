@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.8.15] - 2026-11-19
+
+- Decoders keep a dictionary's Huffman and sequence tables over frames that
+  only repeat them, instead of copying them for every frame.
+
 ## [0.8.14] - 2026-11-18
 
 - Add `push::PushDecoder`: push-style (sans-io) decoding into caller

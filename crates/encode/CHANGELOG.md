@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-11-19
+
+- Fix a panic or corrupt frame when a block repeated a dictionary's sequence
+  tables while its offset codes went past what they hold. FSE encode tables
+  record their symbols, and repeat mode needs every code of the block.
+- Levels 3 and 4 keep a dictionary in its own tables beside small input
+  tables, for inputs up to 8 KiB, or 16 KiB when the prefilled tables are
+  sized for other inputs, as C zstd's dfast does. A 64 B frame with a 16 KiB
+  dictionary at level 3 takes 2 µs instead of 43.
+- Dictionary frames follow C zstd: literals up to 1 KiB reuse the
+  dictionary's Huffman table, raw literals win when headers make Huffman
+  larger, blocks under 1000 sequences reuse valid dictionary sequence tables
+  unless they code them over 20% past their entropy, and frames within their
+  window are single-segment. 64 B frames shrink by 11-13%.
+- `CompressContext::with_dict` builds its snapshot and attached tables on
+  first use, from the dictionary bytes alone.
+- Match tables go through `MatchTable`, which zeroes each at most once per
+  frame. A reused `PushEncoder` or `FrameEncoder` clears only the slots a
+  small frame wrote.
+- One-shot frames reserve sequences for their input, streams grow their
+  window by doubling up to a block, and a reused `PushEncoder` encodes
+  one-pass frames with its own tables.
+
 ## [0.9.7] - 2026-11-19
 
 - Sequence bitstreams go straight into the block output, reserved from an
