@@ -100,9 +100,6 @@ pub(crate) struct BlockEncodeWorkspace {
     pub repeat_seq: Vec<u8>,
     /// Huffman literal streams; bytes past the encoded length are scratch.
     pub huf_concat: Vec<u8>,
-    pub pred_writer_buf: Vec<u8>,
-    pub cust_writer_buf: Vec<u8>,
-    pub repeat_writer_buf: Vec<u8>,
     /// Sequences of the last packed block in `packed_seqs[..num_packed]`.
     packed_seqs: Vec<PackedSeq>,
     num_packed: usize,
@@ -124,9 +121,6 @@ impl BlockEncodeWorkspace {
             cust_seq: Vec::new(),
             repeat_seq: Vec::new(),
             huf_concat: Vec::new(),
-            pred_writer_buf: Vec::new(),
-            cust_writer_buf: Vec::new(),
-            repeat_writer_buf: Vec::new(),
             packed_seqs: Vec::new(),
             num_packed: 0,
             seq_freqs: SeqFreqs::default(),
@@ -500,7 +494,13 @@ fn encode_compressed_block_impl(
 
     let saved_rep = *rep_offsets;
 
-    pack_sequences_and_literals::<true>(src, sequences, rep_offsets, workspace);
+    pack_sequences_and_literals::<true>(
+        src,
+        sequences,
+        src.len() - total_match,
+        rep_offsets,
+        workspace,
+    );
 
     let raw_literals = encode_literals_section(
         &workspace.lit_buf[..workspace.lit_len],
@@ -521,7 +521,7 @@ fn encode_compressed_block_impl(
             workspace.prev_of.as_ref().unwrap(),
             workspace.prev_ml.as_ref().unwrap(),
             &mut workspace.repeat_seq,
-            &mut workspace.repeat_writer_buf,
+            workspace.seq_freqs.extra_bits,
         );
     }
 
@@ -540,7 +540,7 @@ fn encode_compressed_block_impl(
             n,
             pred_est,
             &mut workspace.cust_seq,
-            &mut workspace.cust_writer_buf,
+            workspace.seq_freqs.extra_bits,
             &mut workspace.custom_seq_tables,
         );
         if use_custom && workspace.cust_seq.len() < pred_est {
@@ -549,7 +549,7 @@ fn encode_compressed_block_impl(
             encode_seq_predefined(
                 &workspace.packed_seqs[..workspace.num_packed],
                 &mut workspace.pred_seq,
-                &mut workspace.pred_writer_buf,
+                workspace.seq_freqs.extra_bits,
             );
             if use_custom && workspace.cust_seq.len() < workspace.pred_seq.len() {
                 &workspace.cust_seq
@@ -561,7 +561,7 @@ fn encode_compressed_block_impl(
         encode_seq_predefined(
             &workspace.packed_seqs[..workspace.num_packed],
             &mut workspace.pred_seq,
-            &mut workspace.pred_writer_buf,
+            workspace.seq_freqs.extra_bits,
         );
         &workspace.pred_seq
     };
@@ -696,7 +696,13 @@ fn encode_compressed_block_raw_impl(
 
     let saved_rep = *rep_offsets;
 
-    pack_sequences_and_literals::<false>(src, sequences, rep_offsets, workspace);
+    pack_sequences_and_literals::<false>(
+        src,
+        sequences,
+        src.len() - total_match,
+        rep_offsets,
+        workspace,
+    );
 
     workspace.lit_section.clear();
     encode_raw_literals_header(workspace.lit_len, &mut workspace.lit_section);
@@ -704,7 +710,7 @@ fn encode_compressed_block_raw_impl(
     encode_seq_predefined(
         &workspace.packed_seqs[..workspace.num_packed],
         &mut workspace.pred_seq,
-        &mut workspace.pred_writer_buf,
+        workspace.seq_freqs.extra_bits,
     );
 
     let block_len = workspace.lit_section.len() + workspace.lit_len + workspace.pred_seq.len();
@@ -723,17 +729,19 @@ fn encode_compressed_block_raw_impl(
     output.extend_from_slice(&workspace.pred_seq)
 }
 
-/// Packs `sequences` for the entropy coders and gathers their literals. With
-/// `COUNT`, also counts the codes for custom tables.
+/// Packs `sequences` for the entropy coders and gathers their `lit_total`
+/// literals. With `COUNT`, also counts the codes for custom tables.
 fn pack_sequences_and_literals<const COUNT: bool>(
     src: &[u8],
     sequences: &[Sequence],
+    lit_total: usize,
     rep_offsets: &mut [u32; 3],
     workspace: &mut BlockEncodeWorkspace,
 ) {
     simd_body!(pack_sequences_and_literals_impl::<COUNT>(
         src,
         sequences,
+        lit_total,
         rep_offsets,
         workspace
     ));
@@ -743,21 +751,24 @@ fn pack_sequences_and_literals<const COUNT: bool>(
 fn pack_sequences_and_literals_impl<const COUNT: bool>(
     src: &[u8],
     sequences: &[Sequence],
+    lit_total: usize,
     rep_offsets: &mut [u32; 3],
     workspace: &mut BlockEncodeWorkspace,
 ) {
     let n = sequences.len();
     let src_len = src.len();
 
-    if workspace.lit_buf.len() < src_len + 32 {
-        workspace.lit_buf.resize(src_len + 32, 0);
+    // Sized to the literals, not the block, so a fresh buffer only zeroes
+    // what the literals use.
+    if workspace.lit_buf.len() < lit_total + 32 {
+        workspace.lit_buf.resize(lit_total + 32, 0);
     }
     if workspace.packed_seqs.len() < n {
         workspace.packed_seqs.resize(n, PackedSeq::default());
     }
     // The exact length lets the compiler check literal stores at positions
-    // clamped to `src_len` against nothing.
-    let lit_buf = &mut workspace.lit_buf[..src_len + 32];
+    // clamped to `lit_total` against nothing.
+    let lit_buf = &mut workspace.lit_buf[..lit_total + 32];
     let freqs = &mut workspace.seq_freqs;
     if COUNT {
         freqs.ll.fill(0);
@@ -777,7 +788,7 @@ fn pack_sequences_and_literals_impl<const COUNT: bool>(
         debug_assert!(lit_offset + ll <= src_len);
         if ll <= 32 && lit_offset + 32 <= src_len {
             let s32: &[u8; 32] = src[lit_offset..].first_chunk().unwrap();
-            let d32: &mut [u8; 32] = lit_buf[lit_pos.min(src_len)..].first_chunk_mut().unwrap();
+            let d32: &mut [u8; 32] = lit_buf[lit_pos.min(lit_total)..].first_chunk_mut().unwrap();
             *d32 = *s32;
         } else {
             lit_buf[lit_pos..lit_pos + ll].copy_from_slice(&src[lit_offset..lit_offset + ll]);
@@ -827,8 +838,8 @@ fn pack_sequences_and_literals_impl<const COUNT: bool>(
             freqs.ll[usize::from(ll_c)] += 1;
             freqs.ml[usize::from(ml_c)] += 1;
             freqs.of[usize::from(of_c)] += 1;
-            extra_bits_total += u64::from(extra_nbits);
         }
+        extra_bits_total += u64::from(extra_nbits);
 
         *packed = PackedSeq {
             extra_bits,
@@ -847,6 +858,7 @@ fn pack_sequences_and_literals_impl<const COUNT: bool>(
         lit_buf[lit_pos..lit_pos + rest].copy_from_slice(&src[lit_offset..src_len]);
         lit_pos += rest;
     }
+    debug_assert_eq!(lit_pos, lit_total);
     freqs.extra_bits = extra_bits_total;
     workspace.lit_len = lit_pos;
     workspace.num_packed = n;
@@ -1126,20 +1138,24 @@ fn encode_raw_literals_header(size: usize, output: &mut Vec<u8>) {
     }
 }
 
-fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, writer_buf: &mut Vec<u8>) {
-    simd_body!(encode_seq_predefined_impl(packed, output, writer_buf));
+fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, extra_bits: u64) {
+    simd_body!(encode_seq_predefined_impl(packed, output, extra_bits));
+}
+
+/// Bytes a sequence bitstream can take, so its buffer is sized once: each
+/// sequence adds its extra bits and at most one table log of state bits per
+/// code, the final states one log each, and the end mark one bit. The last
+/// 8-byte store reaches 8 bytes past the end.
+fn seq_stream_bound(n: usize, extra_bits: u64, state_bits: u32) -> usize {
+    let bits = extra_bits + (n as u64 + 1) * u64::from(state_bits) + 1;
+    bits.div_ceil(8) as usize + 8
 }
 
 #[inline(always)]
-fn encode_seq_predefined_impl(
-    packed: &[PackedSeq],
-    output: &mut Vec<u8>,
-    writer_buf: &mut Vec<u8>,
-) {
+fn encode_seq_predefined_impl(packed: &[PackedSeq], output: &mut Vec<u8>, extra_bits: u64) {
     let n = packed.len();
     let num_seq = n as u32;
     output.clear();
-    output.reserve(n * 4 + 4);
 
     write_seq_count(output, num_seq);
 
@@ -1148,8 +1164,9 @@ fn encode_seq_predefined_impl(
     let tables = predefined_tables();
     let last = &packed[n - 1];
 
-    let max_out = n * 18 + 16;
-    let mut bitstream = primitives::BitstreamScratch::new(writer_buf, max_out);
+    let state_bits = u32::from(LL_DEFAULT_ACCURACY + ML_DEFAULT_ACCURACY + OF_DEFAULT_ACCURACY);
+    let max_out = seq_stream_bound(n, extra_bits, state_bits);
+    let mut bitstream = primitives::BitstreamScratch::new(output, max_out);
 
     let mut ll_state = tables.ll.init_state(last.ll_c);
     let mut of_state = tables.of.init_state(last.of_c);
@@ -1212,7 +1229,6 @@ fn encode_seq_predefined_impl(
         pos += 1;
     }
     bitstream.finish(pos);
-    output.extend_from_slice(bitstream.as_slice());
 }
 
 fn encode_seq_repeat(
@@ -1221,10 +1237,10 @@ fn encode_seq_repeat(
     of_t: &FseEncodeTable,
     ml_t: &FseEncodeTable,
     output: &mut Vec<u8>,
-    writer_buf: &mut Vec<u8>,
+    extra_bits: u64,
 ) {
     simd_body!(encode_seq_repeat_impl(
-        packed, ll_t, of_t, ml_t, output, writer_buf
+        packed, ll_t, of_t, ml_t, output, extra_bits
     ));
 }
 
@@ -1235,12 +1251,11 @@ fn encode_seq_repeat_impl(
     of_t: &FseEncodeTable,
     ml_t: &FseEncodeTable,
     output: &mut Vec<u8>,
-    writer_buf: &mut Vec<u8>,
+    extra_bits: u64,
 ) {
     let n = packed.len();
     let num_seq = n as u32;
     output.clear();
-    output.reserve(n * 4 + 4);
 
     write_seq_count(output, num_seq);
 
@@ -1249,8 +1264,9 @@ fn encode_seq_repeat_impl(
 
     let last = &packed[n - 1];
 
-    let max_out = n * 18 + 16;
-    let mut bitstream = primitives::BitstreamScratch::new(writer_buf, max_out);
+    let state_bits = u32::from(ll_t.table_log + of_t.table_log + ml_t.table_log);
+    let max_out = seq_stream_bound(n, extra_bits, state_bits);
+    let mut bitstream = primitives::BitstreamScratch::new(output, max_out);
 
     let mut ll_s = ll_t.init_state(last.ll_c);
     let mut of_s = of_t.init_state(last.of_c);
@@ -1315,7 +1331,6 @@ fn encode_seq_repeat_impl(
         pos += 1;
     }
     bitstream.finish(pos);
-    output.extend_from_slice(bitstream.as_slice());
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1516,11 +1531,11 @@ fn encode_seq_custom(
     n: usize,
     pred_size: usize,
     output: &mut Vec<u8>,
-    writer_buf: &mut Vec<u8>,
+    extra_bits: u64,
     tables: &mut CustomSeqTables,
 ) -> bool {
     simd_body!(encode_seq_custom_impl(
-        packed, ll_freq, ml_freq, of_freq, n, pred_size, output, writer_buf, tables
+        packed, ll_freq, ml_freq, of_freq, n, pred_size, output, extra_bits, tables
     ))
 }
 
@@ -1534,7 +1549,7 @@ fn encode_seq_custom_impl(
     n: usize,
     pred_size: usize,
     output: &mut Vec<u8>,
-    writer_buf: &mut Vec<u8>,
+    extra_bits: u64,
     tables: &mut CustomSeqTables,
 ) -> bool {
     output.clear();
@@ -1576,8 +1591,6 @@ fn encode_seq_custom_impl(
     };
 
     let num_seq = n as u32;
-    output.reserve(n * 4 + 64);
-
     write_seq_count(output, num_seq);
 
     output.push((ll_mode << 6) | (of_mode << 4) | (ml_mode << 2));
@@ -1597,8 +1610,13 @@ fn encode_seq_custom_impl(
 
     let last = &packed[n - 1];
 
-    let max_out = n * 18 + 16;
-    let mut bitstream = primitives::BitstreamScratch::new(writer_buf, max_out);
+    let log = |t: &TableEnc| match t.mode {
+        TableMode::Compressed => u32::from(t.enc_table.table_log),
+        TableMode::Rle(_) => 0,
+    };
+    let state_bits = log(&tables.ll) + log(&tables.of) + log(&tables.ml);
+    let max_out = seq_stream_bound(n, extra_bits, state_bits);
+    let mut bitstream = primitives::BitstreamScratch::new(output, max_out);
     let mut pos: usize = 0;
     let mut bits: u64 = 0;
     let mut bits_used: u32 = 0;
@@ -1718,7 +1736,6 @@ fn encode_seq_custom_impl(
         pos += 1;
     }
     bitstream.finish(pos);
-    output.extend_from_slice(bitstream.as_slice());
 
     true
 }

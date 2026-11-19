@@ -185,21 +185,18 @@ pub struct CompressContext {
 
 impl CompressContext {
     /// Creates a new context for the given compression level (-7..=4; -8 runs as -7).
+    ///
+    /// It allocates nothing up front: the first frame sizes the hash tables
+    /// and buffers for its input.
     pub fn new(level: i32) -> Result<Self, CompressError> {
-        let params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
-        let max_log = strategy::max_hash_log(level).expect("level validated above");
-        let alloc_size = 1usize << max_log;
-        let (hash_table, hash_long) = match params.strategy {
-            Strategy::Fast => (vec![0u32; alloc_size], Vec::new()),
-            Strategy::DFast => (vec![0u32; alloc_size], vec![0u32; alloc_size]),
-        };
+        strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
         Ok(Self {
             level,
             content_checksum: true,
             dict: None,
             prepared: None,
-            hash_table,
-            hash_long,
+            hash_table: Vec::new(),
+            hash_long: Vec::new(),
             dict_hash: Vec::new(),
             small_hash: Vec::new(),
             sequences: Vec::new(),
@@ -237,15 +234,14 @@ impl CompressContext {
         let params = strategy::level_params_for_size(level, total_window)
             .ok_or(CompressError::InvalidLevel(level))?;
         let prepared = PreparedDict::new(&dict, level, &params);
-        let hash_table = vec![0u32; prepared.hash_snapshot.len()];
-        let hash_long = vec![0u32; prepared.hash_long_snapshot.len()];
+        // Frames restore the tables from the prepared snapshots before use.
         Ok(Self {
             level,
             content_checksum: true,
             dict: Some((dict, expected_size)),
             prepared: Some(prepared),
-            hash_table,
-            hash_long,
+            hash_table: Vec::new(),
+            hash_long: Vec::new(),
             dict_hash: Vec::new(),
             small_hash: Vec::new(),
             sequences: Vec::new(),
@@ -732,6 +728,8 @@ fn compress_core<S: OutputSink>(
         let mut offset = 0;
         let mut positions = PositionBase::new(params.window_log);
 
+        // A table grown from empty is zeroed already.
+        let short_zeroed = hash_table.is_empty();
         if hash_table.len() != hash_size {
             hash_table.resize(hash_size, 0);
         }
@@ -826,7 +824,9 @@ fn compress_core<S: OutputSink>(
                         offset += chunk_size;
                     }
                 } else {
-                    hash_table.fill(0);
+                    if !short_zeroed {
+                        hash_table.fill(0);
+                    }
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let block_end = offset + chunk_size;
@@ -879,6 +879,7 @@ fn compress_core<S: OutputSink>(
                 }
             }
             Strategy::DFast => {
+                let long_zeroed = hash_long.is_empty();
                 if hash_long.len() != long_size {
                     hash_long.resize(long_size, 0);
                 }
@@ -949,8 +950,12 @@ fn compress_core<S: OutputSink>(
                         offset += chunk_size;
                     }
                 } else {
-                    hash_table.fill(0);
-                    hash_long.fill(0);
+                    if !short_zeroed {
+                        hash_table.fill(0);
+                    }
+                    if !long_zeroed {
+                        hash_long.fill(0);
+                    }
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let block_end = offset + chunk_size;
