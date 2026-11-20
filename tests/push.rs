@@ -385,9 +385,15 @@ fn decode_limits() {
         .unwrap();
     assert_eq!(out, data);
 
-    // A window above the default 128 MiB needs an explicit cap.
+    // A window above the default 128 MiB needs an explicit cap. C zstd caps
+    // windows at 2^30 on 32-bit targets.
     let mut c = zstd::stream::Encoder::new(Vec::new(), 3).unwrap();
-    c.window_log(31).unwrap();
+    c.window_log(if cfg!(target_pointer_width = "32") {
+        30
+    } else {
+        31
+    })
+    .unwrap();
     std::io::Write::write_all(&mut c, &data).unwrap();
     let frame = c.finish().unwrap();
     let mut out = Vec::new();
