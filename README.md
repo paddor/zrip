@@ -8,6 +8,9 @@ produced at any zstd compression level. The encoder supports levels -7 through
 
 - **Speed.** Negative levels beat C zstd's speed at the same ratio on most
   files. See [Performance](#performance).
+- **Small inputs.** Tuned for hot loops of small messages. On 512 B to 8 KiB
+  inputs, round trips beat C zstd at every level. See
+  [Performance](#performance).
 - **No `unsafe`.** Every crate is `#![forbid(unsafe_code)]`. See
   [SAFETY.md](SAFETY.md).
 - **Small.** About 15k lines of Rust. No levels above 4; their extra ratio
