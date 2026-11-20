@@ -513,3 +513,91 @@ fn decode_limit_counts_earlier_frames() {
     assert_eq!(err, DecompressError::OutputTooSmall);
     assert_eq!(out.len(), 1000);
 }
+
+/// Skewed literals with few repeats: about 5 bits per byte.
+fn skewed(range: core::ops::Range<u32>) -> Vec<u8> {
+    range
+        .map(|i| {
+            let r = i
+                .wrapping_mul(0x9E37_79B1)
+                .rotate_left(13)
+                .wrapping_mul(0x9E37_79B1);
+            ((r >> 26) & (r >> 20) & 63) as u8 + b' '
+        })
+        .collect()
+}
+
+/// Types of the blocks in a frame, and of their literal sections.
+fn block_types(frame: &[u8]) -> Vec<(u8, Option<u8>)> {
+    let header = zrip::frame::header::parse_frame_header(frame).unwrap();
+    let mut pos = header.header_size;
+    let mut types = Vec::new();
+    loop {
+        let h = u32::from_le_bytes([frame[pos], frame[pos + 1], frame[pos + 2], 0]);
+        let (last, kind, size) = (h & 1 == 1, ((h >> 1) & 3) as u8, (h >> 3) as usize);
+        pos += 3;
+        types.push((kind, (kind == 2).then(|| frame[pos] & 3)));
+        pos += if kind == 1 { 1 } else { size };
+        if last {
+            return types;
+        }
+    }
+}
+
+#[test]
+fn treeless_literals_after_a_raw_block_decode() {
+    let first = skewed(0..16 * 1024);
+    // Under 4 KiB, so the flat-block sampler leaves them to the block
+    // encoder, which falls back to raw literals or a raw block.
+    let random = |len: usize, mut x: u32| -> Vec<u8> {
+        (0..len)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                (x >> 24) as u8
+            })
+            .collect()
+    };
+    let dense = random(3000, 1);
+    // Dense bytes, each 256-byte run repeated: a compressed block with raw
+    // literals.
+    let repeated: Vec<u8> = random(1024, 2)
+        .chunks(256)
+        .flat_map(|c| [c, c].concat())
+        .collect();
+    let third = skewed(1 << 20..(1 << 20) + 1024);
+    // L3 streams with sparse probes, which miss the repeats after the first
+    // block and store the second block raw.
+    for level in [1, 4] {
+        let mut enc = PushEncoder::new(level).unwrap();
+        let mut frame = Vec::new();
+        let mut buf = vec![0u8; 1 << 16];
+        for (data, op) in [
+            (&first, EndOp::Flush),
+            (&repeated, EndOp::Flush),
+            (&dense, EndOp::Flush),
+            (&third, EndOp::End),
+        ] {
+            let mut input = &data[..];
+            loop {
+                let p = enc.encode(input, &mut buf, op).unwrap();
+                frame.extend_from_slice(&buf[..p.produced]);
+                input = &input[p.consumed..];
+                if p.status != Status::NeedsOutput {
+                    break;
+                }
+            }
+        }
+        // Huffman literals with a tree, raw literals, a raw block, then
+        // literals that reuse the first block's table across both.
+        assert_eq!(
+            block_types(&frame),
+            [(2, Some(2)), (2, Some(0)), (0, None), (2, Some(3))],
+            "level {level}"
+        );
+        let all = [&first[..], &repeated, &dense, &third].concat();
+        assert_eq!(zstd::decode_all(&frame[..]).unwrap(), all, "level {level}");
+        assert_eq!(zrip::decompress(&frame).unwrap(), all, "level {level}");
+    }
+}

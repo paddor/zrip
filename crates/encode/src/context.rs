@@ -445,9 +445,10 @@ impl CompressContext {
         self.workspace.prev_ml = dict
             .ml_table()
             .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 52));
-        self.workspace.prev_huffman = dict
-            .huf_table()
-            .and_then(|(dt, tl)| HuffmanEncodeTable::from_decode_table(dt, tl));
+        self.workspace.set_prev_huffman(
+            dict.huf_table()
+                .and_then(|(dt, tl)| HuffmanEncodeTable::from_decode_table(dt, tl)),
+        );
         self.output.clear();
         compress_core(
             input,
@@ -517,15 +518,16 @@ impl CompressContext {
         let prep = self.prepared.as_ref().unwrap();
 
         if use_attached {
-            self.workspace.prev_huffman = if params.force_raw_literals {
-                None
-            } else {
-                prep.huf_table.clone()
-            };
+            self.workspace
+                .set_prev_huffman(if params.force_raw_literals {
+                    None
+                } else {
+                    prep.huf_table.clone()
+                });
         } else if let Some(ref huf) = prep.huf_table {
-            self.workspace.prev_huffman = Some(huf.clone());
+            self.workspace.set_prev_huffman(Some(huf.clone()));
         } else {
-            self.workspace.prev_huffman = None;
+            self.workspace.set_prev_huffman(None);
         }
         self.workspace.prev_ll = prep.ll_table.clone();
         self.workspace.prev_of = prep.of_table.clone();
@@ -756,7 +758,7 @@ impl CompressContext {
 
         let params = strategy::level_params_with_prefix(self.level, prefix_len, input.len())
             .expect("level validated at construction");
-        self.workspace.prev_huffman = prep.huf_table.clone();
+        self.workspace.set_prev_huffman(prep.huf_table.clone());
         self.workspace.prev_ll = prep.ll_table.clone();
         self.workspace.prev_of = prep.of_table.clone();
         self.workspace.prev_ml = prep.ml_table.clone();
@@ -809,7 +811,7 @@ pub(crate) fn compress_core<S: OutputSink>(
     let long_size = 1usize << params.hash_log;
 
     if prefix.is_empty() {
-        workspace.prev_huffman = None;
+        workspace.set_prev_huffman(None);
         workspace.prev_ll = None;
         workspace.prev_of = None;
         workspace.prev_ml = None;

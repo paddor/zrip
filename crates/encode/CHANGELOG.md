@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Literal sections under 64 bytes never build a fresh Huffman table, as in C
+  zstd: they reuse the previous one or stay raw. Raw literals and raw blocks
+  keep the decoder's table; a fresh table takes over only once its block is
+  written compressed.
+
 ## [0.9.9] - 2026-11-20
 
 - The DFast probe loop breaks out with the match it found and handles it

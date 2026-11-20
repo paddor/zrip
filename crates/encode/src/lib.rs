@@ -542,9 +542,9 @@ pub(crate) fn compress_with_dict_to(
         workspace.prev_ml = dict
             .ml_table()
             .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 52));
-        workspace.prev_huffman = dict.huf_table().and_then(|(dt, tl)| {
+        workspace.set_prev_huffman(dict.huf_table().and_then(|(dt, tl)| {
             zrip_core::huffman::encode::HuffmanEncodeTable::from_decode_table(dt, tl)
-        });
+        }));
 
         if input.len() <= MAX_BLOCK_SIZE {
             let sequences = match params.strategy {
