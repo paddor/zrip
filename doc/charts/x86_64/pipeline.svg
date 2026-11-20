@@ -29,8 +29,8 @@ seconds / GB
 <rect x="71" y="279" width="16" height="23" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="71" y="257" width="16" height="22" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="71" y="251" width="16" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="87" y="277" width="16" height="25" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="87" y="254" width="16" height="23" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="87" y="276" width="16" height="26" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="87" y="254" width="16" height="22" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="87" y="247" width="16" height="7" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="103" y="279" width="17" height="23" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="103" y="257" width="17" height="22" opacity="1" fill="#C47D08" stroke="none"/>
@@ -192,7 +192,7 @@ osdb
 <rect x="71" y="567" width="16" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="87" y="587" width="16" height="25" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="87" y="569" width="16" height="18" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="87" y="563" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="87" y="562" width="16" height="7" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="103" y="589" width="17" height="23" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="103" y="571" width="17" height="18" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="103" y="564" width="17" height="7" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -288,7 +288,7 @@ webster
 <rect x="588" y="555" width="16" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="604" y="604" width="16" height="8" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="604" y="561" width="16" height="43" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="604" y="555" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="604" y="554" width="16" height="7" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="620" y="603" width="16" height="9" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="620" y="560" width="16" height="43" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="620" y="555" width="16" height="5" opacity="1" fill="#F59E0B" stroke="none"/>

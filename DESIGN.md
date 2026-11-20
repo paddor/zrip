@@ -42,22 +42,22 @@ the finders search from there.
 
 ### Levels
 
-Parameters start from C zstd's `ZSTD_defaultCParameters`, except L-7 to L-4.
-L-3 to L4 are retuned to search less in long literal runs.
+Parameters start from C zstd's `ZSTD_defaultCParameters`, except L-7 to L-3.
+L-2 to L4 are retuned to search less in long literal runs.
 Level 0 maps to level 1. Level -8 runs as L-7. Small inputs clamp the hash
 and window logs to the input size, so tables stay cheap to clear.
 
 | Level | Strategy | Hash table | Window | Min match | Target | Search strength |
 |------:|:---------|:-----------|:-------|:---------:|-------:|----------------:|
-| -7 | Fast | 32 KiB | 512 KiB | 8 | 2 | 4 |
-| -6 | Fast | 32 KiB | 512 KiB | 8 | 9 | 5 |
-| -5 | Fast | 32 KiB | 512 KiB | 8 | 5 | 6 |
-| -4 | Fast | 32 KiB | 512 KiB | 7 | 4 | 5 |
-| -3 | Fast | 64 KiB | 512 KiB | 6 | 4 | 5 |
-| -2 | Fast | 64 KiB | 512 KiB | 6 | 3 | 5 |
-| -1 | Fast | 64 KiB | 512 KiB | 6 | 2 | 5 |
-| 1 | Fast | 128 KiB | 512 KiB | 7 | 1 | 4 |
-| 2 | Fast | 256 KiB | 1 MiB | 7 | 1 | 4 |
+| -7 | Fast | 32 KiB | 512 KiB | 8 | 2 | 3 |
+| -6 | Fast | 32 KiB | 512 KiB | 8 | 5 | 3 |
+| -5 | Fast | 32 KiB | 512 KiB | 8 | 4 | 4 |
+| -4 | Fast | 32 KiB | 512 KiB | 8 | 2 | 4 |
+| -3 | Fast | 64 KiB | 512 KiB | 8 | 2 | 4 |
+| -2 | Fast | 64 KiB | 512 KiB | 7 | 2 | 4 |
+| -1 | Fast | 64 KiB | 512 KiB | 7 | 2 | 5 |
+| 1 | Fast | 64 KiB | 512 KiB | 7 | 1 | 4 |
+| 2 | Fast | 128 KiB | 1 MiB | 7 | 1 | 4 |
 | 3 | DFast | 512 + 256 KiB | 2 MiB | 5 | 1 | 0 |
 | 4 | DFast | 2x 1 MiB | 16 MiB | 5 | 1 | 3 |
 
@@ -66,9 +66,10 @@ and window logs to the input size, so tables stay cheap to clear.
 
 - **L-7** aims at LZ4: raw literals and matches of eight bytes or more, so
   frames hold few sequences, no Huffman tables, and decode fast.
-- **L-6 to L-4** hash 8 (or 7) bytes at shorter steps than C's negative
-  levels. Longer matches leave fewer bytes to Huffman coding, the costly part.
-- **L-3 to L2** grow their step faster than C, so long literal runs cost
+- **L-6 to L-3** hash 8 bytes at shorter steps than C's negative levels.
+  Longer matches leave fewer bytes to Huffman coding, the costly part. L-3
+  searches as L-4 does, in a table twice the size.
+- **L-2 to L2** grow their step faster than C, so long literal runs cost
   fewer probes. Frequent matches keep the initial step and most of the ratio.
   L1 and L2 hash seven bytes to favor longer matches.
 - **L3 and L4** list the search strength for inputs above 256 KiB. L3 grows

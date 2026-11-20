@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Level -3 searches as level -4 does, hashing eight bytes, in a table twice
+  the size. Its old search gained almost nothing over -4 on highly
+  compressible files and compressed worse than -4 on inputs up to 256 KiB.
+  Across the Silesia files, -3 now sits between -4 and -2 in both speed and
+  ratio: highly compressible files compress 3% better and encode 3% faster,
+  the others encode 13% to 64% faster and compress up to 4% worse.
+- Level -7 grows its search step every 8 bytes without a match instead of
+  every 16. On text it encoded barely faster than -6 while compressing much
+  worse; now it is 11% to 24% faster than -6. It encodes 4% to 25% faster
+  than before and compresses 3% to 4% worse on all but the least
+  compressible files.
+
 ## [0.8.22] - 2026-11-20
 
 ### Added
