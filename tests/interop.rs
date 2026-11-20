@@ -3,6 +3,13 @@
 
 const BLOCK: usize = zrip::frame::MAX_BLOCK_SIZE; // 128 KiB
 const KNUTH: u32 = 0x9E37_79B1;
+/// C zstd's highest level. Its ultra levels, in tests running in parallel,
+/// run out of a 32-bit address space.
+const C_MAX_LEVEL: i32 = if cfg!(target_pointer_width = "32") {
+    19
+} else {
+    22
+};
 
 // ===== Encoder: zrip compress -> C decompress =====
 
@@ -618,7 +625,7 @@ fn xxh64_matches_c_zstd_checksum() {
 #[test]
 fn decompress_c_zstd_high_levels() {
     let original: Vec<u8> = (0u8..=255).cycle().take(8192).collect();
-    for level in [5, 9, 15, 19, 22] {
+    for level in [5, 9, 15, 19, C_MAX_LEVEL] {
         let compressed = zstd::encode_all(&original[..], level).unwrap();
         let decompressed =
             zrip::decompress(&compressed).unwrap_or_else(|e| panic!("level {level}: {e}"));
@@ -665,7 +672,7 @@ fn decompress_c_all_levels_all_patterns() {
         ),
     ];
 
-    for level in [-7, -5, -3, -1, 1, 2, 3, 4, 5, 9, 15, 22] {
+    for level in [-7, -5, -3, -1, 1, 2, 3, 4, 5, 9, 15, C_MAX_LEVEL] {
         for (name, data) in &patterns {
             let compressed = zstd::encode_all(&data[..], level).unwrap();
             let decompressed = zrip::decompress(&compressed)
@@ -698,7 +705,7 @@ fn decompress_c_high_entropy() {
             (x >> 16) as u8
         })
         .collect();
-    for level in [1, 3, 9, 22] {
+    for level in [1, 3, 9, C_MAX_LEVEL] {
         let compressed = zstd::encode_all(&original[..], level).unwrap();
         let decompressed =
             zrip::decompress(&compressed).unwrap_or_else(|e| panic!("level {level}: {e}"));
@@ -985,7 +992,7 @@ fn decompress_c_high_accuracy_fse_tables() {
             ((x >> 16) & 0xFF) as u8
         })
         .collect();
-    for level in [15, 19, 22] {
+    for level in [15, 19, C_MAX_LEVEL] {
         let compressed = zstd::encode_all(&data[..], level).unwrap();
         let decompressed =
             zrip::decompress(&compressed).unwrap_or_else(|e| panic!("level {level}: {e}"));
@@ -1027,7 +1034,7 @@ fn decompress_c_all_22_levels() {
         .take(20_000)
         .copied()
         .collect();
-    for level in 1..=22 {
+    for level in 1..=C_MAX_LEVEL {
         let compressed = zstd::encode_all(&data[..], level).unwrap();
         let decompressed =
             zrip::decompress(&compressed).unwrap_or_else(|e| panic!("level {level}: {e}"));
