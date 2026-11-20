@@ -404,12 +404,7 @@ pub(crate) fn parse_sequence_tables_ws(
             if acc > LL_MAX_ACCURACY_LOG {
                 return Err(DecompressError::BadFseTable);
             }
-            build_decode_table_into(
-                &ws.fse_dist,
-                acc,
-                &mut ws.fse_build_buf,
-                &mut ws.fse_symbol_next,
-            )?;
+            build_decode_table_into(&ws.fse_dist, acc, &mut ws.fse_build_buf)?;
             prev.ll_table.fill_ll(&ws.fse_build_buf);
             prev.ll_accuracy = acc;
             prev.ll_kind = SequenceTableKind::Other;
@@ -463,12 +458,7 @@ pub(crate) fn parse_sequence_tables_ws(
             if acc > OF_MAX_ACCURACY_LOG {
                 return Err(DecompressError::BadFseTable);
             }
-            build_decode_table_into(
-                &ws.fse_dist,
-                acc,
-                &mut ws.fse_build_buf,
-                &mut ws.fse_symbol_next,
-            )?;
+            build_decode_table_into(&ws.fse_dist, acc, &mut ws.fse_build_buf)?;
             prev.of_table.fill_of(&ws.fse_build_buf);
             prev.of_accuracy = acc;
             prev.of_kind = SequenceTableKind::Other;
@@ -521,12 +511,7 @@ pub(crate) fn parse_sequence_tables_ws(
             if acc > ML_MAX_ACCURACY_LOG {
                 return Err(DecompressError::BadFseTable);
             }
-            build_decode_table_into(
-                &ws.fse_dist,
-                acc,
-                &mut ws.fse_build_buf,
-                &mut ws.fse_symbol_next,
-            )?;
+            build_decode_table_into(&ws.fse_dist, acc, &mut ws.fse_build_buf)?;
             prev.ml_table.fill_ml(&ws.fse_build_buf);
             prev.ml_accuracy = acc;
             prev.ml_kind = SequenceTableKind::Other;

@@ -8,7 +8,6 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
-pub(crate) mod block_decoder;
 #[cfg(feature = "alloc")]
 pub mod context;
 pub(crate) mod exec;
@@ -18,7 +17,6 @@ pub(crate) mod frame_state;
 pub(crate) mod literals;
 #[cfg(feature = "alloc")]
 pub mod push;
-pub(crate) mod ring_buffer;
 pub(crate) mod seq_table;
 pub(crate) mod sequences;
 #[cfg(feature = "std")]
@@ -75,8 +73,6 @@ pub(crate) struct BlockDecodeWorkspace {
     pub huf_last_header_valid: bool,
     /// Scratch: normalized counts of an FSE table description.
     pub fse_dist: Vec<i16>,
-    /// Scratch: next state per symbol while building an FSE table.
-    pub fse_symbol_next: Vec<u16>,
     /// Scratch: built FSE decode rows, for sequence tables and Huffman
     /// weights.
     pub fse_build_buf: Vec<zrip_core::fse::FseDecodeEntry>,
@@ -122,7 +118,6 @@ impl BlockDecodeWorkspace {
             huf_last_header: Vec::new(),
             huf_last_header_valid: false,
             fse_dist: Vec::new(),
-            fse_symbol_next: Vec::new(),
             fse_build_buf: Vec::new(),
             // Built on first use; streaming decoders keep their own tables.
             seq_tables: None,

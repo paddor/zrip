@@ -237,7 +237,6 @@ pub(crate) fn decode_literals_ws(
                     stream_data,
                     &mut ws.huf_weights,
                     &mut ws.fse_build_buf,
-                    &mut ws.fse_symbol_next,
                     &mut ws.fse_dist,
                 )?;
                 let can_reuse = ws.huf_last_weights_valid && ws.huf_weights == ws.huf_last_weights;

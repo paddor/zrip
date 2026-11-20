@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Removed unused items: `hash::hash4` to `hash8`, `hash::PRIME32_2`, the
+  `simd` module (`has_bmi2`), `fse::FseEncodeEntry`, `fse::FseTable` and
+  `fse::FSE_SEQ_DECODE_ENTRY_ZERO`. `build_decode_table_into` and
+  `parse_huffman_weights_into` drop their unused `symbol_next` scratch
+  argument. The empty `dict::cover` module is hidden from the docs.
+
 - `fastcover::select_segments` fills the dictionary from the end, best
   segment first, and cuts the last pick to fit, as C zstd's
   `COVER_buildDictionary`; it cut the best segment's end.

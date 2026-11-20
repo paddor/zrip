@@ -12,7 +12,7 @@ produced at any zstd compression level. The encoder supports levels -7 through
   [SAFETY.md](SAFETY.md).
 - **Small.** About 15k lines of Rust. No levels above 4; their extra ratio
   matters for storage, not transfers.
-- **Dictionaries.** Built-in COVER and FastCOVER training.
+- **Dictionaries.** Built-in FastCOVER training.
 - **Push API.** Sans-io `PushEncoder` and `PushDecoder` for async codecs and
   protocol stacks. See [Push](#push-sans-io).
 - **Adaptive level.** Picks the level at run time from what limits the
@@ -227,7 +227,7 @@ It settles on the best measured level, which the caller applies with
 | `frame`        | yes     | Frame header parsing and writing; implies `std` |
 | `alloc`        | yes     | `no_std` + heap via `alloc` crate; includes `CompressContext`, `DecompressContext` |
 | `ldm`          | yes     | Long distance matching for large-window compression |
-| `dict_builder` | no      | COVER/FastCOVER dictionary training            |
+| `dict_builder` | no      | FastCOVER dictionary training                  |
 | `simd`         | yes     | [`fearless_simd`](https://crates.io/crates/fearless_simd) runtime dispatch (AVX2+BMI2, NEON, SIMD128) |
 | `paranoid`     | no      | Keeps any future `unsafe` out; no effect today  |
 | `nightly`      | no      | `#[optimize]` attributes on hot functions      |

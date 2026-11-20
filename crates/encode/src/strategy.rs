@@ -267,13 +267,6 @@ fn use_custom_sequence_tables(params: &LevelParams, input_len: usize) -> bool {
     !keeps_raw_literals(params, input_len)
 }
 
-/// Returns the larger of `level`'s `hash_log` and `chain_log`, before any
-/// clamping to the input, or `None` if out of range.
-pub fn max_hash_log(level: i32) -> Option<u32> {
-    let p = level_params_inner(level)?;
-    Some(p.hash_log.max(p.chain_log))
-}
-
 fn level_params_inner(level: i32) -> Option<LevelParams> {
     Some(match level {
         0 => return level_params_inner(DEFAULT_LEVEL),

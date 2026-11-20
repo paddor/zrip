@@ -33,28 +33,6 @@ pub struct FseSeqDecodeEntry {
     pub baseline_value: u32,
 }
 
-/// Per-symbol encode transform with its output bit count. Not used in
-/// the workspace; [`encode::SymbolTransform`] is the one in use.
-#[derive(Clone)]
-pub struct FseEncodeEntry {
-    /// As in [`encode::SymbolTransform`].
-    pub delta_nb_bits: u32,
-    /// As in [`encode::SymbolTransform`].
-    pub delta_find_state: i16,
-    /// Output bit count.
-    pub num_bits_out: u8,
-}
-
-/// A static decode table and its accuracy log. Not used in the
-/// workspace.
-#[derive(Clone)]
-pub struct FseTable {
-    /// `1 << accuracy_log` cells.
-    pub entries: &'static [FseDecodeEntry],
-    /// Table log.
-    pub accuracy_log: u8,
-}
-
 /// Largest symbol an FSE table can hold.
 pub const MAX_SYMBOL: usize = 255;
 /// Largest accuracy log a table description may give (C zstd's
@@ -144,11 +122,3 @@ const fn max_seq_accuracy() -> u8 {
 pub const FSE_SEQ_TABLE_CAPACITY: usize = 1 << max_seq_accuracy();
 /// Keeps a state index inside [`FSE_SEQ_TABLE_CAPACITY`].
 pub const FSE_SEQ_TABLE_MASK: u32 = FSE_SEQ_TABLE_CAPACITY as u32 - 1;
-
-/// All-zero cell, for initializing tables.
-pub const FSE_SEQ_DECODE_ENTRY_ZERO: FseSeqDecodeEntry = FseSeqDecodeEntry {
-    base_line: 0,
-    num_bits: 0,
-    extra_bits: 0,
-    baseline_value: 0,
-};

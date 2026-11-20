@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Removed the unused `BlockDecodeWorkspace::fse_symbol_next`.
+
 - Decoding matches C zstd 1.5.7: one-shot decoding holds only compressed
   blocks to `Block_Maximum_Size`, and their output may pass it by 32 bytes,
   or by any amount when the literals stay outside the output, as there.

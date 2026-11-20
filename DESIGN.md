@@ -128,8 +128,8 @@ level uses. `CompressContext::set_level()` prepares it again.
 - **Copy** (larger, in the snapshot's tier): copy the prefilled table and
   search normally. Outside the tier, prefill per call. DFast always does this.
 
-`zrip-core` trains dictionaries with FastCOVER or COVER and writes the
-standard zstd dictionary format.
+`zrip-core` trains dictionaries with FastCOVER and writes the standard zstd
+dictionary format.
 
 ### Streaming (`streaming.rs`)
 

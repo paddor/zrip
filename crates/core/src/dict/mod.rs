@@ -3,7 +3,10 @@
 
 #![forbid(unsafe_code)]
 
+/// Empty: zrip trains with FastCOVER only. Kept so code that names the
+/// module still builds.
 #[cfg(feature = "dict_builder")]
+#[doc(hidden)]
 pub mod cover;
 #[cfg(feature = "dict_builder")]
 pub mod fastcover;

@@ -22,8 +22,6 @@ pub mod block;
 pub mod frame;
 pub mod push;
 
-pub mod simd;
-
 pub mod sequence;
 pub use sequence::Sequence;
 

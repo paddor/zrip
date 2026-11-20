@@ -39,7 +39,6 @@ pub fn parse_huffman_weights_into(
     data: &[u8],
     weights: &mut Vec<u8>,
     fse_table: &mut Vec<crate::fse::FseDecodeEntry>,
-    fse_symbol_next: &mut Vec<u16>,
     fse_dist: &mut Vec<i16>,
 ) -> Result<usize, DecompressError> {
     if data.is_empty() {
@@ -51,7 +50,7 @@ pub fn parse_huffman_weights_into(
     if header_byte >= 128 {
         parse_direct_weights_into(data, weights)
     } else {
-        parse_fse_compressed_weights_into(data, weights, fse_table, fse_symbol_next, fse_dist)
+        parse_fse_compressed_weights_into(data, weights, fse_table, fse_dist)
     }
 }
 
@@ -178,7 +177,6 @@ fn parse_fse_compressed_weights_into(
     data: &[u8],
     weights: &mut Vec<u8>,
     fse_table: &mut Vec<crate::fse::FseDecodeEntry>,
-    fse_symbol_next: &mut Vec<u16>,
     fse_dist: &mut Vec<i16>,
 ) -> Result<usize, DecompressError> {
     use crate::fse::table_builder::{build_decode_table_into, parse_fse_table_description_into};
@@ -196,7 +194,7 @@ fn parse_fse_compressed_weights_into(
         return Err(DecompressError::BadHuffmanWeights);
     }
 
-    build_decode_table_into(fse_dist, accuracy_log, fse_table, fse_symbol_next)
+    build_decode_table_into(fse_dist, accuracy_log, fse_table)
         .map_err(|_| DecompressError::BadHuffmanWeights)?;
 
     let table_desc_bytes = bit_reader.bytes_consumed();
@@ -615,26 +613,14 @@ mod tests {
         let (weights, _) = parse_huffman_weights(&data).unwrap();
         assert_eq!(weights.len(), 255);
         let mut out = Vec::new();
-        parse_huffman_weights_into(
-            &data,
-            &mut out,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut Vec::new(),
-        )
-        .unwrap();
+        parse_huffman_weights_into(&data, &mut out, &mut Vec::new(), &mut Vec::new()).unwrap();
         assert_eq!(out.len(), 255);
 
         for count in [256, 257] {
             let data = fse_weights_header(count);
             assert!(parse_huffman_weights(&data).is_err(), "{count} weights");
-            let result = parse_huffman_weights_into(
-                &data,
-                &mut out,
-                &mut Vec::new(),
-                &mut Vec::new(),
-                &mut Vec::new(),
-            );
+            let result =
+                parse_huffman_weights_into(&data, &mut out, &mut Vec::new(), &mut Vec::new());
             assert_eq!(
                 result,
                 Err(DecompressError::BadHuffmanWeights),
@@ -654,8 +640,7 @@ mod tests {
             seed ^= seed << 17;
             seed
         };
-        let (mut out, mut table, mut next, mut dist) =
-            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (mut out, mut table, mut dist) = (Vec::new(), Vec::new(), Vec::new());
         let (mut ok, mut too_many) = (0, 0);
         for _ in 0..20_000 {
             let accuracy_log = 5 + (rand() % 2) as u8;
@@ -685,8 +670,7 @@ mod tests {
             data.extend_from_slice(&compressed);
 
             let reference = parse_huffman_weights(&data);
-            let result =
-                parse_huffman_weights_into(&data, &mut out, &mut table, &mut next, &mut dist);
+            let result = parse_huffman_weights_into(&data, &mut out, &mut table, &mut dist);
             match (reference, result) {
                 (Ok((weights, consumed)), Ok(result_consumed)) => {
                     assert_eq!(out, weights);

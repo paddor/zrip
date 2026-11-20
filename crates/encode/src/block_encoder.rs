@@ -1024,51 +1024,9 @@ pub(crate) fn log2_fp8(x: u32) -> u32 {
 }
 
 /// Whether a fresh Huffman table is worth trying for literals whose policy
-/// does not ask for one: yes above 32 KiB, no below. At exactly 32 KiB, an
-/// order-0 entropy estimate decides.
+/// does not ask for one: above 32 KiB.
 fn huf_worth_trying(data: &[u8]) -> bool {
-    if data.len() > 32768 {
-        return true;
-    }
-    if data.len() < 32768 {
-        return false;
-    }
-
-    let n = data.len() as u32;
-    let mut freqs = [0u32; 256];
-    let mut max_sym = 0u8;
-    for &b in data {
-        freqs[b as usize] += 1;
-        if b > max_sym {
-            max_sym = b;
-        }
-    }
-
-    if max_sym > 128 {
-        return false;
-    }
-
-    let active = freqs[..=max_sym as usize]
-        .iter()
-        .filter(|&&f| f > 0)
-        .count();
-    if active < 2 {
-        return false;
-    }
-
-    let log2_n = log2_fp8(n);
-    let mut entropy_bits_fp8: u64 = 0;
-    for &f in &freqs[..=max_sym as usize] {
-        if f > 0 {
-            entropy_bits_fp8 += f as u64 * (log2_n - log2_fp8(f)) as u64;
-        }
-    }
-
-    let estimated_bytes = entropy_bits_fp8.div_ceil(2048);
-    let tree_overhead = 1 + (max_sym as u64).div_ceil(2);
-    let min_gain = n as u64 / 32;
-
-    estimated_bytes + tree_overhead + min_gain < n as u64
+    data.len() > 32 * 1024
 }
 
 /// Literals the entropy gate samples. Shorter literal runs are measured

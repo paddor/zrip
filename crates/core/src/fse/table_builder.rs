@@ -271,20 +271,17 @@ pub fn build_decode_table(
     accuracy_log: u8,
 ) -> Result<Vec<FseDecodeEntry>, DecompressError> {
     let mut table = Vec::new();
-    let mut symbol_next = Vec::new();
-    build_decode_table_into(distribution, accuracy_log, &mut table, &mut symbol_next)?;
+    build_decode_table_into(distribution, accuracy_log, &mut table)?;
     Ok(table)
 }
 
 /// Builds the decode table for `distribution` into `table`, resized to
 /// `1 << accuracy_log` cells. The probabilities, -1 counting as 1, must
-/// sum to the table size, as parsed ones do. `symbol_next` is unused; it
-/// is only cleared.
+/// sum to the table size, as parsed ones do.
 pub fn build_decode_table_into(
     distribution: &[i16],
     accuracy_log: u8,
     table: &mut Vec<FseDecodeEntry>,
-    symbol_next: &mut Vec<u16>,
 ) -> Result<(), DecompressError> {
     let table_size = 1usize << accuracy_log;
     if table.len() != table_size {
@@ -310,7 +307,6 @@ pub fn build_decode_table_into(
     // C zstd's spread step. It is odd, so the walk visits every cell once.
     let step = (table_size >> 1) + (table_size >> 3) + 3;
     let mut next = [0u16; 256];
-    symbol_next.clear();
 
     // Zero and positive probabilities mix unpredictably, so `next` is set
     // without a branch. "Less than one" (-1) symbols are rare and take the
@@ -729,7 +725,7 @@ mod tests {
             seed ^= seed << 17;
             seed
         };
-        let (mut table, mut next) = (Vec::new(), Vec::new());
+        let mut table = Vec::new();
         for round in 0..4000 {
             let accuracy_log = 5 + (rand() % 5) as u8;
             let size = 1i32 << accuracy_log;
@@ -763,7 +759,7 @@ mod tests {
             }
             dist[last] += remaining as i16;
 
-            build_decode_table_into(&dist, accuracy_log, &mut table, &mut next).unwrap();
+            build_decode_table_into(&dist, accuracy_log, &mut table).unwrap();
             let fields = |t: &[FseDecodeEntry]| -> Vec<(u8, u8, u16)> {
                 t.iter()
                     .map(|e| (e.symbol, e.num_bits, e.base_line))

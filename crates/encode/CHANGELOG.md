@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Removed the unused `strategy::max_hash_log`.
+
 - `fast::count_back` counts equal bytes from the right end on big-endian
   targets; it counted from the wrong end and extended matches over unequal
   bytes.
