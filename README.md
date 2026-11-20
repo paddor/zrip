@@ -6,14 +6,17 @@ produced at any zstd compression level. The encoder supports levels -7 through
 
 ## Why zrip
 
-- **Speed.** Built for throughput. [Performance](#performance) compares it
-  with C zstd and other Rust implementations.
-- **Negative levels.** Levels -7 to -1 trade ratio for speed, as in C zstd.
+- **Speed.** Negative levels beat C zstd's speed at the same ratio on most
+  files. See [Performance](#performance).
 - **No `unsafe`.** Every crate is `#![forbid(unsafe_code)]`. See
   [SAFETY.md](SAFETY.md).
 - **Small.** About 15k lines of Rust. No levels above 4; their extra ratio
   matters for storage, not transfers.
 - **Dictionaries.** Built-in COVER and FastCOVER training.
+- **Push API.** Sans-io `PushEncoder` and `PushDecoder` for async codecs and
+  protocol stacks. See [Push](#push-sans-io).
+- **Adaptive level.** Picks the level at run time from what limits the
+  transfer: output, CPU, or input. See [Adaptive level](#adaptive-level).
 - **`no_std` + `alloc`.** The `frame` feature needs `std`.
 - **WebAssembly.** [`@paddor/zrip`](https://jsr.io/@paddor/zrip) on JSR and
   npm, with WASM SIMD detection.
@@ -54,6 +57,9 @@ and chart commands from [`DEVELOPMENT.md`](DEVELOPMENT.md) and send a PR with
 </details>
 
 ## API
+
+Levels go from -7 (fastest) to 4. Level 0 means the default, level 1.
+[DESIGN.md](DESIGN.md) lists each level's parameters.
 
 ```rust
 // One-shot (allocating)
@@ -206,6 +212,13 @@ let dict = train_dict_fastcover(&samples, 16384, FastCoverParams::default());
 // Use with compress_with_dict() / decompress_with_dict()
 ```
 
+### Adaptive level
+
+`zrip::adaptive::AdaptiveLevel` picks the level at run time. The caller reports
+each window's compression work and what limited it: output, CPU, or idle input.
+It settles on the best measured level, which the caller applies with
+`CompressContext::set_level()`.
+
 ## Features
 
 | Feature        | Default | Description                                   |
@@ -215,7 +228,7 @@ let dict = train_dict_fastcover(&samples, 16384, FastCoverParams::default());
 | `alloc`        | yes     | `no_std` + heap via `alloc` crate; includes `CompressContext`, `DecompressContext` |
 | `ldm`          | yes     | Long distance matching for large-window compression |
 | `dict_builder` | no      | COVER/FastCOVER dictionary training            |
-| `simd`         | yes     | `fearless_simd` runtime dispatch (AVX2+BMI2, NEON, SIMD128) |
+| `simd`         | yes     | [`fearless_simd`](https://crates.io/crates/fearless_simd) runtime dispatch (AVX2+BMI2, NEON, SIMD128) |
 | `paranoid`     | no      | Keeps any future `unsafe` out; no effect today  |
 | `nightly`      | no      | `#[optimize]` attributes on hot functions      |
 
@@ -224,7 +237,7 @@ let dict = train_dict_fastcover(&samples, 16384, FastCoverParams::default());
 [SAFETY.md](SAFETY.md) describes how zrip stays fast without `unsafe` and
 catalogs C zstd memory safety bugs that Rust prevents by construction.
 
-All codec paths are fuzz-tested (19 targets). Fuzz targets cover round-trip
+All codec paths are fuzz-tested (20 targets). Fuzz targets cover round-trip
 correctness, cross-validation against C zstd, streaming, dictionary modes,
 push chunking, and corruption resistance (bitflip, splice, truncate,
 overwrite).
@@ -235,12 +248,6 @@ overwrite).
 architecture, SIMD dispatch, compile-time specialization, and divergences
 from C zstd.
 
-## Levels
+## License
 
-Level 0 means the default, level 1. [DESIGN.md](DESIGN.md) lists each
-level's parameters.
-
-`zrip::adaptive::AdaptiveLevel` picks the level at run time. The caller reports
-each window's compression work and what limited it: output, CPU, or idle input.
-It settles on the best measured level, which the caller applies with
-`CompressContext::set_level()`.
+MIT. See [LICENSE](LICENSE).

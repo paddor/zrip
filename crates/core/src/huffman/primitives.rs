@@ -1,3 +1,5 @@
+//! Table read and output write helpers for the Huffman decoders.
+
 use super::HuffmanDecodeEntry;
 
 #[inline(always)]

@@ -1,18 +1,29 @@
+//! Frame header parsing.
+
 #![forbid(unsafe_code)]
 
 use crate::error::DecompressError;
 use crate::frame::ZSTD_MAGIC;
 
+/// A parsed frame header.
 #[derive(Debug, Clone)]
 pub struct FrameHeader {
+    /// Window size in bytes. Single-segment frames use the content size.
     pub window_size: u64,
+    /// Decompressed size, when the header gives it.
     pub frame_content_size: Option<u64>,
+    /// Dictionary ID, when present and nonzero.
     pub dict_id: Option<u32>,
+    /// Whether a 4-byte checksum (low 32 bits of XXH64) ends the frame.
     pub content_checksum: bool,
+    /// Whether the window is the whole content (no window descriptor).
     pub single_segment: bool,
+    /// Header size in bytes. Includes the magic number, unless parsed with
+    /// [`parse_frame_header_after_magic`] and a `magic_size` of 0.
     pub header_size: usize,
 }
 
+/// Parses the frame header at the start of `data`, magic number first.
 pub fn parse_frame_header(data: &[u8]) -> Result<FrameHeader, DecompressError> {
     if data.len() < 4 {
         return Err(DecompressError::InputExhausted);
@@ -26,6 +37,9 @@ pub fn parse_frame_header(data: &[u8]) -> Result<FrameHeader, DecompressError> {
     parse_frame_header_after_magic(&data[4..], 4)
 }
 
+/// Parses a frame header that starts after the magic number. Adds
+/// `magic_size` to `header_size`, for callers that skipped the magic.
+/// Truncation fails with [`DecompressError::BadFrameHeader`].
 pub fn parse_frame_header_after_magic(
     data: &[u8],
     magic_size: usize,
@@ -34,6 +48,8 @@ pub fn parse_frame_header_after_magic(
         return Err(DecompressError::BadFrameHeader);
     }
 
+    // Frame_Header_Descriptor: bits 7-6 content size field, 5 single
+    // segment, 4 unused, 3 reserved, 2 checksum, 1-0 dict ID field.
     let descriptor = data[0];
     let dict_id_flag = descriptor & 0x03;
     let content_checksum = (descriptor & 0x04) != 0;
@@ -56,6 +72,7 @@ pub fn parse_frame_header_after_magic(
         }
         let window_desc = data[offset];
         offset += 1;
+        // Window_Descriptor: `(1 << (10 + exponent)) * (1 + mantissa / 8)`.
         let exponent = (window_desc >> 3) as u64;
         let mantissa = (window_desc & 0x07) as u64;
         let window_base = 1u64 << (10 + exponent);
@@ -112,6 +129,7 @@ pub fn parse_frame_header_after_magic(
         }
         let fcs = match fcs_field_size {
             1 => data[offset] as u64,
+            // The 2-byte field stores the size minus 256.
             2 => u16::from_le_bytes([data[offset], data[offset + 1]]) as u64 + 256,
             4 => u32::from_le_bytes([
                 data[offset],

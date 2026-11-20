@@ -4,7 +4,7 @@
 //! The caller finds frame headers, block headers, block bodies and checksums
 //! in its input and hands each one over as a byte slice. This module checks
 //! and decodes them, keeps the window history, and puts each block's output
-//! in [`FrameState::output`].
+//! in [`FrameState::block`].
 #![forbid(unsafe_code)]
 
 use alloc::boxed::Box;
@@ -28,18 +28,24 @@ pub(crate) const FRAME_PREFIX_SIZE: usize = 5;
 /// Largest zstd frame header, magic included.
 #[cfg_attr(not(feature = "std"), allow(dead_code))]
 pub(crate) const MAX_FRAME_HEADER_SIZE: usize = 18;
+/// Block header: last-block flag, block type and 21-bit size, little-endian.
 pub(crate) const BLOCK_HEADER_SIZE: usize = 3;
+/// Content checksum: the low 32 bits of XXH64.
 pub(crate) const CHECKSUM_SIZE: usize = 4;
 /// Skippable frame magic plus its 4-byte length.
 pub(crate) const SKIPPABLE_HEADER_SIZE: usize = 8;
 
-/// Returns true if `magic` starts a skippable frame.
+/// Returns true if `magic` starts a skippable frame:
+/// `0x184D2A50..=0x184D2A5F`.
 pub(crate) fn is_skippable_magic(magic: u32) -> bool {
     (magic & 0xFFFF_FFF0) == 0x184D_2A50
 }
 
 /// Total frame header size, magic included, from the magic and descriptor.
 pub(crate) fn frame_header_size(prefix: &[u8]) -> usize {
+    // Descriptor bits: 7-6 content size flag, 5 single segment, 1-0
+    // dictionary ID flag. Single-segment frames have no window byte, and
+    // their flag 0 means a 1-byte content size instead of none.
     let descriptor = prefix[4];
     let single_segment = (descriptor & 0x20) != 0;
     let dict_id_size = [0, 1, 2, 4][usize::from(descriptor & 0x03)];
@@ -55,34 +61,47 @@ pub(crate) fn frame_header_size(prefix: &[u8]) -> usize {
 
 /// What follows a block.
 pub(crate) enum AfterBlock {
+    /// Another block header.
     Block,
+    /// The 4-byte content checksum, then the frame ends.
     Checksum,
+    /// Nothing: the frame ended.
     FrameEnd,
 }
 
+/// Decoder state for a stream of frames: tables, repeat offsets, limits,
+/// the checksum, and the window history the blocks decode into.
 pub(crate) struct FrameState {
     ws: Box<BlockDecodeWorkspace>,
     seq_tables: SequenceDecodeTables,
     rep_offsets: [u32; 3],
     hasher: Option<Xxh64State>,
+    /// Output limit for the whole stream, in bytes.
     max_output: usize,
+    /// Explicit window cap. `None` means `MAX_WINDOW_SIZE`.
     max_window: Option<u64>,
+    /// Output of all frames so far, checked against `max_output`.
     bytes_output: u64,
     frame_content_size: Option<u64>,
+    /// Output of the current frame so far.
     frame_bytes: u64,
     dict: Option<Dictionary>,
     /// Window history, then the current block's output from `block_start`.
     /// Blocks decode straight into it, so their output needs no copy.
     history: Vec<u8>,
     block_start: usize,
+    /// The current frame's window, in bytes.
     window_size: usize,
 }
 
 impl FrameState {
+    /// A state for a stream of at most `max_output` output bytes, with an
+    /// optional dictionary for every frame.
     pub(crate) fn new(dict: Option<Dictionary>, max_output: usize) -> Self {
         Self {
             ws: Box::new(BlockDecodeWorkspace::new()),
             seq_tables: SequenceDecodeTables::new_default(),
+            // RFC 8878's initial repeat offsets.
             rep_offsets: [1, 4, 8],
             hasher: None,
             max_output,
@@ -273,6 +292,7 @@ impl FrameState {
         &mut self.history[start..]
     }
 
+    /// Appends `size` copies of `byte` as an RLE block's output.
     pub(crate) fn rle_block(&mut self, byte: u8, size: usize) {
         let end = self.history.len() + size;
         self.history.resize(end, byte);

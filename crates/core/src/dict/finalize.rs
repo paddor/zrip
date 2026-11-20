@@ -1,3 +1,6 @@
+//! Turns trained content into a zstd dictionary: header, entropy tables,
+//! repeat offsets, content.
+
 #![forbid(unsafe_code)]
 
 use alloc::vec::Vec;
@@ -7,7 +10,11 @@ use crate::fse::{LL_DEFAULT_ACCURACY, ML_DEFAULT_ACCURACY, OF_DEFAULT_ACCURACY};
 use crate::fse::{LL_DEFAULT_DIST, ML_DEFAULT_DIST, OF_DEFAULT_DIST};
 use crate::huffman::encode::HuffmanEncodeTable;
 
+/// Builds dictionary bytes from the last `dict_size - 256` bytes of
+/// `content`, or all of it if shorter. The Huffman table follows the
+/// samples' literals; the FSE tables are the predefined ones.
 pub fn finalize_dictionary(content: &[u8], samples: &[&[u8]], dict_size: usize) -> Vec<u8> {
+    // Leave 256 bytes of `dict_size` for the header and tables.
     let content_len = content.len().min(dict_size.saturating_sub(256));
 
     let rep_offsets = compute_rep_offsets(content, samples);
@@ -131,6 +138,9 @@ fn literal_counts(content: &[u8], samples: &[&[u8]]) -> [u32; 256] {
     counts
 }
 
+/// Repeat offsets: the distances back from the end of `content` at which
+/// sample starts match most (4 bytes or more), in place of the defaults
+/// `[1, 4, 8]`. C zstd always writes the defaults.
 fn compute_rep_offsets(content: &[u8], samples: &[&[u8]]) -> [u32; 3] {
     let max_offset = content.len().min(1024);
     if max_offset == 0 {
@@ -182,6 +192,8 @@ fn compute_rep_offsets(content: &[u8], samples: &[&[u8]]) -> [u32; 3] {
     rep
 }
 
+/// FNV-1a over `content` and the first 10 samples, never 0. C zstd keeps
+/// IDs in `32768..2^31`; this one can be any nonzero value.
 fn compute_dict_id(content: &[u8], samples: &[&[u8]]) -> u32 {
     let mut h = 0x811c_9dc5_u32;
     for &b in content {

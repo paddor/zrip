@@ -1,9 +1,16 @@
+//! The 4-stream Huffman decoder: interleaved fast loops with C zstd's
+//! container layout, then a checked tail per stream.
+
 use crate::bitstream::primitives as bitstream_primitives;
 use crate::bitstream::reader_reverse::ReverseBitReader;
 use crate::error::DecompressError;
 use crate::huffman::primitives as huffman_primitives;
 use crate::huffman::{DECODE_TABLE_SIZE, HuffmanDecodeEntry, PAIR_TABLE_LOG, PAIR_TABLE_SIZE};
 
+/// Decodes the 4-stream section `data` into `output[..output_size]`, one
+/// `output_size.div_ceil(4)`-byte segment per stream, the last shorter.
+/// Fast loops run while every stream has room; `decode_stream_tail`
+/// finishes each.
 pub(super) fn decode_4_streams_core(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -16,6 +23,8 @@ pub(super) fn decode_4_streams_core(
         return Err(DecompressError::BadHuffmanStream);
     }
 
+    // Jump table: the sizes of streams 1 to 3, u16 little-endian. Stream 4
+    // takes the rest.
     let s1_size = u16::from_le_bytes([data[0], data[1]]) as usize;
     let s2_size = u16::from_le_bytes([data[2], data[3]]) as usize;
     let s3_size = u16::from_le_bytes([data[4], data[5]]) as usize;
@@ -30,6 +39,8 @@ pub(super) fn decode_4_streams_core(
         return Err(DecompressError::BadHuffmanStream);
     }
 
+    // The fourth segment must not be empty. C zstd differs at the edges: it
+    // takes sizes 6 and 9 (empty fourth segment) and rejects 4 (under 6).
     let seg = output_size.div_ceil(4);
     if seg * 3 >= output_size {
         return Err(DecompressError::BadHuffmanStream);
@@ -89,6 +100,7 @@ pub(super) fn decode_4_streams_core(
     }
     let shift = 64 - tl;
 
+    /// Whether a refill can load eight bytes inside the stream.
     #[inline(always)]
     fn can_refill_fast(bits_consumed: u32, ptr: usize, data_len: usize) -> bool {
         let byte_shift = (bits_consumed >> 3) as usize;

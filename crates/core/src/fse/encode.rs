@@ -1,3 +1,5 @@
+//! FSE encode tables and state, laid out as C zstd's `FSE_CTable`.
+
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
@@ -7,20 +9,33 @@ use alloc::vec::Vec;
 
 use crate::bitstream::writer::BitWriter;
 
+/// FSE encode table for one normalized distribution.
 pub struct FseEncodeTable {
+    /// Per-symbol transforms, indexed by symbol.
     pub symbol_tt: Vec<SymbolTransform>,
+    /// Next states, grouped by symbol. Values are in
+    /// `1 << accuracy_log..2 << accuracy_log`.
     pub state_table: Vec<u16>,
+    /// Table log: `1 << accuracy_log` states.
     pub accuracy_log: u8,
 }
 
+/// Per-symbol encode parameters (C zstd's
+/// `FSE_symbolCompressionTransform`).
 #[derive(Clone, Copy)]
 pub struct SymbolTransform {
+    /// `(state + delta_nb_bits) >> 16` is the bit count a state outputs for
+    /// this symbol.
     pub delta_nb_bits: u32,
+    /// Index offset into `state_table`: the next state is
+    /// `state_table[(state >> nb_bits) + delta_find_state]`.
     pub delta_find_state: i32,
 }
 
 #[cfg(feature = "alloc")]
 impl FseEncodeTable {
+    /// Builds a table for `distribution`, normalized to `1 << accuracy_log`
+    /// with -1 for "less than one".
     pub fn from_distribution(distribution: &[i16], accuracy_log: u8) -> Self {
         let table_size = 1usize << accuracy_log;
         let mut symbol_tt = vec![
@@ -62,12 +77,15 @@ pub fn build_encode_table(
     cumul: &mut [u32],
 ) {
     let table_size = 1usize << accuracy_log;
+    // C zstd's spread step. It is odd, so the walk visits every cell once.
     let step = (table_size >> 1) + (table_size >> 3) + 3;
     let mask = table_size - 1;
 
     let mut high_threshold = table_size - 1;
     let mut position = 0;
     cumul[0] = 0;
+    // "Less than one" symbols take the top cells, one each, which the spread
+    // skips.
     for (s, &prob) in distribution.iter().enumerate() {
         if prob == -1 {
             spread[high_threshold] = s as u16;
@@ -125,6 +143,8 @@ pub fn build_encode_table(
     }
 }
 
+/// One FSE encoder state. Symbols are encoded last to first, so the
+/// decoder reads them in order.
 pub struct FseEncodeState<'t> {
     table: &'t FseEncodeTable,
     state: u32,
@@ -132,6 +152,7 @@ pub struct FseEncodeState<'t> {
 
 #[cfg(feature = "alloc")]
 impl<'t> FseEncodeState<'t> {
+    /// Starts on `symbol` without output bits (C zstd's `FSE_initCState2`).
     pub fn init(table: &'t FseEncodeTable, symbol: u8) -> Self {
         let tt = &table.symbol_tt[symbol as usize];
         let nb_bits_out = tt.delta_nb_bits.wrapping_add(1 << 16) >> 16;
@@ -141,6 +162,8 @@ impl<'t> FseEncodeState<'t> {
         Self { table, state }
     }
 
+    /// Writes the low bits of the state, then moves to the state for
+    /// `symbol`.
     pub fn encode_symbol(&mut self, writer: &mut BitWriter, symbol: u8) {
         let tt = &self.table.symbol_tt[symbol as usize];
         let nb_bits_out = (self.state.wrapping_add(tt.delta_nb_bits) >> 16) as u8;
@@ -150,10 +173,13 @@ impl<'t> FseEncodeState<'t> {
             as u32;
     }
 
+    /// Writes the final state, `accuracy_log` bits, for the decoder to start
+    /// from.
     pub fn flush(&self, writer: &mut BitWriter, accuracy_log: u8) {
         writer.write_bits(self.state & ((1u32 << accuracy_log) - 1), accuracy_log);
     }
 
+    /// Current state, in `1 << accuracy_log..2 << accuracy_log`.
     pub fn state(&self) -> u32 {
         self.state
     }

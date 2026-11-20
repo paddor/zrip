@@ -3,7 +3,8 @@
 ## No unsafe
 
 All four crates are `#![forbid(unsafe_code)]`. SIMD dispatch goes through
-`fearless_simd`, which keeps the `#[target_feature]` calls inside that crate.
+[`fearless_simd`](https://crates.io/crates/fearless_simd), which keeps the
+`#[target_feature]` calls inside that crate.
 
 Hot loops avoid bounds checks by construction: exact-size hash tables, reads
 clamped to limits the compiler can prove, and zeroed decoder output room. A

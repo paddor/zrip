@@ -1,3 +1,6 @@
+//! Huffman stream decoding: single-stream, and 4-stream with an optional
+//! two-symbol table.
+
 #[cfg(feature = "alloc")]
 use alloc::vec;
 #[cfg(feature = "alloc")]
@@ -10,6 +13,8 @@ use crate::huffman::{
     DECODE_TABLE_SIZE, HuffmanDecodeEntry, MAX_TABLE_LOG, PAIR_TABLE_LOG, PAIR_TABLE_SIZE,
 };
 
+/// Decodes `output_size` symbols from one reverse stream into a new
+/// `Vec`. The stream must end exactly after the last symbol.
 pub fn decode_single_stream(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -37,6 +42,7 @@ pub fn decode_single_stream(
         if remaining == 0 {
             return Err(DecompressError::BadHuffmanStream);
         }
+        // Near the stream start, missing low bits read as zeros.
         let bits = if remaining >= tl {
             reader.peek_bits(table_log)
         } else {
@@ -57,6 +63,8 @@ pub fn decode_single_stream(
     Ok(output)
 }
 
+/// Decodes one reverse stream into all of `output`. The stream must end
+/// exactly after the last symbol.
 pub fn decode_single_stream_into(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -68,6 +76,8 @@ pub fn decode_single_stream_into(
     decode_stream_tail(table, table_log, &mut reader, output)
 }
 
+/// [`decode_single_stream_into`] with `output` resized to `output_size`.
+/// Clears `output` on error.
 pub fn decode_single_stream_vec(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -84,6 +94,8 @@ pub fn decode_single_stream_vec(
     result
 }
 
+/// Decodes a 4-stream section, a 6-byte jump table and then the streams,
+/// into a new `Vec` of `output_size` bytes.
 pub fn decode_4_streams(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -96,6 +108,8 @@ pub fn decode_4_streams(
     Ok(output)
 }
 
+/// [`decode_4_streams`] with `output` resized to `output_size`. Clears
+/// `output` on error.
 pub fn decode_4_streams_into(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -159,7 +173,7 @@ const PAIR_MIN_LITERALS: usize = 24 * 1024;
 /// 11-bit lookup, and the single-symbol loop is faster (measured on the
 /// Silesia corpus at level 1, where text gains up to 6% and high-entropy
 /// literals lose up to 20% without this limit), and only for sections of at
-/// least [`PAIR_MIN_LITERALS`].
+/// least `PAIR_MIN_LITERALS`.
 pub fn prefers_pairs(literals: usize, compressed: usize) -> bool {
     if literals < PAIR_MIN_LITERALS || compressed * 8 > literals * 5 {
         return false;
@@ -235,6 +249,7 @@ fn decode_4_streams_with(
     result
 }
 
+/// Rejects table logs outside 1 to 11 and tables shorter than the log.
 fn validate_decode_table(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -264,6 +279,8 @@ fn prepare_output(output: &mut Vec<u8>, output_size: usize) {
     output.resize(output_size, 0);
 }
 
+/// Decodes the rest of `reader`'s stream into `output` and checks that
+/// the stream ends exactly there.
 pub(super) fn decode_stream_tail(
     table: &[HuffmanDecodeEntry],
     table_log: u8,

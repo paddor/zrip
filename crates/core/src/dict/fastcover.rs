@@ -1,11 +1,19 @@
+//! Dictionary content selection after C zstd's FastCOVER. Simpler: no
+//! parameter search, and candidate segments are sampled.
+
 #![forbid(unsafe_code)]
 
 use alloc::vec;
 use alloc::vec::Vec;
 
+/// FastCOVER parameters.
 pub struct FastCoverParams {
+    /// Segment size in bytes.
     pub k: usize,
+    /// d-mer size in bytes. The frequency table has `2^min(4 * d, 24)`
+    /// counters.
     pub d: usize,
+    /// Step between counted d-mer positions; 0 acts as 1.
     pub accel: usize,
 }
 
@@ -19,6 +27,10 @@ impl Default for FastCoverParams {
     }
 }
 
+/// Picks up to `dict_size` bytes of content from `samples`: the `k`-byte
+/// segments whose d-mers are most frequent, best last. Pads with the end
+/// of the samples when segments run out. Samples shorter than `k` in
+/// total come back as is, cut to `dict_size`.
 pub fn select_segments(samples: &[&[u8]], dict_size: usize, params: &FastCoverParams) -> Vec<u8> {
     let d = params.d;
     let k = params.k;
@@ -37,6 +49,7 @@ pub fn select_segments(samples: &[&[u8]], dict_size: usize, params: &FastCoverPa
     }
 
     let num_dmers = concat.len() - d + 1;
+    // 4 bits per d-mer byte, at most 2^24 counters (64 MiB).
     let freq_table_bits = (d * 4).min(24);
     let freq_table_size = 1usize << freq_table_bits;
     let freq_mask = freq_table_size - 1;
@@ -48,7 +61,8 @@ pub fn select_segments(samples: &[&[u8]], dict_size: usize, params: &FastCoverPa
         hashes[i] = (hash_dmer(&concat[i..i + d]) & freq_mask) as u32;
     }
 
-    // Count d-mer frequencies across distinct samples
+    // Count d-mer frequencies within each sample; d-mers that span two
+    // samples are skipped
     for s in 0..samples.len() {
         let start = offsets[s];
         let end = offsets[s + 1];
@@ -82,6 +96,7 @@ pub fn select_segments(samples: &[&[u8]], dict_size: usize, params: &FastCoverPa
         let mut best_pos = 0;
         let mut best_score = 0u64;
 
+        // Score about 512 evenly spaced start positions per round.
         let step = (num_dmers / 512).max(1);
         let mut pos = 0;
         while pos + k <= concat.len() {
@@ -101,6 +116,7 @@ pub fn select_segments(samples: &[&[u8]], dict_size: usize, params: &FastCoverPa
 
         best_segments.push((best_pos, best_score));
 
+        // Zero the chosen d-mers so later picks favor other content.
         for i in best_pos..best_pos + seg_dmers {
             freqs[hashes[i] as usize] = 0;
         }
@@ -111,6 +127,8 @@ pub fn select_segments(samples: &[&[u8]], dict_size: usize, params: &FastCoverPa
         collected += k;
     }
 
+    // Last pick first, so the best segment ends nearest the data, as in
+    // C zstd.
     let mut content = Vec::with_capacity(content_budget);
     for &(pos, _) in best_segments.iter().rev() {
         let end = (pos + k).min(concat.len());

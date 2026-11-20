@@ -1,3 +1,6 @@
+//! Sequence execution: decodes each sequence from the FSE bitstream and
+//! copies its literals and match in the same pass.
+
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
@@ -8,10 +11,16 @@ use zrip_core::error::DecompressError;
 use zrip_core::fse::FSE_SEQ_TABLE_MASK;
 use zrip_core::hint::{likely, unlikely};
 
+/// Where a block's sequences may write and copy from.
 #[derive(Clone, Copy)]
 pub(crate) struct SequenceOutputScope<'a> {
+    /// Index in the output of the lowest byte a match may copy from: the
+    /// frame's first byte, or the window's start when streaming.
     pub(crate) output_base: usize,
+    /// Most bytes the block may write.
     pub(crate) max_block_output: usize,
+    /// Dictionary content before `output_base`, for matches that reach
+    /// back beyond it. Empty when streaming, which keeps it in the output.
     pub(crate) history: &'a [u8],
 }
 
@@ -89,6 +98,8 @@ impl Word {
     fn read(&mut self, count: u32) -> u32 {
         let start = self.avail.wrapping_sub(count as usize);
         self.avail = start;
+        // `& 63` keeps a wrapped `start` from overflowing the shift; the
+        // final `is_exhausted` check rejects that stream.
         ((self.container >> (start & 63)) & ((1u64 << count) - 1)) as u32
     }
 
@@ -101,6 +112,9 @@ impl Word {
     }
 }
 
+/// Decodes `num_sequences` sequences from `data`, executes them into
+/// `output`, then appends the block's last literals. Updates `offsets` on
+/// success. With `HAS_HISTORY`, matches may reach into `scope.history`.
 #[inline(always)]
 pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     data: &[u8],
@@ -133,6 +147,7 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     let mut vec = core::mem::take(output);
     let (base, op) = open_block(&mut vec, scope.max_block_output, scope.output_base);
     // No closure here: the loop must inline into the `fearless_simd` body.
+    // Output below 4 GiB, the usual case, gets 32-bit positions (`NARROW`).
     let (result, op) = if u32::try_from(vec.len()).is_ok() {
         let mut out = SeqOut::<true>::new(&mut vec[base..], op);
         let result = run_sequences(
@@ -160,6 +175,7 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
         );
         (result, out.op())
     };
+    // Drop the zeroed room past the output, also after an error.
     vec.truncate(base + op);
     *output = vec;
     result
@@ -206,6 +222,9 @@ impl SeqDecoder {
         let literal_length = ll_e.baseline_value + w.read(ll_bits);
 
         let [rep0, rep1, rep2] = self.rep;
+        // Offset values above 3 carry `offset + 3`; 1 to 3 pick a repeat
+        // offset. Without literals the pick shifts by one, and index 3 means
+        // `rep0 - 1`, which is 0 for `rep0 == 1` and fails on execution.
         let offset = if likely(offset_value > 3) {
             let offset = offset_value - 3;
             self.rep = [offset, rep0, rep1];
@@ -293,6 +312,9 @@ fn run_sequences<const NARROW: bool>(
     Ok(())
 }
 
+/// [`decode_execute_sequences`] for a block with exactly one sequence:
+/// a plain bit reader and an appending [`BlockOutput`], without the loop's
+/// zeroed block room. The last sequence needs no state update.
 #[inline(always)]
 pub(crate) fn decode_execute_single_sequence<const HAS_HISTORY: bool>(
     data: &[u8],

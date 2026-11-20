@@ -1,3 +1,5 @@
+//! [`CompressContext`], which reuses tables and buffers across frames, and
+//! the dictionary state it prepares once.
 #[cfg(feature = "alloc")]
 use alloc::borrow::Cow;
 #[cfg(feature = "alloc")]
@@ -55,6 +57,7 @@ fn attached_log(prefix_len: usize, cap: u32) -> u32 {
 /// by the first input that uses them, so a context that compresses only
 /// inputs of other sizes never builds them.
 pub(crate) struct PreparedDict {
+    /// The dictionary content, then the current input.
     combined: Vec<u8>,
     /// The parameters the snapshots are prefilled for.
     params: LevelParams,
@@ -78,6 +81,8 @@ pub(crate) struct PreparedDict {
 }
 
 impl PreparedDict {
+    /// Prepares `dict` for `level`, with snapshots for `params`. Builds the
+    /// entropy tables now and the hash tables on first use.
     pub fn new(dict: &Dictionary, level: i32, params: &LevelParams) -> Self {
         let prefix = dict.content();
         let prefix_len = prefix.len();
@@ -113,6 +118,8 @@ impl PreparedDict {
             .huf_table()
             .and_then(|(dt, tl)| HuffmanEncodeTable::from_decode_table(dt, tl));
 
+        // Largest codes: 35 for literal lengths, 31 for offsets, 52 for
+        // match lengths.
         let ll_table = dict
             .ll_table()
             .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 35));
@@ -291,13 +298,15 @@ impl CompressContext {
 
     /// Creates a new context with a pre-loaded dictionary.
     ///
-    /// The prepared hash table snapshot is for the T0 (>256 KB) parameter
+    /// The prepared hash table snapshot is for the large-input parameter
     /// tier, built by the first input that uses it. Inputs whose tiered
-    /// params match T0's hash sizes use the fast snapshot-restore path;
-    /// others fall back to per-call prefix hashing.
+    /// params match its hash sizes use the fast snapshot-restore path.
+    /// Inputs up to 8 KiB, and some other one-block inputs, search the
+    /// dictionary's own tables instead; the rest fall back to per-call
+    /// prefix hashing.
     ///
-    /// Use [`with_dict_for_size`] to build the snapshot for a specific
-    /// input size tier.
+    /// Use [`with_dict_for_size`](Self::with_dict_for_size) to build the
+    /// snapshot for a specific input size tier.
     pub fn with_dict(level: i32, dict: Dictionary) -> Result<Self, CompressError> {
         Self::with_dict_for_size(level, dict, usize::MAX)
     }
@@ -372,6 +381,9 @@ impl CompressContext {
     }
 
     /// Compresses `input` using the context's level and optional dictionary.
+    ///
+    /// The frame borrows the context's output buffer. A frame of 512 KiB or
+    /// more takes the buffer instead, and the next call allocates a new one.
     pub fn compress(&mut self, input: &[u8]) -> Result<Cow<'_, [u8]>, CompressError> {
         let mut output = core::mem::take(&mut self.output);
         output.clear();
@@ -468,6 +480,8 @@ impl CompressContext {
         Ok(self.take_or_borrow_output())
     }
 
+    /// Writes one frame with the prepared dictionary: attached dictionary
+    /// tables, a restored snapshot, or else per-call prefix hashing.
     fn compress_with_prepared<S: OutputSink>(
         &mut self,
         input: &[u8],
@@ -788,6 +802,9 @@ impl CompressContext {
     }
 }
 
+/// Writes one frame for `input` after an optional dictionary `prefix`, in
+/// the caller's tables and buffers. The caller sets the workspace's
+/// dictionary entropy tables; without a prefix they are cleared here.
 #[allow(clippy::too_many_arguments, clippy::unnecessary_wraps)]
 pub(crate) fn compress_core<S: OutputSink>(
     input: &[u8],

@@ -200,9 +200,10 @@ at most five bits use a two-symbol table, like C zstd's `HUF_DEltX2`.
 ## Platform dispatch
 
 The encoder wraps hot per-block functions in `simd_body!`, which runs them
-through `fearless_simd`'s AVX2 path when the CPU has it. The decoder's
-sequence loop uses `fearless_simd::dispatch!` (AVX2 + BMI2 on x86_64, NEON on
-aarch64, SIMD128 on wasm32). Without `std` or `simd`, the scalar build runs.
+through [`fearless_simd`](https://crates.io/crates/fearless_simd)'s AVX2 path
+when the CPU has it. The decoder's sequence loop uses
+`fearless_simd::dispatch!` (AVX2 + BMI2 on x86_64, NEON on aarch64, SIMD128 on
+wasm32). Without `std` or `simd`, the scalar build runs.
 No crate has `unsafe`; `fearless_simd` keeps the `#[target_feature]` calls.
 
 ## Out of scope

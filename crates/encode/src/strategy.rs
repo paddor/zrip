@@ -1,3 +1,5 @@
+//! Level parameters: the settings each level runs with, and how the input
+//! size and [`Options`] adjust them.
 #![forbid(unsafe_code)]
 
 /// Match-finding strategy.
@@ -12,13 +14,21 @@ pub enum Strategy {
 /// Parameters for Long Distance Matching.
 #[derive(Debug, Clone, Copy)]
 pub struct LdmParams {
+    /// Log2 of the LDM table's entries.
     pub hash_log: u32,
+    /// Log2 of the entries per bucket, at most `hash_log` and 7.
     pub bucket_size_log: u32,
+    /// Shortest LDM match in bytes. Each split point indexes this many
+    /// bytes before it.
     pub min_match_length: u32,
+    /// Split points, which LDM indexes and looks up, fall about once every
+    /// 2^`hash_rate_log` bytes.
     pub hash_rate_log: u32,
 }
 
 impl LdmParams {
+    /// Defaults for a 2^`window_log`-byte window: a table of up to 2^20
+    /// entries in buckets of 16, and 64-byte minimum matches.
     pub fn default_for_window_log(window_log: u32) -> Self {
         let hash_log = 20u32.min(window_log.saturating_sub(1));
         let hash_rate_log = window_log.saturating_sub(hash_log).max(7);
@@ -37,27 +47,47 @@ impl LdmParams {
 /// Pass to [`compress_with_params`](crate::compress_with_params).
 #[derive(Debug, Clone, Copy)]
 pub struct LevelParams {
+    /// Match finder.
     pub strategy: Strategy,
+    /// Log2 of the window size in bytes, [`WINDOW_LOG_MIN`] to
+    /// [`WINDOW_LOG_MAX`].
     pub window_log: u32,
+    /// Log2 of the entries of the Fast table, or of the DFast long table.
     pub hash_log: u32,
     /// DFast short table log. Same as hashLog for Fast strategy.
     pub chain_log: u32,
+    /// C zstd's `searchLog`. The Fast and DFast finders ignore it.
     pub search_log: u32,
+    /// Bytes the Fast table hashes, 4 to 8, or the DFast short table, 4 or
+    /// 5. A Fast match needs 8 equal bytes at 8, else 4.
     pub min_match: u32,
+    /// Fast only: the search step starts at `target_length + 1` bytes, at
+    /// least 2, as in C zstd. Above 1, with `min_match` 5 or more, it also
+    /// keeps dense literals raw.
     pub target_length: u32,
+    /// The search step grows by one every 2^`search_strength` bytes
+    /// without a match. C zstd has no such parameter.
     pub search_strength: u32,
+    /// Keep literals raw and use the predefined sequence tables. Blocks over
+    /// 32 KiB that are almost all literals may still take Huffman literals.
     pub force_raw_literals: bool,
+    /// Long distance matching; `None` turns it off.
     #[cfg(feature = "ldm")]
     pub ldm_params: Option<LdmParams>,
 }
 
 impl LevelParams {
+    /// Sets the window to 2^`window_log` bytes.
+    /// [`compress_with_params`](crate::compress_with_params) clamps it to
+    /// [`WINDOW_LOG_MIN`]..=[`WINDOW_LOG_MAX`] and to the input.
     #[must_use]
     pub fn with_window_log(mut self, window_log: u32) -> Self {
         self.window_log = window_log;
         self
     }
 
+    /// Enables long distance matching with `params`. The window stays as
+    /// set; see [`LdmParams::default_for_window_log`].
     #[cfg(feature = "ldm")]
     #[must_use]
     pub fn with_ldm(mut self, params: LdmParams) -> Self {
@@ -148,7 +178,9 @@ fn short_input_search_strength(level: i32, input_len: usize) -> Option<u32> {
     }
 }
 
+/// Smallest hash or chain log, a 64-entry table.
 pub const HASH_LOG_MIN: u32 = 6;
+/// Largest hash or chain log.
 pub const HASH_LOG_MAX: u32 = 30;
 /// Smallest window log, a 1 KiB window.
 pub const WINDOW_LOG_MIN: u32 = 10;
@@ -235,8 +267,8 @@ fn use_custom_sequence_tables(params: &LevelParams, input_len: usize) -> bool {
     !keeps_raw_literals(params, input_len)
 }
 
-/// Returns the maximum hash_log for a given level.
-/// Used by CompressContext to pre-allocate hash tables.
+/// Returns the larger of `level`'s `hash_log` and `chain_log`, before any
+/// clamping to the input, or `None` if out of range.
 pub fn max_hash_log(level: i32) -> Option<u32> {
     let p = level_params_inner(level)?;
     Some(p.hash_log.max(p.chain_log))
@@ -425,7 +457,7 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
 /// Options for large-window and LDM compression, orthogonal to level.
 ///
 /// Pass to [`compress_opts`](crate::compress_opts) or
-/// [`FrameEncoder::with_options`](crate::streaming::FrameEncoder::with_options).
+/// `FrameEncoder::with_options` (with `std`).
 #[derive(Debug, Clone, Default)]
 pub struct Options {
     pub(crate) window_log: Option<u32>,
@@ -454,6 +486,9 @@ impl Options {
     }
 }
 
+/// Applies `opts` to `params`: the window log, clamped to
+/// [`WINDOW_LOG_MIN`]..=[`WINDOW_LOG_MAX`], and with LDM on, a 2^27-byte
+/// window unless set and [`LdmParams`] sized for the window.
 pub fn apply_options(params: &mut LevelParams, opts: &Options) {
     if let Some(wl) = opts.window_log {
         params.window_log = wl.clamp(WINDOW_LOG_MIN, WINDOW_LOG_MAX);

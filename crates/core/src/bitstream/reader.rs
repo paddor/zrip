@@ -1,7 +1,10 @@
+//! Forward bit reader, LSB first, for FSE table descriptions.
+
 #![forbid(unsafe_code)]
 
 use crate::error::DecompressError;
 
+/// Reads bits LSB first from the start of a byte slice.
 pub struct BitReader<'a> {
     data: &'a [u8],
     pos: usize,
@@ -9,6 +12,7 @@ pub struct BitReader<'a> {
 }
 
 impl<'a> BitReader<'a> {
+    /// Starts at bit 0 of `data`.
     pub fn new(data: &'a [u8]) -> Self {
         Self {
             data,
@@ -17,21 +21,25 @@ impl<'a> BitReader<'a> {
         }
     }
 
+    /// Bits read since the start of the data.
     #[inline]
     pub fn bits_consumed(&self) -> usize {
         self.pos * 8 + self.bit_pos as usize
     }
 
+    /// Bits left before the end of the data.
     #[inline]
     pub fn bits_remaining(&self) -> usize {
         self.data.len() * 8 - self.bits_consumed()
     }
 
+    /// Whether every bit was read.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.bits_remaining() == 0
     }
 
+    /// Bytes read so far, a partly read byte included.
     #[inline]
     pub fn bytes_consumed(&self) -> usize {
         if self.bit_pos == 0 {
@@ -41,6 +49,8 @@ impl<'a> BitReader<'a> {
         }
     }
 
+    /// Reads `n` bits, at most 25, into the low bits of the result. Fails
+    /// with [`DecompressError::InputExhausted`] past the end.
     pub fn read_bits(&mut self, n: u8) -> Result<u32, DecompressError> {
         debug_assert!(n <= 25);
         if n == 0 {
@@ -91,10 +101,12 @@ impl<'a> BitReader<'a> {
         self.bit_pos = (bit % 8) as u8;
     }
 
+    /// [`read_bits`](Self::read_bits) as a `u16`, for `n` up to 16.
     pub fn read_bits_u16(&mut self, n: u8) -> Result<u16, DecompressError> {
         self.read_bits(n).map(|v| v as u16)
     }
 
+    /// The next `n` bits, without consuming them.
     pub fn peek_bits(&self, n: u8) -> Result<u32, DecompressError> {
         let mut copy = Self {
             data: self.data,
@@ -104,6 +116,7 @@ impl<'a> BitReader<'a> {
         copy.read_bits(n)
     }
 
+    /// Skips the rest of a partly read byte.
     pub fn align_to_byte(&mut self) {
         if self.bit_pos != 0 {
             self.bit_pos = 0;
@@ -111,6 +124,8 @@ impl<'a> BitReader<'a> {
         }
     }
 
+    /// The whole bytes after the read position. A partly read byte is
+    /// skipped.
     pub fn remaining_bytes(&self) -> &'a [u8] {
         if self.bit_pos == 0 {
             &self.data[self.pos..]

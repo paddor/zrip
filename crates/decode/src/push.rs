@@ -15,8 +15,10 @@ use zrip_core::error::DecompressError;
 use zrip_core::frame::ZSTD_MAGIC;
 pub use zrip_core::push::{Progress, Status};
 
+/// The next piece of input the decoder waits for.
 #[derive(Clone, Copy)]
 enum Unit {
+    /// A frame's or skippable frame's 4-byte magic number.
     Magic,
     /// Frame header descriptor, which sizes the rest of the header.
     Descriptor,
@@ -26,6 +28,7 @@ enum Unit {
     },
     /// Length of a skippable frame.
     SkipSize,
+    /// The rest of a skippable frame's payload, discarded as it arrives.
     Skip {
         remaining: u32,
     },
@@ -38,11 +41,14 @@ enum Unit {
         size: usize,
         last: bool,
     },
+    /// A compressed block, decoded once all of it arrived. A body split
+    /// across calls is gathered in `stage`.
     Compressed {
         size: usize,
         last: bool,
     },
     Checksum,
+    /// A call failed; `PushDecoder::error` holds the error.
     Failed,
 }
 
@@ -97,6 +103,7 @@ pub struct PushDecoder {
     frame_done: bool,
     /// A frame ended, its output was delivered, and no later input was read.
     at_frame_end: bool,
+    /// The error every call returns until `reset`.
     error: Option<DecompressError>,
 }
 
@@ -310,6 +317,9 @@ impl PushDecoder {
         self.error = None;
     }
 
+    /// Drains pending output into `sink`, then steps through `input` until
+    /// it runs out or `sink` is full. With `stop_at_frame_end`, returns
+    /// [`Status::Finished`] after each frame.
     fn run<S: Sink>(
         &mut self,
         input: &[u8],

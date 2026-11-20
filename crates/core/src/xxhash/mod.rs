@@ -1,5 +1,9 @@
+//! XXH64. zstd's content checksum is the low 32 bits of XXH64 with
+//! seed 0.
+
 mod primitives;
 
+// XXH64's primes.
 const PRIME64_1: u64 = 0x9E37_79B1_85EB_CA87;
 const PRIME64_2: u64 = 0xC2B2_AE3D_27D4_EB4F;
 const PRIME64_3: u64 = 0x1656_67B1_9E37_79F9;
@@ -21,6 +25,7 @@ fn xxh64_merge_round(mut acc: u64, val: u64) -> u64 {
     acc
 }
 
+/// One-shot XXH64 of `data` with `seed`.
 pub fn xxh64(data: &[u8], seed: u64) -> u64 {
     let len = data.len();
     let mut h64: u64;
@@ -84,19 +89,24 @@ pub fn xxh64(data: &[u8], seed: u64) -> u64 {
     h64
 }
 
+/// Streaming XXH64. Any split of the input into [`update`](Self::update)
+/// calls gives the same hash as [`xxh64`] on the whole.
 pub struct Xxh64State {
     v1: u64,
     v2: u64,
     v3: u64,
     v4: u64,
     total_len: u64,
+    /// Input not yet hashed: less than one 32-byte stripe.
     buf: [u8; 32],
     buf_used: usize,
+    /// Whether 32 bytes or more came in, so the four lanes are in use.
     large: bool,
     seed: u64,
 }
 
 impl Xxh64State {
+    /// Starts a hash with `seed`.
     pub fn new(seed: u64) -> Self {
         Self {
             v1: seed.wrapping_add(PRIME64_1).wrapping_add(PRIME64_2),
@@ -111,6 +121,7 @@ impl Xxh64State {
         }
     }
 
+    /// Hashes `data` after the input so far.
     pub fn update(&mut self, mut data: &[u8]) {
         self.total_len += data.len() as u64;
 
@@ -146,6 +157,7 @@ impl Xxh64State {
         }
     }
 
+    /// The hash of the input so far. More input may follow.
     pub fn finish(&self) -> u64 {
         let mut h64: u64;
 

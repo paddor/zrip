@@ -38,12 +38,15 @@ pub(crate) fn slot_clear_pays(window: usize, tables: usize, entries: usize) -> b
     window.saturating_mul(tables * SLOT_CLEAR_RATIO) <= entries
 }
 
+/// Encoder state for one frame at a time, reused across frames.
 pub(crate) struct EncodeState {
     params: LevelParams,
     rep_offsets: [u32; 3],
     hasher: Xxh64State,
     workspace: BlockEncodeWorkspace,
     dict: Option<Dictionary>,
+    /// The next block is the first of a frame with a dictionary, and seeds
+    /// the tables with it.
     first_block: bool,
     hash_table: MatchTable,
     hash_long: MatchTable,
@@ -275,6 +278,7 @@ impl EncodeState {
         n
     }
 
+    /// Appends a frame header without a content size.
     pub(crate) fn write_header(&self, out: &mut Vec<u8>) -> Result<(), CompressError> {
         write_frame_header_without_content_size(
             out,
@@ -415,6 +419,8 @@ impl EncodeState {
             }
         }
 
+        // Past two windows, keep only the last window and move the table
+        // positions down by what was dropped.
         let window_size = 1usize << self.params.window_log;
         if self.window_buf.len() > window_size * 2 {
             let shift = self.window_buf.len() - window_size;

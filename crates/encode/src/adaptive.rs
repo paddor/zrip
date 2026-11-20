@@ -178,9 +178,13 @@ pub struct AdaptiveLevel {
     len: usize,
     samples: [Option<Sample>; LADDER],
     index: usize,
+    /// The step under test: the index it left, and its goal.
     probe: Option<(usize, Goal)>,
+    /// Highest index a step toward ratio may reach while it holds.
     ceiling: Option<Limit>,
+    /// Lowest index a step toward speed may reach while it holds.
     floor: Option<Limit>,
+    /// Windows seen so far.
     window: u64,
 }
 
@@ -267,6 +271,7 @@ impl AdaptiveLevel {
         self.level()
     }
 
+    /// The sample at `index`, if taken within the last `RETRY_WINDOWS`.
     fn fresh(&self, index: usize) -> Option<Sample> {
         self.samples[index].filter(|sample| self.window - sample.window < RETRY_WINDOWS)
     }
@@ -290,6 +295,8 @@ impl AdaptiveLevel {
         }
     }
 
+    /// The next index toward `goal`, unless at the end of the ladder or past
+    /// its limit.
     fn next(&self, goal: Goal) -> Option<usize> {
         let limit = self.limit(goal);
         match goal {

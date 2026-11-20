@@ -142,10 +142,12 @@ function getDecompressorInner(decompressor: Decompressor): Wasm.Decompressor {
  * ```
  */
 export class Decompressor {
+  /** Creates a context without a dictionary. */
   constructor() {
     decompressorInner.set(this, new WasmDecompressor());
   }
 
+  /** Creates a context for frames compressed with `dict`. */
   static withDict(dict: Dictionary): Decompressor {
     const decompressor = new Decompressor();
     getDecompressorInner(decompressor).free();
@@ -153,6 +155,11 @@ export class Decompressor {
     return decompressor;
   }
 
+  /**
+   * Decompresses all frames in `input`.
+   *
+   * @throws On invalid input, or output above `options.maxDecompressedSize`.
+   */
   decompress(
     input: Uint8Array,
     options?: DecompressOptions,
@@ -163,6 +170,7 @@ export class Decompressor {
     );
   }
 
+  /** Releases the WASM memory. Later calls throw. Safe to call twice. */
   free(): void {
     const inner = decompressorInner.get(this);
     if (!inner) return;
@@ -170,6 +178,7 @@ export class Decompressor {
     inner.free();
   }
 
+  /** Calls {@linkcode Decompressor.free | free()}, for `using`. */
   [Symbol.dispose](): void {
     this.free();
   }

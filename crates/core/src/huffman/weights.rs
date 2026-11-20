@@ -1,3 +1,6 @@
+//! Huffman tree descriptions: weight parsing (direct or FSE-compressed)
+//! and decode table construction.
+
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
@@ -11,6 +14,8 @@ use crate::error::DecompressError;
 use crate::fse::decode::FseState;
 use crate::fse::table_builder::build_decode_table;
 
+/// Parses the tree description at the start of `data`. Returns the explicit
+/// weights (the last symbol's is implied) and the bytes used.
 pub fn parse_huffman_weights(data: &[u8]) -> Result<(Vec<u8>, usize), DecompressError> {
     if data.is_empty() {
         return Err(DecompressError::BadHuffmanWeights);
@@ -18,6 +23,8 @@ pub fn parse_huffman_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompress
 
     let header_byte = data[0];
 
+    // 128 and up: `header - 127` weights, 4 bits each. Below: the size of
+    // the FSE-compressed weights.
     if header_byte >= 128 {
         parse_direct_weights(data)
     } else {
@@ -25,6 +32,8 @@ pub fn parse_huffman_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompress
     }
 }
 
+/// [`parse_huffman_weights`] into reused buffers: `weights` gets the
+/// weights, the `fse_*` vectors are scratch. Returns the bytes used.
 #[cfg(feature = "alloc")]
 pub fn parse_huffman_weights_into(
     data: &[u8],
@@ -99,6 +108,7 @@ fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompr
 
     let compressed = &data[1..=compressed_size];
 
+    // Weights go up to 12; RFC 8878 caps the accuracy log at 6.
     let mut bit_reader = BitReader::new(compressed);
     let (distribution, accuracy_log) =
         crate::fse::table_builder::parse_fse_table_description(&mut bit_reader, 12)?;
@@ -124,6 +134,8 @@ fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompr
     let mut state2 = FseState::new(&table, accuracy_log, &mut rev_reader)
         .map_err(|_| DecompressError::BadHuffmanWeights)?;
 
+    // Two states alternate over one table. When the next update would read
+    // past the stream start, the other state's symbol is the last weight.
     let mut weights = Vec::new();
 
     loop {
@@ -282,6 +294,9 @@ fn parse_fse_compressed_weights_into(
     Ok(1 + compressed_size)
 }
 
+/// Builds a decode table from explicit weights, adding the implied last
+/// one. Returns [`DECODE_TABLE_SIZE`](crate::huffman::DECODE_TABLE_SIZE)
+/// entries and the table log.
 #[cfg(feature = "alloc")]
 pub fn build_huffman_decode_table(
     weights: &[u8],
@@ -314,6 +329,8 @@ pub fn build_huffman_decode_table(
         return Err(DecompressError::BadHuffmanWeights);
     }
 
+    // The implied last weight fills the code space up to the next power of
+    // two, so the gap must be a power of two.
     let total_capacity = 1u32 << table_log;
     let last_weight_value = total_capacity - weight_sum;
     if last_weight_value == 0 || !last_weight_value.is_power_of_two() {
@@ -398,6 +415,8 @@ pub fn build_huffman_decode_table_into(
         return Err(DecompressError::BadHuffmanWeights);
     }
 
+    // The implied last weight fills the code space up to the next power of
+    // two, so the gap must be a power of two.
     let total_capacity = 1u32 << table_log;
     let last_weight_value = total_capacity - weight_sum;
     if last_weight_value == 0 || !last_weight_value.is_power_of_two() {

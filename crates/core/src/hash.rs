@@ -1,29 +1,42 @@
+//! Multiplicative hashes of the low 4 to 8 bytes of a word, and the
+//! multipliers the match finders use for their hash tables.
+
 #![forbid(unsafe_code)]
 
+/// Multiplier of [`hash4`]: XXH32's first prime, also C zstd's
+/// `prime4bytes`.
 pub const PRIME32_1: u32 = 0x9E37_79B1;
+/// XXH32's second prime.
 pub const PRIME32_2: u32 = 0x85EB_CA77;
+/// Multiplier of [`hash5`] to [`hash8`]: XXH64's first prime. C zstd
+/// uses a separate prime per length, so these hash values differ.
 pub const PRIME64_1: u64 = 0x9E37_79B1_85EB_CA87;
 
+/// Hashes `value` to `hash_log` bits, 1 to 32 (C zstd's `ZSTD_hash4`).
 #[inline]
 pub fn hash4(value: u32, hash_log: u32) -> u32 {
     (value.wrapping_mul(PRIME32_1)) >> (32 - hash_log)
 }
 
+/// Hashes the low 5 bytes of `value` to `hash_log` bits, 1 to 32.
 #[inline]
 pub fn hash5(value: u64, hash_log: u32) -> u32 {
     ((value << 24).wrapping_mul(PRIME64_1) >> (64 - hash_log)) as u32
 }
 
+/// Hashes the low 6 bytes of `value` to `hash_log` bits, 1 to 32.
 #[inline]
 pub fn hash6(value: u64, hash_log: u32) -> u32 {
     ((value << 16).wrapping_mul(PRIME64_1) >> (64 - hash_log)) as u32
 }
 
+/// Hashes the low 7 bytes of `value` to `hash_log` bits, 1 to 32.
 #[inline]
 pub fn hash7(value: u64, hash_log: u32) -> u32 {
     ((value << 8).wrapping_mul(PRIME64_1) >> (64 - hash_log)) as u32
 }
 
+/// Hashes all 8 bytes of `value` to `hash_log` bits, 1 to 32.
 #[inline]
 pub fn hash8(value: u64, hash_log: u32) -> u32 {
     (value.wrapping_mul(PRIME64_1) >> (64 - hash_log)) as u32

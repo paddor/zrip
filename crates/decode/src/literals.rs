@@ -1,3 +1,5 @@
+//! Literals section decoding: raw, RLE, and Huffman-coded literals, with
+//! caches that skip rebuilding an unchanged Huffman table.
 #![forbid(unsafe_code)]
 
 use crate::BlockDecodeWorkspace;
@@ -9,16 +11,25 @@ use zrip_core::huffman::decode::{
 };
 use zrip_core::huffman::weights::{build_huffman_decode_table_into, parse_huffman_weights_into};
 
+/// `Literals_Block_Type`, the low 2 bits of the section header.
 #[derive(Debug, Clone, Copy)]
 pub enum LiteralsBlockType {
+    /// Stored as is.
     Raw,
+    /// One byte, repeated.
     Rle,
+    /// Huffman-coded, after a new tree description.
     Compressed,
+    /// Huffman-coded with the previous tree.
     Treeless,
 }
 
+/// Parses a raw or RLE section header. Returns the literal count and the
+/// header size.
 fn parse_raw_rle_header(data: &[u8]) -> Result<(usize, usize), DecompressError> {
     let header_byte = data[0];
+    // Size format in bits 3-2: x0 is a 5-bit count in 1 byte, 01 a 12-bit
+    // count in 2 bytes, 11 a 20-bit count in 3 bytes.
     let size_format = (header_byte >> 2) & 0x03;
     match size_format {
         0 | 2 => Ok(((header_byte >> 3) as usize, 1)),
@@ -43,8 +54,12 @@ fn parse_raw_rle_header(data: &[u8]) -> Result<(usize, usize), DecompressError> 
     }
 }
 
+/// Parses a compressed or treeless section header. Returns the literal
+/// count, the compressed size, the stream count and the header size.
 fn parse_compressed_header(data: &[u8]) -> Result<(usize, usize, usize, usize), DecompressError> {
     let header_byte = data[0];
+    // Size format in bits 3-2: 0 is one stream, others four. Both sizes are
+    // 10 bits for formats 0 and 1, 14 bits for 2, and 18 bits for 3.
     let size_format = (header_byte >> 2) & 0x03;
     match size_format {
         0 => {
@@ -185,6 +200,9 @@ pub(crate) fn decode_literals_ws(
 
             let stream_data = &data[header_size..header_size + compressed_size];
 
+            // Treeless reuses the last table of the frame or its dictionary.
+            // A tree description equal to the last one reuses its table
+            // without parsing, and equal weights reuse it without a rebuild.
             let huf_consumed = if treeless {
                 if !ws.huf_valid {
                     return Err(DecompressError::CorruptLiterals);
@@ -237,6 +255,7 @@ pub(crate) fn decode_literals_ws(
                     &mut ws.literal_buf,
                 )?;
             } else if prefers_pairs(regen_size, compressed_stream.len()) {
+                // Two symbols per lookup; the pair table is built lazily.
                 if !ws.huf_pairs_valid {
                     build_pair_table(&ws.huf_table, ws.huf_table_log, &mut ws.huf_pairs)?;
                     ws.huf_pairs_valid = true;

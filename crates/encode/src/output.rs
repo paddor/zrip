@@ -1,3 +1,4 @@
+//! Where frame writers put their bytes: a growable `Vec` or a fixed slice.
 #![forbid(unsafe_code)]
 
 use zrip_core::error::CompressError;
@@ -5,6 +6,8 @@ use zrip_core::error::CompressError;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
+/// A frame byte sink. A full slice fails with
+/// `CompressError::OutputTooSmall`; a `Vec` grows.
 pub(crate) trait OutputSink {
     fn push(&mut self, byte: u8) -> Result<(), CompressError>;
     fn extend_from_slice(&mut self, data: &[u8]) -> Result<(), CompressError>;
@@ -37,6 +40,7 @@ impl OutputSink for Vec<u8> {
     }
 }
 
+/// Writes to the start of a caller's slice.
 pub(crate) struct SliceSink<'a> {
     output: &'a mut [u8],
     pos: usize,
@@ -48,6 +52,7 @@ impl<'a> SliceSink<'a> {
         Self { output, pos: 0 }
     }
 
+    /// Bytes written so far.
     #[inline]
     pub(crate) fn pos(&self) -> usize {
         self.pos

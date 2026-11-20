@@ -1,3 +1,4 @@
+//! [`FrameEncoder`], a streaming encoder over [`std::io::Write`].
 #![forbid(unsafe_code)]
 
 use std::io::{self, Write};

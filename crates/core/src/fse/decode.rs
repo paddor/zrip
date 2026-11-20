@@ -1,15 +1,19 @@
+//! FSE decoder state over a reverse bitstream.
+
 #![forbid(unsafe_code)]
 
 use crate::bitstream::reader_reverse::ReverseBitReader;
 use crate::error::DecompressError;
 use crate::fse::FseDecodeEntry;
 
+/// One FSE decoder state over a decode table.
 pub struct FseState<'t> {
     table: &'t [FseDecodeEntry],
     state: u32,
 }
 
 impl<'t> FseState<'t> {
+    /// Reads the initial state, `accuracy_log` bits.
     pub fn new(
         table: &'t [FseDecodeEntry],
         accuracy_log: u8,
@@ -19,16 +23,20 @@ impl<'t> FseState<'t> {
         Ok(Self { table, state })
     }
 
+    /// Symbol of the current state.
     #[inline]
     pub fn symbol(&self) -> u8 {
         self.table[self.state as usize].symbol
     }
 
+    /// Bits the next [`update_state`](Self::update_state) reads.
     #[inline]
     pub fn num_bits(&self) -> u8 {
         self.table[self.state as usize].num_bits
     }
 
+    /// Moves to the next state: the cell's `base_line` plus `num_bits` read
+    /// bits.
     #[inline]
     pub fn update_state(&mut self, reader: &mut ReverseBitReader) -> Result<(), DecompressError> {
         let entry = &self.table[self.state as usize];
@@ -37,6 +45,7 @@ impl<'t> FseState<'t> {
         Ok(())
     }
 
+    /// Current state, an index into the table.
     pub fn state(&self) -> u32 {
         self.state
     }
