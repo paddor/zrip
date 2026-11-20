@@ -25,6 +25,9 @@
   faster and 9% smaller at level 3, and 1 KiB frames 1.3x faster and 4-5%
   smaller. 1 KiB frames decode 1.4x faster and 64-byte frames 8% slower,
   since their literals are now Huffman-coded.
+- `Options::window_log(0)` selects the level's default window, as in C
+  zstd, instead of the smallest one. Other values are still clamped to
+  1 KiB through 128 MiB, which the docs now say.
 
 ### Fixed
 

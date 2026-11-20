@@ -8,6 +8,8 @@
   zstd: they reuse the previous one or stay raw. Raw literals and raw blocks
   keep the decoder's table; a fresh table takes over only once its block is
   written compressed.
+- `Options::window_log(0)` selects the level's default window, as in C
+  zstd, instead of `WINDOW_LOG_MIN`.
 
 ## [0.9.9] - 2026-11-20
 
