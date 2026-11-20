@@ -105,7 +105,13 @@ pub(crate) struct BlockEncodeWorkspace {
     num_packed: usize,
     seq_freqs: SeqFreqs,
     custom_seq_tables: CustomSeqTables,
-    pub prev_huffman: Option<HuffmanEncodeTable>,
+    /// Huffman tables. Slot `huffman_prev` holds the one the decoder has:
+    /// the last one a compressed block sent, which raw literals and raw
+    /// blocks leave in place, as in C zstd. The other slot holds a table
+    /// built for the block being encoded, which takes over by index once
+    /// that block is written compressed, so no table is copied.
+    huffman: [Option<HuffmanEncodeTable>; 2],
+    huffman_prev: usize,
     pub prev_ll: Option<FseEncodeTable>,
     pub prev_of: Option<FseEncodeTable>,
     pub prev_ml: Option<FseEncodeTable>,
@@ -125,11 +131,37 @@ impl BlockEncodeWorkspace {
             num_packed: 0,
             seq_freqs: SeqFreqs::default(),
             custom_seq_tables: CustomSeqTables::new(),
-            prev_huffman: None,
+            huffman: [None, None],
+            huffman_prev: 0,
             prev_ll: None,
             prev_of: None,
             prev_ml: None,
         }
+    }
+
+    /// The Huffman table the decoder holds.
+    #[cfg(test)]
+    fn prev_huffman(&self) -> Option<&HuffmanEncodeTable> {
+        self.huffman[self.huffman_prev].as_ref()
+    }
+
+    /// Sets the Huffman table the decoder holds, as at a frame start.
+    pub fn set_prev_huffman(&mut self, table: Option<HuffmanEncodeTable>) {
+        self.huffman[self.huffman_prev] = table;
+        self.huffman[1 - self.huffman_prev] = None;
+    }
+}
+
+/// The decoder's Huffman table and the slot for a fresh one.
+fn huffman_slots(
+    huffman: &mut [Option<HuffmanEncodeTable>; 2],
+    prev: usize,
+) -> (Option<&HuffmanEncodeTable>, &mut Option<HuffmanEncodeTable>) {
+    let [a, b] = huffman;
+    if prev == 0 {
+        (a.as_ref(), b)
+    } else {
+        (b.as_ref(), a)
     }
 }
 
@@ -528,12 +560,15 @@ fn encode_compressed_block_impl(
         workspace,
     );
 
+    let (prev_huffman, fresh_huffman) =
+        huffman_slots(&mut workspace.huffman, workspace.huffman_prev);
     let raw_literals = encode_literals_section(
         &workspace.lit_buf[..workspace.lit_len],
         n,
         &mut workspace.lit_section,
         &mut workspace.huf_concat,
-        &mut workspace.prev_huffman,
+        prev_huffman,
+        fresh_huffman,
         policy,
     );
 
@@ -623,10 +658,11 @@ fn encode_compressed_block_impl(
     let block_len = literal_section_len + seq_data.len();
     if block_len >= src.len() {
         *rep_offsets = saved_rep;
-        // The decoder never sees this block's table, so it cannot be reused.
-        workspace.prev_huffman = None;
+        // The decoder never sees this block's table and keeps the previous one.
+        workspace.huffman[1 - workspace.huffman_prev] = None;
         return encode_raw_block(src, last, output);
     }
+    commit_fresh_huffman(&mut workspace.huffman, &mut workspace.huffman_prev);
 
     let block_size = block_len as u32;
     let header = (block_size << 3) | 0x04 | if last { 1 } else { 0 };
@@ -640,6 +676,15 @@ fn encode_compressed_block_impl(
     output.extend_from_slice(seq_data)
 }
 
+/// Makes the table the block just written sent the decoder's previous one.
+fn commit_fresh_huffman(huffman: &mut [Option<HuffmanEncodeTable>; 2], prev: &mut usize) {
+    let fresh = 1 - *prev;
+    if huffman[fresh].is_some() {
+        huffman[*prev] = None;
+        *prev = fresh;
+    }
+}
+
 /// Encodes a block without sequences: Huffman-coded literals and an empty
 /// sequence section. Falls back to a raw block when that is not smaller.
 fn encode_literals_only_block(
@@ -649,21 +694,25 @@ fn encode_literals_only_block(
     workspace: &mut BlockEncodeWorkspace,
     policy: BlockPolicy,
 ) -> Result<(), CompressError> {
+    let (prev_huffman, fresh_huffman) =
+        huffman_slots(&mut workspace.huffman, workspace.huffman_prev);
     let raw_literals = encode_literals_section(
         src,
         0,
         &mut workspace.lit_section,
         &mut workspace.huf_concat,
-        &mut workspace.prev_huffman,
+        prev_huffman,
+        fresh_huffman,
         policy,
     );
     // One byte for the empty sequence section (Number_of_Sequences = 0).
     let block_len = workspace.lit_section.len() + 1;
     if raw_literals || block_len >= src.len() {
-        // The decoder never sees this block's table, so it cannot be reused.
-        workspace.prev_huffman = None;
+        // The decoder never sees this block's table and keeps the previous one.
+        workspace.huffman[1 - workspace.huffman_prev] = None;
         return encode_raw_block(src, last, output);
     }
+    commit_fresh_huffman(&mut workspace.huffman, &mut workspace.huffman_prev);
     let header = ((block_len as u32) << 3) | 0x04 | u32::from(last);
     output.push(header as u8)?;
     output.push((header >> 8) as u8)?;
@@ -1017,10 +1066,22 @@ fn encode_literals_section(
     num_seq: usize,
     output: &mut Vec<u8>,
     huf_concat: &mut Vec<u8>,
-    prev_huffman: &mut Option<HuffmanEncodeTable>,
+    prev_huffman: Option<&HuffmanEncodeTable>,
+    fresh_huffman: &mut Option<HuffmanEncodeTable>,
     policy: BlockPolicy,
 ) -> bool {
     output.clear();
+
+    // As C zstd's `ZSTD_minLiteralsToCompress` at its fast strategies, a
+    // fresh table never repays its description below 64 literals, so only
+    // the previous table is tried there, from 6 literals. Unlike C, it is
+    // tried even when it may lack codes; the estimate skips it then. Keeping
+    // it over a table built for a few literals also serves later blocks.
+    let min_literals = if prev_huffman.is_some() { 6 } else { 64 };
+    if lits.len() < min_literals {
+        encode_raw_literals_header(lits.len(), output);
+        return true;
+    }
 
     let try_huffman_literals = policy.custom_tables;
 
@@ -1038,7 +1099,7 @@ fn encode_literals_section(
     // Pick between reusing the previous table, a fresh table with its
     // description, and raw bytes by estimated size, as C zstd does. Reuse is
     // only a win when the old table still fits these literals.
-    let want_fresh = try_huffman_literals || huf_worth_trying(lits);
+    let want_fresh = lits.len() >= 64 && (try_huffman_literals || huf_worth_trying(lits));
     if prev_huffman.is_none() && !want_fresh {
         encode_raw_literals_header(lits.len(), output);
         return true;
@@ -1049,7 +1110,6 @@ fn encode_literals_section(
     let sample = (limit != u32::MAX && lits.len() > DENSITY_SAMPLE)
         .then(|| byte_histogram(&lits[..DENSITY_SAMPLE]));
     if sample.is_some_and(|sample| histogram_too_dense(&sample, limit)) {
-        *prev_huffman = None;
         encode_raw_literals_header(lits.len(), output);
         return true;
     }
@@ -1061,7 +1121,6 @@ fn encode_literals_section(
         let tail = byte_histogram(&lits[lits.len() - SUSPECT_SAMPLE..]);
         let sample: [u32; 256] = core::array::from_fn(|i| head[i] + tail[i]);
         if histogram_too_dense(&sample, FLAT_LITERALS_FP8) {
-            *prev_huffman = None;
             encode_raw_literals_header(lits.len(), output);
             return true;
         }
@@ -1075,16 +1134,14 @@ fn encode_literals_section(
         None => byte_histogram(lits),
     };
     if histogram_too_dense(&freqs, FLAT_LITERALS_FP8) {
-        *prev_huffman = None;
         encode_raw_literals_header(lits.len(), output);
         return true;
     }
     if limit != u32::MAX && lits.len() <= DENSITY_SAMPLE && histogram_too_dense(&freqs, limit) {
-        *prev_huffman = None;
         encode_raw_literals_header(lits.len(), output);
         return true;
     }
-    let reuse_bits = prev_huffman.as_ref().and_then(|p| p.estimate_bits(&freqs));
+    let reuse_bits = prev_huffman.and_then(|p| p.estimate_bits(&freqs));
     // As C zstd at its fast strategies: short literals keep a table that can
     // encode them. A fresh one rarely repays its description there, and
     // building it costs more than encoding them.
@@ -1102,7 +1159,6 @@ fn encode_literals_section(
     // The estimates are lower bounds: when neither beats raw bytes, skip the
     // encode.
     if reuse_bits.unwrap_or(u64::MAX).min(fresh_bits) / 8 >= lits.len() as u64 {
-        *prev_huffman = None;
         encode_raw_literals_header(lits.len(), output);
         return true;
     }
@@ -1113,7 +1169,7 @@ fn encode_literals_section(
     if let Some(bits) = reuse_bits
         && bits <= fresh_bits
     {
-        let len = encode(prev_huffman.as_ref().unwrap(), huf_concat);
+        let len = encode(prev_huffman.unwrap(), huf_concat);
         if huf_literals_header_len(lits.len(), len) + len < raw_size {
             encode_treeless_literals_header(lits.len(), len, use_4_streams, output);
             output.extend_from_slice(&huf_concat[..len]);
@@ -1127,12 +1183,11 @@ fn encode_literals_section(
             encode_compressed_literals_header(lits.len(), compressed_size, use_4_streams, output);
             output.extend_from_slice(tree_desc);
             output.extend_from_slice(&huf_concat[..len]);
-            *prev_huffman = Some(table);
+            *fresh_huffman = Some(table);
             return false;
         }
     }
 
-    *prev_huffman = None;
     encode_raw_literals_header(lits.len(), output);
     true
 }
@@ -2037,7 +2092,7 @@ mod tests {
         assert_eq!(out[3] & 3, 2, "Huffman literals with a tree");
         assert_eq!(out.last(), Some(&0), "empty sequence section");
         assert_eq!(rep, [1, 4, 8]);
-        assert!(ws.prev_huffman.is_some());
+        assert!(ws.prev_huffman().is_some());
     }
 
     #[test]
@@ -2054,7 +2109,59 @@ mod tests {
         assert!(!last);
         assert_eq!(block_type, 0, "raw block");
         assert_eq!(size, src.len());
-        assert!(ws.prev_huffman.is_none());
+        assert!(ws.prev_huffman().is_none());
+    }
+
+    #[test]
+    fn raw_block_keeps_the_previous_table() {
+        let mut ws = BlockEncodeWorkspace::new();
+        let first = skewed_literals(16 * 1024);
+        let mut out = Vec::new();
+        encode_compressed_block(
+            &first,
+            &[],
+            &mut [1, 4, 8],
+            false,
+            &mut out,
+            &mut ws,
+            POLICY,
+        )
+        .unwrap();
+        assert!(ws.prev_huffman().is_some());
+
+        // Dense bytes fall back to a raw block, which leaves the decoder's
+        // table alone.
+        let dense: Vec<u8> = (0..4096u32)
+            .map(|i| (i.wrapping_mul(KNUTH) >> 24) as u8)
+            .collect();
+        let mut out = Vec::new();
+        encode_compressed_block(
+            &dense,
+            &[],
+            &mut [1, 4, 8],
+            false,
+            &mut out,
+            &mut ws,
+            POLICY,
+        )
+        .unwrap();
+        assert_eq!(block_header(&out).1, 0, "raw block");
+        assert!(ws.prev_huffman().is_some());
+
+        // Literals like the first block's reuse its table without a tree.
+        let mut out = Vec::new();
+        encode_compressed_block(
+            &first[..1024],
+            &[],
+            &mut [1, 4, 8],
+            true,
+            &mut out,
+            &mut ws,
+            POLICY,
+        )
+        .unwrap();
+        assert_eq!(block_header(&out).1, 2, "compressed block");
+        assert_eq!(out[3] & 3, 3, "treeless literals");
     }
 
     #[test]
@@ -2072,7 +2179,7 @@ mod tests {
             POLICY,
         )
         .unwrap();
-        assert!(ws.prev_huffman.is_some());
+        assert!(ws.prev_huffman().is_some());
 
         // Same shape, shifted to byte values the first table has no code for.
         let second: Vec<u8> = first.iter().map(|&b| b + 128).collect();

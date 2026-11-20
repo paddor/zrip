@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use crate::dict::DICT_MAGIC;
 use crate::fse::{LL_DEFAULT_ACCURACY, ML_DEFAULT_ACCURACY, OF_DEFAULT_ACCURACY};
 use crate::fse::{LL_DEFAULT_DIST, ML_DEFAULT_DIST, OF_DEFAULT_DIST};
+use crate::huffman::encode::HuffmanEncodeTable;
 
 pub fn finalize_dictionary(content: &[u8], samples: &[&[u8]], dict_size: usize) -> Vec<u8> {
     let content_len = content.len().min(dict_size.saturating_sub(256));
@@ -19,9 +20,13 @@ pub fn finalize_dictionary(content: &[u8], samples: &[&[u8]], dict_size: usize) 
     // Dict ID
     dict.extend_from_slice(&dict_id.to_le_bytes());
 
-    // Huffman table: minimal 2-symbol table
-    dict.push(128 + 1); // 1 explicit symbol
-    dict.push(0x11); // weight[0] = 1, padding = 1
+    // Huffman table for the literals the samples leave when matched against
+    // the content. As in C zstd's `ZDICT_finalizeDictionary`, every byte value
+    // counts once more, so the table codes any literals and frames can always
+    // reuse it.
+    let content_start = content.len().saturating_sub(content_len);
+    let kept = &content[content_start..];
+    dict.extend_from_slice(literal_table(kept, samples).weights_description());
 
     // FSE tables: serialize the default distributions
     let of_bytes = crate::fse::table_builder::serialize_fse_table_description(
@@ -46,10 +51,84 @@ pub fn finalize_dictionary(content: &[u8], samples: &[&[u8]], dict_size: usize) 
     dict.extend_from_slice(&rep_offsets[2].to_le_bytes());
 
     // Content
-    let content_start = content.len().saturating_sub(content_len);
-    dict.extend_from_slice(&content[content_start..]);
+    dict.extend_from_slice(kept);
 
     dict
+}
+
+/// Shortest match the literal count takes, as at levels 3 and 4.
+const LITERAL_MIN_MATCH: usize = 5;
+
+/// Nearly flat counts whose table has a description, as C zstd's
+/// `ZDICT_flatLit`. A flat table over all 256 bytes has none: every weight
+/// is the same, which the FSE-compressed form cannot code, and the direct
+/// form holds only 128 weights.
+const FLAT_LITERALS: [u32; 256] = {
+    let mut counts = [2; 256];
+    counts[0] = 4;
+    counts[253] = 1;
+    counts[254] = 1;
+    counts
+};
+
+/// A Huffman table with a code for every byte, weighted by the literals of
+/// `samples` compressed with `content` as their dictionary. Samples whose
+/// literals are too few or too flat for a describable table get
+/// [`FLAT_LITERALS`]'s, as in C zstd.
+fn literal_table(content: &[u8], samples: &[&[u8]]) -> HuffmanEncodeTable {
+    let counts = literal_counts(content, samples);
+    HuffmanEncodeTable::from_histogram(&counts)
+        .or_else(|| HuffmanEncodeTable::from_histogram(&FLAT_LITERALS))
+        .expect("flat literal counts build a table")
+}
+
+/// Byte counts, plus one each, of what greedy matching leaves as literals in
+/// each sample: matches of at least [`LITERAL_MIN_MATCH`] bytes in `content`
+/// or earlier in the same sample. C zstd counts them by compressing the
+/// samples with the dictionary.
+fn literal_counts(content: &[u8], samples: &[&[u8]]) -> [u32; 256] {
+    const CONTENT_LOG: u32 = 16;
+    const SAMPLE_LOG: u32 = 12;
+    let hash = |b: &[u8], log: u32| {
+        let v = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+        (v.wrapping_mul(0x9E37_79B1) >> (32 - log)) as usize
+    };
+    let common = |a: &[u8], b: &[u8]| a.iter().zip(b).take_while(|(x, y)| x == y).count();
+
+    let mut in_content = alloc::vec![usize::MAX; 1 << CONTENT_LOG];
+    for i in 0..content.len().saturating_sub(LITERAL_MIN_MATCH - 1) {
+        in_content[hash(&content[i..], CONTENT_LOG)] = i;
+    }
+
+    let mut counts = [1u32; 256];
+    let mut in_sample = alloc::vec![usize::MAX; 1 << SAMPLE_LOG];
+    for sample in samples {
+        in_sample.fill(usize::MAX);
+        let mut i = 0;
+        while i < sample.len() {
+            let mut len = 0;
+            if i + LITERAL_MIN_MATCH <= sample.len() {
+                let rest = &sample[i..];
+                let c = in_content[hash(rest, CONTENT_LOG)];
+                if c != usize::MAX {
+                    len = common(rest, &content[c..]);
+                }
+                let h = hash(rest, SAMPLE_LOG);
+                let p = in_sample[h];
+                if p != usize::MAX {
+                    len = len.max(common(rest, &sample[p..]));
+                }
+                in_sample[h] = i;
+            }
+            if len >= LITERAL_MIN_MATCH {
+                i += len;
+            } else {
+                counts[usize::from(sample[i])] = counts[usize::from(sample[i])].saturating_add(1);
+                i += 1;
+            }
+        }
+    }
+    counts
 }
 
 fn compute_rep_offsets(content: &[u8], samples: &[&[u8]]) -> [u32; 3] {
@@ -119,4 +198,26 @@ fn compute_dict_id(content: &[u8], samples: &[&[u8]]) -> u32 {
         h = 1;
     }
     h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flat_literal_counts_build_a_table() {
+        assert!(HuffmanEncodeTable::from_histogram(&[1; 256]).is_none());
+        let table = HuffmanEncodeTable::from_histogram(&FLAT_LITERALS).unwrap();
+        assert!(table.estimate_bits(&[1; 256]).is_some(), "codes every byte");
+    }
+
+    #[test]
+    fn samples_without_literals_get_the_flat_table() {
+        let content: Vec<u8> = (0..4096u32).map(|i| (i * 7 % 251) as u8).collect();
+        let flat = HuffmanEncodeTable::from_histogram(&FLAT_LITERALS).unwrap();
+        for samples in [&[][..], &[&b""[..]], &[&content[100..200]]] {
+            let table = literal_table(&content, samples);
+            assert_eq!(table.weights_description(), flat.weights_description());
+        }
+    }
 }

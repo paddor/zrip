@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Literal sections under 64 bytes never build a fresh Huffman table, as in C
+  zstd: they reuse the previous one or stay raw. Raw literals and raw blocks
+  keep the table the decoder holds instead of dropping it, so later blocks can
+  still reuse it. A stream flushed every 256 bytes encodes 1.9x faster at
+  level 1 and 1.7x at level 3, and compresses 5.8% and 2.5% better. 15-byte
+  messages at levels 1 and 3 encode in 0.1 µs instead of 2.1 µs. Highly
+  compressible 256-byte inputs encode up to 2.2x faster and compress up to
+  14% worse, close to C zstd's size; at 512 bytes, up to 2% worse.
+- Trained dictionaries carry a Huffman table with a code for every byte,
+  weighted by the literals the samples leave when matched against the
+  dictionary content, as C zstd's are. They held a placeholder table that
+  coded no literals. Frames reuse the table, as in C. With such a dictionary,
+  64-byte frames encode 1.75x faster at levels 1 and 3, 256-byte frames 1.5x
+  faster and 9% smaller at level 3, and 1 KiB frames 1.3x faster and 4-5%
+  smaller. 1 KiB frames decode 1.4x faster and 64-byte frames 8% slower,
+  since their literals are now Huffman-coded.
+
 ## [0.8.21] - 2026-11-20
 
 ### Changed

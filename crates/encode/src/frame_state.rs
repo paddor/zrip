@@ -133,9 +133,10 @@ impl EncodeState {
                 self.workspace.prev_ml = d
                     .ml_table()
                     .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 52));
-                self.workspace.prev_huffman = d
-                    .huf_table()
-                    .and_then(|(dt, tl)| HuffmanEncodeTable::from_decode_table(dt, tl));
+                self.workspace.set_prev_huffman(
+                    d.huf_table()
+                        .and_then(|(dt, tl)| HuffmanEncodeTable::from_decode_table(dt, tl)),
+                );
                 (Some(d.id()), d.content(), *d.rep_offsets())
             }
             None => (None, &[][..], [1, 4, 8]),
@@ -174,7 +175,7 @@ impl EncodeState {
             None => [1, 4, 8],
         };
         self.hasher = Xxh64State::new(0);
-        self.workspace.prev_huffman = None;
+        self.workspace.set_prev_huffman(None);
         self.window_buf.clear();
         if let Some(ref d) = self.dict {
             self.window_buf.extend_from_slice(d.content());
