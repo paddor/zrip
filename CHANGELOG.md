@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.23] - 2026-11-20
+
 ### Changed
 
 - Level -3 searches as level -4 does, hashing eight bytes, in a table twice

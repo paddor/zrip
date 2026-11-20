@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.17] - 2026-11-20
+
 - Removed the unused `BlockDecodeWorkspace::fse_symbol_next`.
 
 - Decoding matches C zstd 1.5.7: one-shot decoding holds only compressed

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-20
+
 - Removed the unused `strategy::max_hash_log`.
 
 - `fast::count_back` counts equal bytes from the right end on big-endian
