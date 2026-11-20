@@ -97,7 +97,7 @@ fn c_lenient_huffman(input: &[u8]) -> bool {
         let magic = u32::from_le_bytes(input[pos..pos + 4].try_into().unwrap());
         if magic & 0xFFFF_FFF0 == 0x184D_2A50 {
             let size = u32::from_le_bytes(input[pos + 4..pos + 8].try_into().unwrap());
-            pos += 8 + size as usize;
+            pos = pos.saturating_add(8).saturating_add(size as usize);
             continue;
         }
         let Ok(header) = parse_frame_header(&input[pos..]) else {

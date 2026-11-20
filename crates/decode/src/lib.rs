@@ -182,7 +182,7 @@ pub(crate) fn skip_skippable_frame(data: &[u8]) -> Option<usize> {
         return None;
     }
     let frame_size = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
-    let total = 8 + frame_size;
+    let total = frame_size.checked_add(8)?;
     if total > data.len() {
         return None;
     }

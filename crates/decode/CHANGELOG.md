@@ -14,6 +14,8 @@
   content size over the output limit up front.
 - A block's sequences that pass its room fail with `BlockTooLarge` instead
   of `CorruptSequences`.
+- `skip_skippable_frame` no longer overflows on 32-bit targets for sizes
+  near `u32::MAX`.
 
 ## [0.8.16] - 2026-11-20
 

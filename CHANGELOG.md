@@ -18,17 +18,23 @@
 - Decoding accepts exactly the frames C zstd 1.5.7 accepts, with the same
   output, checked by a differential test and fuzz target. Only corrupt
   4-stream Huffman literals, which C zstd's fast decoder does not check,
-  still fail in zrip. It now takes
-  Huffman tables of 12 bits, which C zstd's decoder takes and RFC 8878
-  does not allow, and 4-stream literals of 6 and 9 bytes, whose last stream
-  is empty. As in C zstd's one-shot decoder, `decompress` holds only
-  compressed blocks to the block size limit. As in its streaming decoder,
-  `FrameDecoder` and `PushDecoder` read a compressed block of size 0 as
-  empty, skip the content size check of a frame that ends with an empty
-  block, and check the output limit only against output.
+  still fail in zrip. It now takes Huffman tables of 12 bits, which C
+  zstd's decoder takes and RFC 8878 does not allow, and 4-stream literals
+  of 6 and 9 bytes, whose last stream is empty. As in C zstd's one-shot
+  decoder, `decompress` holds only compressed blocks to the block size
+  limit. As in its streaming decoder, `FrameDecoder` and `PushDecoder`
+  read a compressed block of size 0 as empty, skip the content size check
+  of a frame that ends with an empty block, and check the output limit
+  only against output.
 
 ### Fixed
 
+- Level -7 with a dictionary could write frames that no decoder accepts.
+  After a block with the predefined sequence tables, a later block of
+  almost only literals could still reuse the dictionary's tables. Affects
+  0.8.18 to 0.8.22.
+- On 32-bit targets, a skippable frame of almost 4 GiB in `decompress`
+  overflowed its size and was skipped by a few bytes only.
 - Frames C zstd rejects no longer decode: window logs over 31 (30 on 32-bit
   targets), Huffman descriptions without two codes of the table's length,
   literals over a window smaller than 128 KiB, and compressed blocks that
@@ -44,13 +50,6 @@
   pick, as C zstd does. Their IDs come from C zstd's formula and stay out
   of the ranges RFC 8878 reserves, and a top repeat offset equal to a
   default no longer drops it.
-
-### Fixed
-
-- Level -7 with a dictionary could write frames that no decoder accepts.
-  After a block with the predefined sequence tables, a later block of
-  almost only literals could still reuse the dictionary's tables. Affects
-  0.8.18 to 0.8.22.
 
 ## [0.8.22] - 2026-11-20
 
