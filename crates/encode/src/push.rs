@@ -172,8 +172,10 @@ impl PushEncoder {
     }
 
     /// Like [`encode`](Self::encode), but `output` may be uninitialized,
-    /// so callers need not zero their buffers. The first `produced` bytes
-    /// of `output` are initialized on return.
+    /// so callers need not zero their buffers. On return, the first
+    /// `produced` bytes of `output` are initialized. Bytes past them are left
+    /// as they were, and no byte is ever made uninitialized, so callers may
+    /// rely on both in unsafe code, as when they track initialized capacity.
     pub fn encode_uninit(
         &mut self,
         input: &[u8],
