@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `MIN_LEVEL` and `MAX_LEVEL` name the lowest and highest compression
+  levels, -7 and 4, beside `DEFAULT_LEVEL`.
+
 ### Changed
 
 - Literal sections under 64 bytes never build a fresh Huffman table, as in C

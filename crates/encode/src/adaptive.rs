@@ -27,7 +27,7 @@
 use core::ops::RangeInclusive;
 use core::time::Duration;
 
-use crate::strategy::DEFAULT_LEVEL;
+use crate::strategy::{DEFAULT_LEVEL, MAX_LEVEL, MIN_LEVEL};
 
 /// Input a window should cover at least. Smaller windows rank levels by
 /// measurement noise.
@@ -197,9 +197,9 @@ impl AdaptiveLevel {
     pub fn new(range: RangeInclusive<i32>, start: i32) -> Self {
         let mut levels = [0; LADDER];
         let mut len = 0;
-        for level in (-7..=4).filter(|level| *level != 0) {
+        for level in (MIN_LEVEL..=MAX_LEVEL).filter(|level| *level != 0) {
             if range.contains(&level)
-                || (level == -7 && range.contains(&-8))
+                || (level == MIN_LEVEL && range.contains(&-8))
                 || (level == DEFAULT_LEVEL && range.contains(&0))
             {
                 levels[len] = level;

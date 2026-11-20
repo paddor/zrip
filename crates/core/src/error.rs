@@ -14,7 +14,8 @@ pub enum ZstdError {
 pub enum CompressError {
     /// Output buffer passed to [`compress_into`](crate::compress_into) is too small.
     OutputTooSmall,
-    /// Compression level is outside the supported range (-7..=4).
+    /// Compression level is outside the supported range (-7..=4; -8 runs
+    /// as -7).
     InvalidLevel(i32),
     /// Dictionary bytes failed to parse.
     InvalidDictionary,

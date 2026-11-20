@@ -69,6 +69,13 @@ impl LevelParams {
 /// Default compression level used when level 0 is requested.
 pub const DEFAULT_LEVEL: i32 = 1;
 
+/// Lowest compression level. Level -8, a separate level in earlier
+/// versions, is still accepted and runs as -7.
+pub const MIN_LEVEL: i32 = -7;
+
+/// Highest compression level.
+pub const MAX_LEVEL: i32 = 4;
+
 /// Returns the compression parameters for a given level, or `None` if out of range.
 ///
 /// Level 0 is treated as "library default" and maps to level 1.
