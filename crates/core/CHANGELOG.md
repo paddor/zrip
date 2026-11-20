@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-20
+
 - Removed unused items: `hash::hash4` to `hash8`, `hash::PRIME32_2`, the
   `simd` module (`has_bmi2`), `fse::FseEncodeEntry`, `fse::FseTable` and
   `fse::FSE_SEQ_DECODE_ENTRY_ZERO`. `build_decode_table_into` and
