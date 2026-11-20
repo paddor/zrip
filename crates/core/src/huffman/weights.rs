@@ -430,23 +430,10 @@ pub fn build_huffman_decode_table_into(
         return Err(DecompressError::BadHuffmanWeights);
     }
     let last_weight = high_bit(last_weight_value) as u8 + 1;
-    // As C zstd (`HUF_readStats`): at least two symbols, an even number,
-    // have weight 1, so the longest code is `table_log` bits.
-    let longest =
-        weights.iter().map(|&w| usize::from(w == 1)).sum::<usize>() + usize::from(last_weight == 1);
-    if longest < 2 || longest % 2 == 1 {
-        return Err(DecompressError::BadHuffmanWeights);
-    }
 
     all_weights.clear();
     all_weights.extend_from_slice(weights);
     all_weights.push(last_weight);
-
-    let size = super::DECODE_TABLE_SIZE.max(1 << table_log);
-    if table.len() != size {
-        table.clear();
-        table.resize(size, HuffmanDecodeEntry::default());
-    }
 
     let max_w = table_log as usize + 1;
 
@@ -473,6 +460,17 @@ pub fn build_huffman_decode_table_into(
     let mut rank_count = [0u32; 16];
     for (w, count) in rank_count.iter_mut().enumerate() {
         *count = hist[0][w] + hist[1][w] + hist[2][w] + hist[3][w];
+    }
+    // As C zstd (`HUF_readStats`): at least two symbols, an even number,
+    // have weight 1, so the longest code is `table_log` bits.
+    if rank_count[1] < 2 || rank_count[1] % 2 == 1 {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
+
+    let size = super::DECODE_TABLE_SIZE.max(1 << table_log);
+    if table.len() != size {
+        table.clear();
+        table.resize(size, HuffmanDecodeEntry::default());
     }
 
     // Group symbols by weight (counting sort), weight 0 first, and within a
