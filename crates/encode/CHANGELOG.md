@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-11-20
+
+- The DFast probe loop breaks out with the match it found and handles it
+  after the loop, with no closures. Built without `target-cpu=native`,
+  levels 3 and 4 compress 17-52% faster; frames are byte-identical.
+
 ## [0.9.8] - 2026-11-19
 
 - Fix a panic or corrupt frame when a block repeated a dictionary's sequence

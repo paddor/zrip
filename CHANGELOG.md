@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.8.21] - 2026-11-20
+
+### Changed
+
+- Levels 3 and 4 compress 17-52% faster in builds without
+  `target-cpu=native`, which is how dependent crates build zrip, with or
+  without LTO. The DFast match search kept a closure out of line there, and
+  every probed position spilled its captures to the stack and called it;
+  0.8.20's dictionary support added to that. The search now breaks out of
+  its probe loop with the match and handles it after the loop, as C zstd
+  does. Frames are byte-identical. Builds with `target-cpu=native` move by
+  -4% to +2%.
+
 ## [0.8.20] - 2026-11-19
 
 ### Fixed
