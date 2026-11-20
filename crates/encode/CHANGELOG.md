@@ -4,6 +4,7 @@
 
 - `strategy::MIN_LEVEL` and `strategy::MAX_LEVEL` name the lowest and
   highest compression levels.
+- `PushEncoder::encode_uninit` writes into an uninitialized buffer.
 - Literal sections under 64 bytes never build a fresh Huffman table, as in C
   zstd: they reuse the previous one or stay raw. Raw literals and raw blocks
   keep the decoder's table; a fresh table takes over only once its block is

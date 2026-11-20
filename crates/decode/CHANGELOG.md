@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- `PushDecoder::decode_uninit` writes into an uninitialized buffer.
 - A compressed block without a sequence count, or with bytes after a zero
   count, fails with `CorruptSequences`, and a block over
   `Block_Maximum_Size` (the window, at most 128 KiB, compressed size

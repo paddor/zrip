@@ -514,6 +514,46 @@ fn decode_limit_counts_earlier_frames() {
     assert_eq!(out.len(), 1000);
 }
 
+#[test]
+fn uninit_buffers_match_initialized_ones() {
+    use std::mem::MaybeUninit;
+
+    let data = mixed(300_000, 11);
+    for (level, out_buf) in [(1, 13), (3, 4096), (-7, 1 << 20)] {
+        let expected = push_encode(&mut PushEncoder::new(level).unwrap(), &data, 1000, out_buf);
+
+        let mut enc = PushEncoder::new(level).unwrap();
+        let mut frame = Vec::new();
+        let mut buf = vec![MaybeUninit::uninit(); out_buf];
+        for (input, op) in [(&data[..], EndOp::Continue), (&[][..], EndOp::End)] {
+            let mut input = input;
+            loop {
+                let p = enc.encode_uninit(input, &mut buf, op).unwrap();
+                frame.extend(buf[..p.produced].iter().map(|b| unsafe { b.assume_init() }));
+                input = &input[p.consumed..];
+                if p.status != Status::NeedsOutput {
+                    break;
+                }
+            }
+        }
+        assert_eq!(frame, expected, "L{level} out={out_buf}");
+
+        let mut dec = PushDecoder::new();
+        let mut out = Vec::new();
+        let mut input = &frame[..];
+        loop {
+            let p = dec.decode_uninit(input, &mut buf).unwrap();
+            out.extend(buf[..p.produced].iter().map(|b| unsafe { b.assume_init() }));
+            input = &input[p.consumed..];
+            if p.status == Status::Finished {
+                break;
+            }
+        }
+        dec.finish().unwrap();
+        assert_eq!(out, data, "L{level} out={out_buf}");
+    }
+}
+
 /// Skewed literals with few repeats: about 5 bits per byte.
 fn skewed(range: core::ops::Range<u32>) -> Vec<u8> {
     range

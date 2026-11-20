@@ -6,6 +6,9 @@
 
 - `MIN_LEVEL` and `MAX_LEVEL` name the lowest and highest compression
   levels, -7 and 4, beside `DEFAULT_LEVEL`.
+- `PushEncoder::encode_uninit` and `PushDecoder::decode_uninit` write into
+  uninitialized buffers, so callers such as async I/O adapters need not
+  zero them first.
 
 ### Changed
 

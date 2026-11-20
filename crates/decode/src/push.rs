@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 use alloc::vec::Vec;
+use core::mem::MaybeUninit;
 
 use crate::frame_state::{
     AfterBlock, BLOCK_HEADER_SIZE, CHECKSUM_SIZE, FRAME_PREFIX_SIZE, FrameState,
@@ -132,6 +133,23 @@ impl Sink for SliceSink<'_> {
     }
 }
 
+struct UninitSink<'a> {
+    buf: &'a mut [MaybeUninit<u8>],
+    pos: usize,
+}
+
+impl Sink for UninitSink<'_> {
+    fn put(&mut self, data: &[u8]) -> usize {
+        let n = data.len().min(self.buf.len() - self.pos);
+        // Compiles to a memcpy. `write_copy_of_slice` needs Rust 1.93.
+        for (dst, &src) in self.buf[self.pos..self.pos + n].iter_mut().zip(data) {
+            dst.write(src);
+        }
+        self.pos += n;
+        n
+    }
+}
+
 impl Sink for Vec<u8> {
     fn put(&mut self, data: &[u8]) -> usize {
         self.extend_from_slice(data);
@@ -201,6 +219,26 @@ impl PushDecoder {
     /// `consumed` can be less than `input.len()` then too.
     pub fn decode(&mut self, input: &[u8], output: &mut [u8]) -> Result<Progress, DecompressError> {
         let mut sink = SliceSink {
+            buf: output,
+            pos: 0,
+        };
+        let (consumed, status) = self.run(input, &mut sink, true)?;
+        Ok(Progress {
+            consumed,
+            produced: sink.pos,
+            status,
+        })
+    }
+
+    /// Like [`decode`](Self::decode), but `output` may be uninitialized,
+    /// so callers need not zero their buffers. The first `produced` bytes
+    /// of `output` are initialized on return.
+    pub fn decode_uninit(
+        &mut self,
+        input: &[u8],
+        output: &mut [MaybeUninit<u8>],
+    ) -> Result<Progress, DecompressError> {
+        let mut sink = UninitSink {
             buf: output,
             pos: 0,
         };
