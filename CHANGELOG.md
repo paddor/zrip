@@ -39,6 +39,11 @@
   wrong count, so frames could decode to other data.
 - Long distance matching with 256-entry buckets (`bucket_size_log` 8),
   which C zstd allows, kept one entry per bucket.
+- Trained dictionaries keep their best segment whole: a dictionary over its
+  size cut the end of the best segment instead of the start of the last
+  pick, as C zstd does. Their IDs come from C zstd's formula and stay out
+  of the ranges RFC 8878 reserves, and a top repeat offset equal to a
+  default no longer drops it.
 
 ### Fixed
 

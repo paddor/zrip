@@ -127,24 +127,26 @@ pub fn select_segments(samples: &[&[u8]], dict_size: usize, params: &FastCoverPa
         collected += k;
     }
 
-    // Last pick first, so the best segment ends nearest the data, as in
-    // C zstd.
-    let mut content = Vec::with_capacity(content_budget);
-    for &(pos, _) in best_segments.iter().rev() {
-        let end = (pos + k).min(concat.len());
-        content.extend_from_slice(&concat[pos..end]);
-        if content.len() >= content_budget {
+    // As C zstd: fill from the end, best pick first, so the best segment
+    // ends nearest the data, and cut the last pick to the room left.
+    let mut content = vec![0u8; content_budget];
+    let mut tail = content_budget;
+    for &(pos, _) in &best_segments {
+        if tail == 0 {
             break;
         }
+        let end = (pos + k).min(concat.len());
+        let size = (end - pos).min(tail);
+        tail -= size;
+        content[tail..tail + size].copy_from_slice(&concat[pos..pos + size]);
     }
-    content.truncate(content_budget);
-
-    if content.len() < content_budget {
-        let pad_start = concat.len().saturating_sub(content_budget - content.len());
-        content.extend_from_slice(&concat[pad_start..]);
-        content.truncate(content_budget);
+    if tail > 0 {
+        // Too few segments: the samples' last bytes fill the front.
+        let pad = tail.min(concat.len());
+        content.drain(..tail - pad);
+        let pad_from = concat.len() - pad;
+        content[..pad].copy_from_slice(&concat[pad_from..]);
     }
-
     content
 }
 

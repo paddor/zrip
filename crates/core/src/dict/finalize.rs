@@ -18,7 +18,7 @@ pub fn finalize_dictionary(content: &[u8], samples: &[&[u8]], dict_size: usize) 
     let content_len = content.len().min(dict_size.saturating_sub(256));
 
     let rep_offsets = compute_rep_offsets(content, samples);
-    let dict_id = compute_dict_id(content, samples);
+    let dict_id = compute_dict_id(content);
 
     let mut dict = Vec::with_capacity(dict_size);
 
@@ -177,39 +177,30 @@ fn compute_rep_offsets(content: &[u8], samples: &[&[u8]]) -> [u32; 3] {
 
     offset_scores.sort_unstable_by_key(|e| core::cmp::Reverse(e.1));
 
-    let mut rep = [1u32, 4, 8];
+    // The three best offsets, then the defaults they leave out.
+    let mut rep = [0u32; 3];
     let mut found = 0usize;
-    for &(offset, _) in &offset_scores {
-        if offset != rep[0] && offset != rep[1] && offset != rep[2] {
+    for offset in offset_scores
+        .iter()
+        .map(|&(offset, _)| offset)
+        .chain([1, 4, 8])
+    {
+        if found == 3 {
+            break;
+        }
+        if !rep[..found].contains(&offset) {
             rep[found] = offset;
             found += 1;
-            if found == 3 {
-                break;
-            }
         }
     }
-
     rep
 }
 
-/// FNV-1a over `content` and the first 10 samples, never 0. C zstd keeps
-/// IDs in `32768..2^31`; this one can be any nonzero value.
-fn compute_dict_id(content: &[u8], samples: &[&[u8]]) -> u32 {
-    let mut h = 0x811c_9dc5_u32;
-    for &b in content {
-        h ^= b as u32;
-        h = h.wrapping_mul(0x0100_0193);
-    }
-    for &sample in samples.iter().take(10) {
-        for &b in sample {
-            h ^= b as u32;
-            h = h.wrapping_mul(0x0100_0193);
-        }
-    }
-    if h == 0 {
-        h = 1;
-    }
-    h
+/// As C zstd (`ZDICT_finalizeDictionary`): XXH64 of `content`, mapped into
+/// `32768..2^31`. RFC 8878 reserves the IDs below and above.
+fn compute_dict_id(content: &[u8]) -> u32 {
+    let id = crate::xxhash::xxh64(content, 0) % ((1 << 31) - 32768) + 32768;
+    id as u32
 }
 
 #[cfg(test)]

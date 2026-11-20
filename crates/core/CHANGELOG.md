@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- `fastcover::select_segments` fills the dictionary from the end, best
+  segment first, and cuts the last pick to fit, as C zstd's
+  `COVER_buildDictionary`; it cut the best segment's end.
+- `finalize_dictionary` takes the dictionary ID as C zstd's
+  `ZDICT_finalizeDictionary` does: XXH64 of the content, mapped into
+  `32768..2^31`. The repeat offsets are the three best distinct offsets,
+  then the defaults they leave out.
+
 - Huffman decode tables take 12 bits (`huffman::MAX_TABLE_LOG`), as C
   zstd's decoder does; `FAST_TABLE_LOG` (11) bounds the fast loops, and
   `MAX_BITS` (11) the encoder. Weights need at least two symbols of weight
