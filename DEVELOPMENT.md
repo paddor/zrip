@@ -96,10 +96,8 @@ Environment name: npm
 Allowed action: npm publish
 ```
 
-If the package does not exist yet, trusted publishing may need a bootstrap
-publish first. Add a publish-capable GitHub Actions secret named `NPM_TOKEN`,
-run `.github/workflows/release-npm.yml`, then remove or rotate that token and
-configure the trusted publisher before the next CI release.
+The workflow passes no npm token, so a broken trusted publisher fails the
+publish instead of falling back to a token.
 
 ```sh
 git tag -a zrip-npm-v0.5.8 -m "zrip npm 0.5.8"
