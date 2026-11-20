@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.22] - 2026-11-20
+
 ### Added
 
 - `MIN_LEVEL` and `MAX_LEVEL` name the lowest and highest compression
