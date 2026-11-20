@@ -136,6 +136,10 @@ name = "zrip_spec_conformance"
 path = "tests/spec_conformance.rs"
 
 [[test]]
+name = "zrip_zstd_golden"
+path = "tests/zstd_golden.rs"
+
+[[test]]
 name = "zrip_streaming"
 path = "tests/streaming.rs"
 

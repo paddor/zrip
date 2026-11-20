@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- A compressed block without a sequence count, or with bytes after a zero
+  count, fails with `CorruptSequences`, and a block over
+  `Block_Maximum_Size` (the window, at most 128 KiB, compressed size
+  included) with `BlockTooLarge`, as in C zstd.
+- `FrameState` counts output in `u64`, so 32-bit targets decode past 4 GiB.
+
 ## [0.8.15] - 2026-11-19
 
 - Decoders keep a dictionary's Huffman and sequence tables over frames that

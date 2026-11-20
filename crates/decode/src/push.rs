@@ -369,7 +369,7 @@ impl PushDecoder {
                     self.stage.clear();
                     h
                 };
-                FrameState::check_block_header(header)?;
+                self.frame.check_block_header(header)?;
                 let size = header.block_size as usize;
                 let last = header.last_block;
                 self.frame.start_block();

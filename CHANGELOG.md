@@ -21,6 +21,15 @@
   smaller. 1 KiB frames decode 1.4x faster and 64-byte frames 8% slower,
   since their literals are now Huffman-coded.
 
+### Fixed
+
+- The decoder rejects three kinds of block that C zstd rejects and it
+  accepted: a compressed block without a sequence count, bytes after a zero
+  sequence count (zstd's `zeroSeq_extraneous.zst` test file), and a block
+  larger than the window.
+- The streaming and push decoders count output in 64 bits, so on 32-bit
+  targets they decode streams and frames past 4 GiB.
+
 ## [0.8.21] - 2026-11-20
 
 ### Changed

@@ -195,7 +195,9 @@ impl<R: Read> FrameDecoder<R> {
         let mut hdr = [0u8; BLOCK_HEADER_SIZE];
         self.inner.read_exact(&mut hdr)?;
         let block_header = parse_block_header(&hdr).map_err(invalid)?;
-        FrameState::check_block_header(block_header).map_err(invalid)?;
+        self.frame
+            .check_block_header(block_header)
+            .map_err(invalid)?;
 
         self.state = State::BlockData {
             block_type: block_header.block_type,

@@ -1,6 +1,14 @@
 // Property-based tests.
 #![cfg(feature = "std")]
 
+/// C zstd's highest level. Its ultra levels, in tests running in parallel,
+/// run out of a 32-bit address space.
+const C_MAX_LEVEL: i32 = if cfg!(target_pointer_width = "32") {
+    19
+} else {
+    22
+};
+
 mod proptest_roundtrip {
     use proptest::prelude::*;
 
@@ -77,7 +85,7 @@ mod proptest_c_interop {
         #[test]
         fn decompress_c_random_levels(
             data in proptest::collection::vec(any::<u8>(), 100..10_000),
-            level in 1..=22i32,
+            level in 1..=super::C_MAX_LEVEL,
         ) {
             let compressed = zstd::encode_all(&data[..], level).unwrap();
             let decompressed = zrip::decompress(&compressed).unwrap();
@@ -237,7 +245,7 @@ mod proptest_structured {
         #[test]
         fn decompress_c_structured(
             data in structured_data(),
-            level in 1..=22i32,
+            level in 1..=super::C_MAX_LEVEL,
         ) {
             let compressed = zstd::encode_all(&data[..], level).unwrap();
             let decompressed = zrip::decompress(&compressed).unwrap();
