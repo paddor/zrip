@@ -16,6 +16,13 @@
   than before and compresses 3% to 4% worse on all but the least
   compressible files.
 
+### Fixed
+
+- Level -7 with a dictionary could write frames that no decoder accepts.
+  After a block with the predefined sequence tables, a later block of
+  almost only literals could still reuse the dictionary's tables. Affects
+  0.8.18 to 0.8.22.
+
 ## [0.8.22] - 2026-11-20
 
 ### Added

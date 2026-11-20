@@ -1262,6 +1262,82 @@ fn c_zstd_decodes_zrip_dict_frames_at_every_level() {
     }
 }
 
+/// L-7 writes a dense block with the predefined sequence tables. A later
+/// literal-heavy block, which takes the regular block encoder, must not
+/// repeat the dictionary's tables after that.
+#[test]
+fn l7_dict_literal_heavy_block_after_predefined_block() {
+    use std::io::Write;
+    fn words(seed: u32, len: usize) -> Vec<u8> {
+        const WORDS: [&[u8]; 8] = [
+            b"alpha ",
+            b"beta ",
+            b"gamma ",
+            b"delta ",
+            b"epsilon ",
+            b"zeta ",
+            b"theta ",
+            b"kappa ",
+        ];
+        let mut state = seed;
+        let mut out = Vec::with_capacity(len + 8);
+        while out.len() < len {
+            state = state.wrapping_mul(KNUTH).wrapping_add(1);
+            out.extend_from_slice(WORDS[(state >> 29) as usize]);
+        }
+        out.truncate(len);
+        out
+    }
+    // A C-trained dictionary has FSE tables of its own, unlike zrip's.
+    let samples: Vec<Vec<u8>> = (0..400).map(|i| words(i, 600)).collect();
+    let dict_data = zstd::dict::from_samples(&samples, 16 * 1024).unwrap();
+    let dict = zrip::dict::Dictionary::from_bytes(&dict_data).unwrap();
+    let c_dict = zstd::dict::DecoderDictionary::copy(&dict_data);
+
+    let mut input = words(7, BLOCK);
+    // Skewed letters with a few repeats: few matches and Huffman literals.
+    let phrase = words(99, 200);
+    let mut state = 1u32;
+    let mut next_phrase = BLOCK + 4000;
+    while input.len() < 2 * BLOCK {
+        if input.len() >= next_phrase {
+            input.extend_from_slice(&phrase);
+            next_phrase = input.len() + 4000;
+        }
+        state = state.wrapping_mul(KNUTH).wrapping_add(1);
+        input.push(
+            b"aaaaaaaabbbbbbccccddddeeeeeeeeeeffgghhhiiiijkllmmnnooooppqrrsstu"
+                [(state >> 26) as usize],
+        );
+    }
+    input.truncate(2 * BLOCK);
+    input.extend(words(11, BLOCK / 2));
+
+    let one_shot = zrip::compress_with_dict(&input, -7, &dict).unwrap();
+    let mut ctx = zrip::CompressContext::with_dict(-7, dict.clone()).unwrap();
+    let context = ctx.compress(&input).unwrap().into_owned();
+    let mut encoder = zrip::FrameEncoder::with_dict(Vec::new(), -7, dict.clone()).unwrap();
+    encoder.write_all(&input).unwrap();
+    let streamed = encoder.finish().unwrap();
+
+    for (name, frame) in [
+        ("one-shot", one_shot),
+        ("context", context),
+        ("stream", streamed),
+    ] {
+        let out = zrip::decompress_with_dict(&frame, &dict);
+        assert!(
+            out.as_deref() == Ok(&input[..]),
+            "{name}: zrip: {:?}",
+            out.err()
+        );
+        let mut c_dec = zstd::Decoder::with_prepared_dictionary(frame.as_slice(), &c_dict).unwrap();
+        let mut out = Vec::new();
+        let res = std::io::Read::read_to_end(&mut c_dec, &mut out);
+        assert!(res.is_ok() && out == input, "{name}: C: {:?}", res.err());
+    }
+}
+
 fn make_dict_samples() -> (Vec<Vec<u8>>, Vec<u8>) {
     let samples: Vec<Vec<u8>> = (0..100)
         .map(|i| {
