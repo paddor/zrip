@@ -228,6 +228,22 @@ fn second4(v: u64) -> u32 {
     }
 }
 
+/// A DFast probe that matched at `ip`.
+enum Hit {
+    /// Rep 0 at `ip + 1`; holds the rep's position.
+    Rep(usize),
+    /// A long match at `m`. `hl1` is the long hash at `ip1`.
+    Long { m: usize, hl1: usize },
+    /// A short match at `m`, with the eight bytes `v1` at `ip1`, their long
+    /// hash `hl1`, and the long table's entry `idxl1` there.
+    Short {
+        m: usize,
+        v1: u64,
+        hl1: usize,
+        idxl1: usize,
+    },
+}
+
 /// DFast match finder, after C zstd's `ZSTD_compressBlock_doubleFast`.
 ///
 /// Each position probes the long table (8-byte hash) and the short table
@@ -308,8 +324,11 @@ fn compress_dfast_block_impl<
         let mut hl0 = h8(v0, hash_log);
         let mut idxl0 = hash_load!(hash_long, hl0) as usize;
 
-        loop {
-            let curr = ip;
+        // Probe one position per pass until something matches, and handle
+        // the match after the loop, as C zstd does. No closures here: built
+        // without `target-cpu=native`, LLVM kept an `or_else` closure out of
+        // the AVX2 body, and every probe stored its captures to the stack.
+        let hit = loop {
             let hs0 = short_hash(v0, MLS, short_log);
             let idxs0 = hash_load!(hash_short, hs0) as usize;
             hash_store!(hash_long, hl0, ip as u32);
@@ -319,6 +338,63 @@ fn compress_dfast_block_impl<
             // first test and reads a clamped position.
             let rep_pos = (ip + 1).wrapping_sub(rep0);
             if (ip + 1 >= rep0) & (rd32!(src, rep_pos.min(ilimit)) == second4(v0)) {
+                break Hit::Rep(rep_pos);
+            }
+
+            let v1 = rd64_upto!(src, ip1, ilimit);
+            let hl1 = h8(v1, hash_log);
+
+            // Long match at ip.
+            if in_input(idxl0) & (rd64!(src, idxl0.min(ilimit)) == v0) {
+                break Hit::Long { m: idxl0, hl1 };
+            }
+            if DICT {
+                let d = dict_long(v0);
+                if in_dict(d) && rd64!(src, d) == v0 {
+                    break Hit::Long { m: d, hl1 };
+                }
+            }
+
+            let idxl1 = hash_load!(hash_long, hl1) as usize;
+
+            // Short match at ip.
+            if in_input(idxs0) & (rd32!(src, idxs0.min(ilimit)) == first4(v0)) {
+                break Hit::Short {
+                    m: idxs0,
+                    v1,
+                    hl1,
+                    idxl1,
+                };
+            }
+            if DICT {
+                let d = dict_short(v0);
+                if in_dict(d) && rd32!(src, d) == first4(v0) {
+                    break Hit::Short {
+                        m: d,
+                        v1,
+                        hl1,
+                        idxl1,
+                    };
+                }
+            }
+
+            if unlikely(ip1 >= next_step) {
+                step += 1;
+                next_step += step_incr;
+            }
+            ip = ip1;
+            ip1 += step;
+            hl0 = hl1;
+            idxl0 = idxl1;
+            v0 = v1;
+            if ip1 > ilimit {
+                break 'outer;
+            }
+        };
+
+        let curr = ip;
+        let (mip, m, ml, hl1) = match hit {
+            Hit::Rep(rep_pos) => {
                 let ml = count_match!(src, ip + 5, rep_pos + 4, block_end) + 4;
                 ip += 1;
                 sequences.push(Sequence {
@@ -346,34 +422,10 @@ fn compress_dfast_block_impl<
                 );
                 continue 'outer;
             }
-
-            let v1 = rd64_upto!(src, ip1, ilimit);
-            let hl1 = h8(v1, hash_log);
-
-            // Long match at ip.
-            let long0 = if in_input(idxl0) & (rd64!(src, idxl0.min(ilimit)) == v0) {
-                Some(idxl0)
-            } else if DICT {
-                let d = dict_long(v0);
-                (in_dict(d) && rd64!(src, d) == v0).then_some(d)
-            } else {
-                None
-            };
-            let found = long0.map(|m| (ip, m, count_match!(src, ip + 8, m + 8, block_end) + 8));
-
-            let idxl1 = hash_load!(hash_long, hl1) as usize;
-
-            // Short match at ip, then a long match at ip1 if it is longer.
-            let found = found.or_else(|| {
-                let short0 = if in_input(idxs0) & (rd32!(src, idxs0.min(ilimit)) == first4(v0)) {
-                    Some(idxs0)
-                } else if DICT {
-                    let d = dict_short(v0);
-                    (in_dict(d) && rd32!(src, d) == first4(v0)).then_some(d)
-                } else {
-                    None
-                }?;
-                let ml = count_match!(src, ip + 4, short0 + 4, block_end) + 4;
+            Hit::Long { m, hl1 } => (ip, m, count_match!(src, ip + 8, m + 8, block_end) + 8, hl1),
+            Hit::Short { m, v1, hl1, idxl1 } => {
+                let ml = count_match!(src, ip + 4, m + 4, block_end) + 4;
+                // A long match at ip1 replaces the short one if it is longer.
                 let long1 = if in_input(idxl1) & (rd64!(src, idxl1.min(ilimit)) == v1) {
                     Some(idxl1)
                 } else if DICT {
@@ -382,66 +434,54 @@ fn compress_dfast_block_impl<
                 } else {
                     None
                 };
-                if let Some(m1) = long1 {
-                    let l1 = count_match!(src, ip1 + 8, m1 + 8, block_end) + 8;
-                    if l1 > ml {
-                        return Some((ip1, m1, l1));
+                match long1 {
+                    Some(m1) => {
+                        let l1 = count_match!(src, ip1 + 8, m1 + 8, block_end) + 8;
+                        if l1 > ml {
+                            (ip1, m1, l1, hl1)
+                        } else {
+                            (ip, m, ml, hl1)
+                        }
                     }
+                    None => (ip, m, ml, hl1),
                 }
-                Some((ip, short0, ml))
-            });
+            }
+        };
 
-            if let Some((mip, m, ml)) = found {
-                debug_assert!(m < mip, "table entry ahead of the search");
-                let back = crate::fast::count_back(src, mip, m, (mip - anchor).min(m - low));
-                let match_start = mip - back;
-                let offset = mip - m;
-                rep1 = rep0;
-                rep0 = offset;
-                // Safe while ip1 stays inside the match, which a short
-                // match of four bytes guarantees for steps below four.
-                if step < 4 {
-                    hash_store!(hash_long, hl1, ip1 as u32);
-                }
-                sequences.push(Sequence {
-                    literal_length: (match_start - anchor) as u32,
-                    offset: offset as u32,
-                    match_length: (ml + back) as u32,
-                });
-                ip = mip + ml;
-                anchor = ip;
-                after_match(
-                    src,
-                    curr,
-                    &mut ip,
-                    &mut anchor,
-                    ilimit,
-                    block_end,
-                    &mut rep0,
-                    &mut rep1,
-                    hash_short,
-                    hash_long,
-                    hash_log,
-                    short_log,
-                    sequences,
-                    MLS,
-                );
-                continue 'outer;
-            }
-
-            if unlikely(ip1 >= next_step) {
-                step += 1;
-                next_step += step_incr;
-            }
-            ip = ip1;
-            ip1 += step;
-            hl0 = hl1;
-            idxl0 = idxl1;
-            v0 = v1;
-            if ip1 > ilimit {
-                break 'outer;
-            }
+        debug_assert!(m < mip, "table entry ahead of the search");
+        let back = crate::fast::count_back(src, mip, m, (mip - anchor).min(m - low));
+        let match_start = mip - back;
+        let offset = mip - m;
+        rep1 = rep0;
+        rep0 = offset;
+        // Safe while ip1 stays inside the match, which a short match of four
+        // bytes guarantees for steps below four.
+        if step < 4 {
+            hash_store!(hash_long, hl1, ip1 as u32);
         }
+        sequences.push(Sequence {
+            literal_length: (match_start - anchor) as u32,
+            offset: offset as u32,
+            match_length: (ml + back) as u32,
+        });
+        ip = mip + ml;
+        anchor = ip;
+        after_match(
+            src,
+            curr,
+            &mut ip,
+            &mut anchor,
+            ilimit,
+            block_end,
+            &mut rep0,
+            &mut rep1,
+            hash_short,
+            hash_long,
+            hash_log,
+            short_log,
+            sequences,
+            MLS,
+        );
     }
 }
 

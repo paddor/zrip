@@ -2560,7 +2560,7 @@ const SWEEP_SIZE_LABELS: &[&str] = &[
     "64", "128", "256", "512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K",
     "1M",
 ];
-const SWEEP_CODECS: &[&str] = &["C zstd", "zrip", "structured-zstd", "rusty_zstd"];
+const SWEEP_CODECS: &[&str] = &["C zstd", "zrip", "structured-zstd", "mzstd", "rusty_zstd"];
 /// The chart file for each sweep level.
 const SWEEP_CHARTS: &[(i32, &str)] = &[(1, "sweep.svg"), (3, "sweep_l3.svg")];
 

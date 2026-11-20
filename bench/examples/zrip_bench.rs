@@ -477,6 +477,44 @@ fn bench_mzstd(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> Benc
     )
 }
 
+/// mzstd with one reused compressor and decoder and `dict_bytes` prepared
+/// for the level, as C zstd loads a dictionary into its context.
+fn bench_mzstd_dict(
+    slices: &[&[u8]],
+    name: &str,
+    level: i32,
+    target_ns: u64,
+    dict_bytes: &[u8],
+) -> BenchResult {
+    use mzstd::dictionary::{DecodeDictionary, DictionaryBuilder};
+    let config = mzstd::EncoderConfig::default().with_level(mzstd::Level::try_from(level).unwrap());
+    let dict = DictionaryBuilder::new(dict_bytes)
+        .with_config(config)
+        .build()
+        .unwrap();
+    let decode_dict = DecodeDictionary::try_from(dict_bytes).unwrap();
+    let mut compressor = mzstd::Compressor::new(config).unwrap();
+    let mut decompressor = mzstd::Decompressor::default();
+    let mut buf = Vec::new();
+    bench_slices(
+        "mzstd+dict",
+        slices,
+        name,
+        level,
+        target_ns,
+        |s| compressor.compress_with_dictionary(&dict, s).unwrap(),
+        |f, len| {
+            buf.clear();
+            buf.reserve(len + 1024);
+            std::hint::black_box(
+                decompressor
+                    .decompress_with_dictionary_into(&decode_dict, f, &mut buf)
+                    .unwrap(),
+            );
+        },
+    )
+}
+
 fn bench_c_zstd(slices: &[&[u8]], name: &str, level: i32, target_ns: u64) -> BenchResult {
     let mut compressor = zstd::bulk::Compressor::new(level).unwrap();
     let mut decompressor = zstd::bulk::Decompressor::new().unwrap();
@@ -566,6 +604,7 @@ fn bench_codec(
         "zrip+dict" => bench_zrip_dict(slices, name, level, target_ns, dict?),
         "C zstd+dict" => bench_c_zstd_dict(slices, name, level, target_ns, dict?),
         "rusty_zstd+dict" => bench_rusty_zstd_dict(slices, name, level, target_ns, dict?),
+        "mzstd+dict" => bench_mzstd_dict(slices, name, level, target_ns, dict?),
         _ => unreachable!("unknown codec {codec}"),
     })
 }
@@ -1236,6 +1275,8 @@ const SWEEP_CODECS: &[&str] = &[
     "rusty_zstd+dict",
     "structured-zstd",
     "structured-zstd+dict",
+    "mzstd",
+    "mzstd+dict",
 ];
 
 fn levels_for_codec<'a>(codec: &str, level_filter: &'a [i32]) -> &'a [i32] {
@@ -1244,7 +1285,7 @@ fn levels_for_codec<'a>(codec: &str, level_filter: &'a [i32]) -> &'a [i32] {
         _ if !level_filter.is_empty() => level_filter,
         "zrip" | "zrip+dict" => ZRIP_LEVELS,
         "C zstd" | "C zstd+dict" | "structured-zstd" | "mzstd" | "rusty_zstd"
-        | "rusty_zstd+dict" => C_ZSTD_LEVELS,
+        | "rusty_zstd+dict" | "mzstd+dict" => C_ZSTD_LEVELS,
         _ => &[1],
     }
 }
@@ -1266,6 +1307,7 @@ fn display_codec(codec: &str) -> &str {
         "zrip+dict" => "zrip+d",
         "rusty_zstd" => "rusty",
         "rusty_zstd+dict" => "rusty+d",
+        "mzstd+dict" => "mzstd+d",
         other => other,
     }
 }
