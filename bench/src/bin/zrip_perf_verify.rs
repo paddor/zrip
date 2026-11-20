@@ -1,16 +1,17 @@
 //! Local performance gate for zrip's encode and decode paths.
 //!
 //! Floors come from `.perf_hw` in the repository root, which is ignored:
-//! each machine keeps its own. Without it, loose smoke floors apply. See
-//! "Performance gate" in `DEVELOPMENT.md`.
+//! each machine keeps its own, per build. Without it, loose smoke floors
+//! apply. See "Performance gate" in `DEVELOPMENT.md`.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::io::Write as _;
-use std::path::PathBuf;
+use std::io::{Read as _, Write as _};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
-use zrip::push::{EndOp, PushEncoder};
-use zrip::{CompressContext, DecompressContext, Dictionary, FrameEncoder};
+use zrip::push::{EndOp, PushDecoder, PushEncoder};
+use zrip::{CompressContext, DecompressContext, Dictionary, FrameDecoder, FrameEncoder};
 
 const KIB: usize = 1024;
 const MIB: usize = 1024 * KIB;
@@ -19,16 +20,77 @@ const MIB: usize = 1024 * KIB;
 const CASE_BYTES: usize = MIB;
 const MAX_INPUTS: usize = 256;
 
+/// The lowest share of the median a suggested floor keeps, however widely
+/// a case's runs spread.
+const MIN_KEEP: f64 = 0.85;
+
 /// One timed batch runs at least this long, so reading the clock costs well
 /// under 1% of it.
 const MIN_BATCH_NS: u64 = 100_000;
+
+/// A way to build the gate. Builds differ in code generation, so each keeps
+/// its own floors.
+struct Build {
+    name: &'static str,
+    about: &'static str,
+    /// `CARGO_ENCODED_RUSTFLAGS`, or `None` for the repository's config.
+    rustflags: Option<&'static str>,
+    lto: bool,
+    features: &'static str,
+}
+
+const BUILDS: &[Build] = &[
+    Build {
+        name: "native",
+        about: "the repository's `.cargo/config.toml`: `target-cpu=native`",
+        rustflags: None,
+        lto: false,
+        features: "",
+    },
+    Build {
+        name: "portable",
+        about: "no rustflags, as dependent crates build: runtime SIMD dispatch",
+        rustflags: Some(""),
+        lto: false,
+        features: "",
+    },
+    Build {
+        name: "portable-lto",
+        about: "portable with fat LTO and one codegen unit",
+        rustflags: Some(""),
+        lto: true,
+        features: "",
+    },
+    Build {
+        name: "paranoid",
+        about: "native with the `paranoid` feature: no unsafe primitives",
+        rustflags: None,
+        lto: false,
+        features: "paranoid",
+    },
+];
+
+/// The build this binary is, as `--builds` names it at compile time. A
+/// plain `cargo run` from the repository root builds `native`.
+fn build_name() -> &'static str {
+    option_env!("ZRIP_PERF_BUILD").unwrap_or(if cfg!(feature = "paranoid") {
+        "paranoid"
+    } else if cfg!(target_feature = "avx2") {
+        "native"
+    } else {
+        "portable"
+    })
+}
 
 #[derive(Clone, Copy)]
 enum Data {
     /// JSON log lines.
     Text,
-    /// Little-endian metric records.
+    /// Little-endian sensor records: timestamp, id, `f32` value, flags.
     Binary,
+    /// Training metric points: key, noisy `f64` value, step, timestamp.
+    /// Few long matches and many short ones.
+    Points,
     /// Slices spread over every Silesia file, when the corpus is present.
     Silesia,
 }
@@ -37,12 +99,18 @@ enum Data {
 enum Op {
     /// `zrip::compress`, one call per input.
     Compress,
+    /// A new `CompressContext` per input.
+    Fresh,
     /// One reused `CompressContext`.
     Context,
+    /// One reused `CompressContext`, `compress_into` a reused buffer.
+    Into,
     /// One reused `PushEncoder`, a frame per input.
     PushFrames,
     /// One `PushEncoder` frame per input, fed 16 KiB at a time.
     PushStream,
+    /// One `PushEncoder` frame per pass, each input a flushed message.
+    PushFlush,
     /// `FrameEncoder` into a `Vec`, fed 64 KiB at a time.
     Stream,
     /// One reused `CompressContext::with_dict`.
@@ -51,6 +119,12 @@ enum Op {
     Decompress,
     /// One reused `DecompressContext`.
     DecompressContext,
+    /// One reused `DecompressContext`, `decompress_into` a reused `Vec`.
+    DecompressInto,
+    /// `FrameDecoder` reading each frame to the end.
+    DecodeStream,
+    /// One reused `PushDecoder`, fed 16 KiB at a time.
+    DecodePush,
     /// One reused `DecompressContext::with_dict`.
     DecompressDict,
 }
@@ -59,7 +133,12 @@ impl Op {
     const fn encodes(self) -> bool {
         !matches!(
             self,
-            Op::Decompress | Op::DecompressContext | Op::DecompressDict
+            Op::Decompress
+                | Op::DecompressContext
+                | Op::DecompressInto
+                | Op::DecodeStream
+                | Op::DecodePush
+                | Op::DecompressDict
         )
     }
 }
@@ -92,20 +171,39 @@ const fn case(
 }
 
 /// Every case, named `section.key`. The shapes follow how zrip is used:
-/// one-shot calls per message, contexts reused across messages, push
-/// streams, large streams, and small dictionary frames.
+/// one-shot calls per message, contexts reused across messages or created
+/// per message, push streams with and without flushes, large streams, small
+/// dictionary frames, and the matching decoders. Sizes run from 64 B
+/// messages to 4 MiB streams.
+#[rustfmt::skip]
 fn cases() -> Vec<Case> {
-    use Data::{Binary, Silesia, Text};
+    use Data::{Binary, Points, Silesia, Text};
     use Op::*;
     vec![
+        case("compress_l1", "64b", Compress, 1, Text, 64),
+        case("compress_l1", "256b", Compress, 1, Text, 256),
         case("compress_l1", "1k", Compress, 1, Text, KIB),
+        case("compress_l1", "4k", Compress, 1, Text, 4 * KIB),
         case("compress_l1", "16k", Compress, 1, Text, 16 * KIB),
         case("compress_l1", "256k", Compress, 1, Text, 256 * KIB),
+        case("compress_l1", "1m", Compress, 1, Text, MIB),
+        case("compress_l3", "64b", Compress, 3, Text, 64),
+        case("compress_l3", "256b", Compress, 3, Text, 256),
         case("compress_l3", "1k", Compress, 3, Text, KIB),
+        case("compress_l3", "4k", Compress, 3, Text, 4 * KIB),
         case("compress_l3", "16k", Compress, 3, Text, 16 * KIB),
         case("compress_l3", "256k", Compress, 3, Text, 256 * KIB),
-        case("compress_l-3", "16k", Compress, -3, Text, 16 * KIB),
-        case("compress_l-3", "256k", Compress, -3, Text, 256 * KIB),
+        case("compress_l3", "1m", Compress, 3, Text, MIB),
+        case("levels_64k", "l-7", Compress, -7, Text, 64 * KIB),
+        case("levels_64k", "l-5", Compress, -5, Text, 64 * KIB),
+        case("levels_64k", "l-3", Compress, -3, Text, 64 * KIB),
+        case("levels_64k", "l-1", Compress, -1, Text, 64 * KIB),
+        case("levels_64k", "l2", Compress, 2, Text, 64 * KIB),
+        case("levels_64k", "l4", Compress, 4, Text, 64 * KIB),
+        case("fresh_l1", "1k", Fresh, 1, Text, KIB),
+        case("fresh_l1", "64k", Fresh, 1, Text, 64 * KIB),
+        case("fresh_l3", "1k", Fresh, 3, Text, KIB),
+        case("fresh_l3", "64k", Fresh, 3, Text, 64 * KIB),
         case("context_l1", "2k", Context, 1, Text, 2 * KIB),
         case("context_l1", "64k", Context, 1, Text, 64 * KIB),
         case("context_l1", "64k_bin", Context, 1, Binary, 64 * KIB),
@@ -113,20 +211,44 @@ fn cases() -> Vec<Case> {
         case("context_l3", "2k", Context, 3, Text, 2 * KIB),
         case("context_l3", "16k", Context, 3, Text, 16 * KIB),
         case("context_l3", "256k", Context, 3, Text, 256 * KIB),
+        case("context_l3", "4m", Context, 3, Text, 4 * MIB),
         case("context_l3", "16k_bin", Context, 3, Binary, 16 * KIB),
+        case("into_l3", "16k", Into, 3, Text, 16 * KIB),
+        case("points_l1", "16k", Context, 1, Points, 16 * KIB),
+        case("points_l1", "256k", Context, 1, Points, 256 * KIB),
+        case("points_l3", "2k", Context, 3, Points, 2 * KIB),
+        case("points_l3", "16k", Context, 3, Points, 16 * KIB),
+        case("points_l3", "256k", Context, 3, Points, 256 * KIB),
+        case("points_l4", "64k", Context, 4, Points, 64 * KIB),
+        case("push_l1", "256b_flush", PushFlush, 1, Text, 256),
+        case("push_l3", "256b_flush", PushFlush, 3, Text, 256),
         case("push_l3", "4k_frames", PushFrames, 3, Text, 4 * KIB),
         case("push_l3", "1m", PushStream, 3, Text, MIB),
         case("stream_l1", "4m", Stream, 1, Text, 4 * MIB),
-        case("dict_l3", "64b", DictContext, 3, Text, 64),
-        case("dict_l3", "1k", DictContext, 3, Text, KIB),
+        case("stream_l3", "4m", Stream, 3, Text, 4 * MIB),
+        case("dict_l1", "64b", DictContext, 1, Text, 64),
         case("dict_l1", "1k", DictContext, 1, Text, KIB),
+        case("dict_l3", "64b", DictContext, 3, Text, 64),
+        case("dict_l3", "256b", DictContext, 3, Text, 256),
+        case("dict_l3", "1k", DictContext, 3, Text, KIB),
+        case("dict_l3", "4k", DictContext, 3, Text, 4 * KIB),
         case("decompress", "1k", Decompress, 1, Text, KIB),
         case("decompress", "16k", Decompress, 1, Text, 16 * KIB),
         case("decompress", "256k", Decompress, 1, Text, 256 * KIB),
+        case("decompress", "4m", Decompress, 3, Text, 4 * MIB),
+        case("dcontext", "64b", DecompressContext, 1, Text, 64),
         case("dcontext", "2k", DecompressContext, 3, Text, 2 * KIB),
         case("dcontext", "64k", DecompressContext, 3, Text, 64 * KIB),
+        case("dcontext", "64k_l-5", DecompressContext, -5, Text, 64 * KIB),
+        case("dcontext", "64k_points", DecompressContext, 3, Points, 64 * KIB),
         case("dcontext", "1m_bin", DecompressContext, 1, Binary, MIB),
+        case("dinto", "16k", DecompressInto, 3, Text, 16 * KIB),
+        case("dstream", "4m", DecodeStream, 3, Text, 4 * MIB),
+        case("dpush", "4m", DecodePush, 3, Text, 4 * MIB),
+        case("dict_decode", "64b", DecompressDict, 3, Text, 64),
         case("dict_decode", "1k", DecompressDict, 3, Text, KIB),
+        case("silesia_l-7", "256k_ctx", Context, -7, Silesia, 256 * KIB),
+        case("silesia_l-3", "64k_ctx", Context, -3, Silesia, 64 * KIB),
         case("silesia_l1", "1k", Compress, 1, Silesia, KIB),
         case("silesia_l1", "16k_ctx", Context, 1, Silesia, 16 * KIB),
         case("silesia_l1", "256k_ctx", Context, 1, Silesia, 256 * KIB),
@@ -134,23 +256,10 @@ fn cases() -> Vec<Case> {
         case("silesia_l3", "16k_ctx", Context, 3, Silesia, 16 * KIB),
         case("silesia_l3", "64k", Compress, 3, Silesia, 64 * KIB),
         case("silesia_l3", "256k_ctx", Context, 3, Silesia, 256 * KIB),
-        case("silesia_l-3", "64k_ctx", Context, -3, Silesia, 64 * KIB),
-        case(
-            "silesia_decode",
-            "16k",
-            DecompressContext,
-            3,
-            Silesia,
-            16 * KIB,
-        ),
-        case(
-            "silesia_decode",
-            "256k",
-            DecompressContext,
-            1,
-            Silesia,
-            256 * KIB,
-        ),
+        case("silesia_l3", "1m_ctx", Context, 3, Silesia, MIB),
+        case("silesia_l4", "256k_ctx", Context, 4, Silesia, 256 * KIB),
+        case("silesia_decode", "16k", DecompressContext, 3, Silesia, 16 * KIB),
+        case("silesia_decode", "256k", DecompressContext, 1, Silesia, 256 * KIB),
     ]
 }
 
@@ -161,6 +270,7 @@ const SMOKE: &[(&str, f64)] = &[
     ("compress_l3.16k_mb_s", 30.0),
     ("context_l1.2k_mb_s", 30.0),
     ("context_l3.2k_mb_s", 20.0),
+    ("points_l3.16k_mb_s", 20.0),
     ("dict_l3.64b_mb_s", 5.0),
     ("decompress.16k_mb_s", 100.0),
 ];
@@ -179,6 +289,11 @@ impl Rng {
 
     fn below(&mut self, n: u64) -> u64 {
         self.next() % n
+    }
+
+    /// Uniform in [0, 1).
+    fn unit(&mut self) -> f64 {
+        (self.next() >> 11) as f64 / (1u64 << 53) as f64
     }
 }
 
@@ -237,6 +352,39 @@ fn binary(len: usize, seed: u64) -> Vec<u8> {
     out
 }
 
+/// Six metrics per training step: a decaying loss, rising accuracy, a
+/// learning rate, a gradient norm, throughput and a memory gauge, each with
+/// noise in its low bits, as a metrics client batches them.
+fn points(len: usize, seed: u64) -> Vec<u8> {
+    let mut rng = Rng(seed ^ 0x7068_6f74_6f6e);
+    let mut step = 12_000 + seed * 1_000;
+    let mut ts = 1_731_000_000_000u64 + seed * 7_919;
+    let mut out = Vec::with_capacity(len + 32);
+    let noise = |rng: &mut Rng| rng.unit() + rng.unit() + rng.unit() - 1.5;
+    while out.len() < len {
+        let s = step as f64;
+        let loss = 0.35 + 2.5 / (1.0 + s / 2_000.0);
+        let values = [
+            loss + 0.04 * noise(&mut rng),
+            0.95 - 0.6 / (1.0 + s / 1_500.0) + 0.01 * noise(&mut rng),
+            3e-4 * (s / 2_000.0).min(1.0),
+            0.8 + 0.25 * noise(&mut rng),
+            (48_000.0 + 900.0 * noise(&mut rng)).round(),
+            37.25,
+        ];
+        for (key, value) in values.into_iter().enumerate() {
+            out.extend_from_slice(&(key as u32).to_le_bytes());
+            out.extend_from_slice(&value.to_le_bytes());
+            out.extend_from_slice(&step.to_le_bytes());
+            out.extend_from_slice(&(ts + key as u64 / 3).to_le_bytes());
+        }
+        step += 1;
+        ts += 330 + rng.below(40);
+    }
+    out.truncate(len);
+    out
+}
+
 fn inputs(case: &Case, corpus: &[Vec<u8>]) -> Vec<Vec<u8>> {
     if let Data::Silesia = case.data {
         // The same share of every file, at evenly spaced offsets.
@@ -255,6 +403,7 @@ fn inputs(case: &Case, corpus: &[Vec<u8>]) -> Vec<Vec<u8>> {
         .map(|seed| match case.data {
             Data::Text => text(case.len, seed),
             Data::Binary => binary(case.len, seed),
+            Data::Points => points(case.len, seed),
             Data::Silesia => unreachable!(),
         })
         .collect()
@@ -262,7 +411,7 @@ fn inputs(case: &Case, corpus: &[Vec<u8>]) -> Vec<Vec<u8>> {
 
 /// The Silesia files, from `ZRIP_PERF_CORPUS` or `bench/corpus/silesia`
 /// (see "Corpus benchmarks" in `DEVELOPMENT.md`), or none if absent.
-fn corpus() -> Vec<Vec<u8>> {
+fn corpus_paths() -> Vec<PathBuf> {
     let dir = std::env::var_os("ZRIP_PERF_CORPUS").map_or_else(
         || PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/corpus/silesia")),
         PathBuf::from,
@@ -276,6 +425,10 @@ fn corpus() -> Vec<Vec<u8>> {
         .collect();
     paths.sort();
     paths
+}
+
+fn corpus() -> Vec<Vec<u8>> {
+    corpus_paths()
         .iter()
         .map(|p| std::fs::read(p).unwrap_or_else(|e| panic!("cannot read {}: {e}", p.display())))
         .collect()
@@ -342,9 +495,25 @@ struct Measured {
     ratio: Option<f64>,
 }
 
+/// Each input's frame, from one reused context at the case's level.
+fn frames(case: &Case, inputs: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    let mut enc = CompressContext::new(case.level).unwrap();
+    inputs
+        .iter()
+        .map(|i| enc.compress(i).unwrap().into_owned())
+        .collect()
+}
+
 /// Times one pass over all inputs and returns throughput in MB/s of
 /// uncompressed bytes.
-fn measure(case: &Case, inputs: &[Vec<u8>], dict: &Dictionary, settings: &Settings) -> Measured {
+fn measure(
+    case: &Case,
+    inputs: &[Vec<u8>],
+    dict: Option<&Dictionary>,
+    settings: &Settings,
+) -> Measured {
+    use std::hint::black_box;
+    let dict = || dict.expect("a dictionary case").clone();
     let bytes: usize = inputs.iter().map(Vec::len).sum();
     let level = case.level;
     let mut out_bytes = 0;
@@ -356,31 +525,60 @@ fn measure(case: &Case, inputs: &[Vec<u8>], dict: &Dictionary, settings: &Settin
                 .sum();
             time(settings, || {
                 for i in inputs {
-                    std::hint::black_box(zrip::compress(std::hint::black_box(i), level).unwrap());
+                    black_box(zrip::compress(black_box(i), level).unwrap());
+                }
+            })
+        }
+        Op::Fresh => {
+            out_bytes = inputs
+                .iter()
+                .map(|i| zrip::compress(i, level).unwrap().len())
+                .sum();
+            time(settings, || {
+                for i in inputs {
+                    let mut ctx = CompressContext::new(level).unwrap();
+                    black_box(ctx.compress(black_box(i)).unwrap().len());
                 }
             })
         }
         Op::Context | Op::DictContext => {
             let mut ctx = match case.op {
                 Op::Context => CompressContext::new(level).unwrap(),
-                _ => CompressContext::with_dict(level, dict.clone()).unwrap(),
+                _ => CompressContext::with_dict(level, dict()).unwrap(),
             };
             out_bytes = inputs.iter().map(|i| ctx.compress(i).unwrap().len()).sum();
             time(settings, || {
                 for i in inputs {
-                    std::hint::black_box(ctx.compress(std::hint::black_box(i)).unwrap());
+                    black_box(ctx.compress(black_box(i)).unwrap());
                 }
             })
         }
-        Op::PushFrames | Op::PushStream => {
+        Op::Into => {
+            let mut ctx = CompressContext::new(level).unwrap();
+            let mut buf = vec![0u8; zrip::compress_bound(case.len)];
+            out_bytes = inputs
+                .iter()
+                .map(|i| ctx.compress_into(i, &mut buf).unwrap())
+                .sum();
+            time(settings, || {
+                for i in inputs {
+                    black_box(ctx.compress_into(black_box(i), &mut buf).unwrap());
+                }
+            })
+        }
+        Op::PushFrames | Op::PushStream | Op::PushFlush => {
             let mut enc = PushEncoder::new(level).unwrap();
             let mut out = Vec::new();
             let chunk = match case.op {
-                Op::PushFrames => usize::MAX,
-                _ => 16 * KIB,
+                Op::PushStream => 16 * KIB,
+                _ => usize::MAX,
             };
             let mut run = |out: &mut Vec<u8>| {
                 for i in inputs {
+                    if let Op::PushFlush = case.op {
+                        enc.encode_to_vec(black_box(i), out, EndOp::Flush).unwrap();
+                        continue;
+                    }
                     let mut parts = i.chunks(chunk.min(i.len())).peekable();
                     while let Some(part) = parts.next() {
                         let op = if parts.peek().is_some() {
@@ -388,9 +586,11 @@ fn measure(case: &Case, inputs: &[Vec<u8>], dict: &Dictionary, settings: &Settin
                         } else {
                             EndOp::End
                         };
-                        enc.encode_to_vec(std::hint::black_box(part), out, op)
-                            .unwrap();
+                        enc.encode_to_vec(black_box(part), out, op).unwrap();
                     }
+                }
+                if let Op::PushFlush = case.op {
+                    enc.encode_to_vec(&[], out, EndOp::End).unwrap();
                 }
             };
             run(&mut out);
@@ -398,50 +598,44 @@ fn measure(case: &Case, inputs: &[Vec<u8>], dict: &Dictionary, settings: &Settin
             time(settings, || {
                 out.clear();
                 run(&mut out);
-                std::hint::black_box(&out);
+                black_box(&out);
             })
         }
         Op::Stream => {
             let encode = |i: &[u8]| {
                 let mut enc = FrameEncoder::new(Vec::new(), level).unwrap();
                 for part in i.chunks(64 * KIB) {
-                    enc.write_all(std::hint::black_box(part)).unwrap();
+                    enc.write_all(black_box(part)).unwrap();
                 }
                 enc.finish().unwrap()
             };
             out_bytes = inputs.iter().map(|i| encode(i).len()).sum();
             time(settings, || {
                 for i in inputs {
-                    std::hint::black_box(encode(i));
+                    black_box(encode(i));
                 }
             })
         }
         Op::Decompress => {
-            let frames: Vec<Vec<u8>> = inputs
-                .iter()
-                .map(|i| zrip::compress(i, level).unwrap())
-                .collect();
+            let frames = frames(case, inputs);
             time(settings, || {
                 for f in &frames {
-                    std::hint::black_box(zrip::decompress(std::hint::black_box(f)).unwrap());
+                    black_box(zrip::decompress(black_box(f)).unwrap());
                 }
             })
         }
         Op::DecompressContext | Op::DecompressDict => {
-            let (mut enc, mut dec) = match case.op {
-                Op::DecompressContext => (
-                    CompressContext::new(level).unwrap(),
-                    DecompressContext::new(),
-                ),
-                _ => (
-                    CompressContext::with_dict(level, dict.clone()).unwrap(),
-                    DecompressContext::with_dict(dict.clone()),
-                ),
+            let (frames, mut dec) = match case.op {
+                Op::DecompressContext => (frames(case, inputs), DecompressContext::new()),
+                _ => {
+                    let mut enc = CompressContext::with_dict(level, dict()).unwrap();
+                    let frames = inputs
+                        .iter()
+                        .map(|i| enc.compress(i).unwrap().into_owned())
+                        .collect();
+                    (frames, DecompressContext::with_dict(dict()))
+                }
             };
-            let frames: Vec<Vec<u8>> = inputs
-                .iter()
-                .map(|i| enc.compress(i).unwrap().into_owned())
-                .collect();
             for (f, i) in frames.iter().zip(inputs) {
                 assert_eq!(
                     &*dec.decompress(f).unwrap(),
@@ -452,7 +646,45 @@ fn measure(case: &Case, inputs: &[Vec<u8>], dict: &Dictionary, settings: &Settin
             }
             time(settings, || {
                 for f in &frames {
-                    std::hint::black_box(dec.decompress(std::hint::black_box(f)).unwrap());
+                    black_box(dec.decompress(black_box(f)).unwrap());
+                }
+            })
+        }
+        Op::DecompressInto => {
+            let frames = frames(case, inputs);
+            let mut dec = DecompressContext::new();
+            let mut out = Vec::new();
+            time(settings, || {
+                for f in &frames {
+                    out.clear();
+                    black_box(dec.decompress_into(black_box(f), &mut out).unwrap());
+                }
+            })
+        }
+        Op::DecodeStream => {
+            let frames = frames(case, inputs);
+            let mut out = Vec::new();
+            time(settings, || {
+                for f in &frames {
+                    out.clear();
+                    let mut dec = FrameDecoder::new(black_box(f.as_slice()));
+                    dec.read_to_end(&mut out).unwrap();
+                    black_box(&out);
+                }
+            })
+        }
+        Op::DecodePush => {
+            let frames = frames(case, inputs);
+            let mut dec = PushDecoder::new();
+            let mut out = Vec::new();
+            time(settings, || {
+                for f in &frames {
+                    out.clear();
+                    for part in f.chunks(16 * KIB) {
+                        dec.decode_to_vec(black_box(part), &mut out).unwrap();
+                    }
+                    dec.finish().unwrap();
+                    black_box(&out);
                 }
             })
         }
@@ -463,20 +695,8 @@ fn measure(case: &Case, inputs: &[Vec<u8>], dict: &Dictionary, settings: &Settin
     }
 }
 
-fn measure_median(
-    case: &Case,
-    inputs: &[Vec<u8>],
-    dict: &Dictionary,
-    settings: &Settings,
-) -> Measured {
-    let mut runs: Vec<Measured> = (0..settings.repeat)
-        .map(|_| measure(case, inputs, dict, settings))
-        .collect();
-    runs.sort_by(|a, b| a.mb_s.total_cmp(&b.mb_s));
-    runs.swap_remove(runs.len() / 2)
-}
-
-/// `.perf_hw`: `[section]` headers and `key=value` lines, `#` comments.
+/// `.perf_hw`: `[build.section]` headers and `key=value` lines, `#`
+/// comments. Keys come back as `build.section.key`.
 fn parse_floors(contents: &str) -> BTreeMap<String, f64> {
     let mut section = String::new();
     let mut floors = BTreeMap::new();
@@ -551,54 +771,235 @@ fn env_number(name: &str, default: u64) -> u64 {
 
 struct Options {
     cases: Vec<String>,
+    builds: Vec<&'static Build>,
     measure_only: bool,
     list: bool,
+    /// Measure one case and print the result for the parent.
+    worker: Option<String>,
     suggest: Option<f64>,
     repeat: usize,
+    /// The arguments to hand each build's gate.
+    passthrough: Vec<String>,
 }
 
 fn parse_args() -> Options {
     let mut options = Options {
         cases: Vec::new(),
+        builds: Vec::new(),
         measure_only: false,
         list: false,
+        worker: None,
         suggest: None,
         repeat: 1,
+        passthrough: Vec::new(),
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
+        let mut value = |what: &str| args.next().unwrap_or_else(|| panic!("{arg} needs {what}"));
         match arg.as_str() {
-            "--case" => options
-                .cases
-                .push(args.next().expect("--case needs a name")),
-            "--repeat" => {
-                options.repeat = args
-                    .next()
-                    .and_then(|n| n.parse().ok())
-                    .expect("--repeat needs a count");
-                assert!(options.repeat > 0, "--repeat must be positive");
+            "--builds" => {
+                let names = value("build names, such as native,portable");
+                for name in names.split(',') {
+                    if name == "all" {
+                        options.builds.extend(BUILDS.iter());
+                        continue;
+                    }
+                    let build = BUILDS.iter().find(|b| b.name == name).unwrap_or_else(|| {
+                        panic!(
+                            "unknown build {name}; builds: all, {}",
+                            BUILDS.iter().map(|b| b.name).collect::<Vec<_>>().join(", ")
+                        )
+                    });
+                    options.builds.push(build);
+                }
+                continue;
             }
-            "--measure-only" => options.measure_only = true,
-            "--list" => options.list = true,
+            "--case" => {
+                let name = value("a name");
+                options.passthrough.extend([arg.clone(), name.clone()]);
+                options.cases.push(name);
+                continue;
+            }
+            "--repeat" => {
+                let n = value("a count");
+                options.repeat = n.parse().expect("--repeat needs a count");
+                assert!(options.repeat > 0, "--repeat must be positive");
+                options.passthrough.extend([arg.clone(), n]);
+                continue;
+            }
             "--suggest" => {
-                let fraction: f64 = args
-                    .next()
-                    .and_then(|n| n.parse().ok())
-                    .expect("--suggest needs a fraction, such as 0.97");
+                let f = value("a fraction, such as 0.97");
+                let fraction: f64 = f.parse().expect("--suggest needs a fraction");
                 assert!(
                     fraction > 0.0 && fraction <= 1.0,
                     "--suggest takes a fraction in (0, 1]"
                 );
                 options.suggest = Some(fraction);
+                options.passthrough.extend([arg.clone(), f]);
+                continue;
             }
+            "--worker" => {
+                options.worker = Some(value("a case name"));
+                continue;
+            }
+            "--measure-only" => options.measure_only = true,
+            "--list" => options.list = true,
             _ => panic!("unknown option: {arg} (see DEVELOPMENT.md, \"Performance gate\")"),
         }
+        options.passthrough.push(arg);
     }
     options
 }
 
+/// Builds the gate as `build` next to this binary's target directory and
+/// returns the binary.
+fn build_gate(build: &Build) -> PathBuf {
+    let exe = std::env::current_exe().expect("current_exe");
+    // `<target>/release/zrip_perf_verify`
+    let target = exe
+        .parent()
+        .and_then(Path::parent)
+        .expect("binary under <target>/release");
+    let dir = target.join(format!("perf-{}", build.name));
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let mut cmd = Command::new(cargo);
+    // From the repository root, so its `.cargo/config.toml` applies.
+    cmd.current_dir(&root)
+        .args(["build", "--release", "--quiet", "--bin", "zrip_perf_verify"])
+        .arg("--manifest-path")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
+        .env("CARGO_TARGET_DIR", &dir)
+        .env("ZRIP_PERF_BUILD", build.name)
+        .env_remove("RUSTFLAGS")
+        .env_remove("CARGO_ENCODED_RUSTFLAGS");
+    if !build.features.is_empty() {
+        cmd.args(["--features", build.features]);
+    }
+    if let Some(flags) = build.rustflags {
+        cmd.env("CARGO_ENCODED_RUSTFLAGS", flags);
+    }
+    if build.lto {
+        cmd.env("CARGO_PROFILE_RELEASE_LTO", "fat")
+            .env("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", "1");
+    }
+    eprintln!("building {}: {}", build.name, build.about);
+    let status = cmd.status().expect("cannot run cargo");
+    assert!(status.success(), "building {} failed", build.name);
+    dir.join("release").join("zrip_perf_verify")
+}
+
+/// Builds and runs the gate once per build, serially. Returns whether every
+/// build passed.
+fn run_builds(options: &Options) -> bool {
+    let bins: Vec<(&Build, PathBuf)> = options.builds.iter().map(|&b| (b, build_gate(b))).collect();
+    let mut floors = String::new();
+    let mut failed = Vec::new();
+    for (build, bin) in bins {
+        eprintln!("\n== {}", build.name);
+        let mut cmd = Command::new(&bin);
+        cmd.args(&options.passthrough)
+            .env("ZRIP_PERF_CHILD", "1")
+            .stderr(Stdio::inherit())
+            .stdout(if options.suggest.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::inherit()
+            });
+        let output = cmd.output().expect("cannot run the gate");
+        floors.push_str(&String::from_utf8(output.stdout).unwrap());
+        if !output.status.success() {
+            failed.push(build.name);
+        }
+    }
+    if let Some(fraction) = options.suggest {
+        print!("{}{floors}", floors_header(fraction));
+    }
+    if !failed.is_empty() {
+        eprintln!("\nFAIL in builds: {}", failed.join(", "));
+    }
+    failed.is_empty()
+}
+
+fn floors_header(fraction: f64) -> String {
+    format!(
+        "# zrip perf gate floors for this machine. This file is ignored.\n\
+         # {:.0}% of the median throughput, less where runs spread more\n\
+         # (down to {:.0}%); ratios as measured.\n",
+        fraction * 100.0,
+        MIN_KEEP * 100.0
+    )
+}
+
+/// Worker mode: measures one case once and prints `mb_s ratio` (`-` for
+/// decode cases) on stdout.
+fn worker(name: &str, settings: &Settings) {
+    let all = cases();
+    let case = all
+        .iter()
+        .find(|c| format!("{}.{}", c.section, c.key) == name)
+        .unwrap_or_else(|| panic!("no case {name}"));
+    pin();
+    let corpus = match case.data {
+        Data::Silesia => corpus(),
+        _ => Vec::new(),
+    };
+    let dict = matches!(case.op, Op::DictContext | Op::DecompressDict).then(dictionary);
+    let inputs = inputs(case, &corpus);
+    let m = measure(case, &inputs, dict.as_ref(), settings);
+    match m.ratio {
+        Some(r) => println!("{} {r}", m.mb_s),
+        None => println!("{} -", m.mb_s),
+    }
+}
+
+/// Measures `case` in `--repeat` fresh worker processes and returns the
+/// median and the spread of their throughputs, `(max - min) / median`.
+/// A new process per run leaves no heap from earlier cases (some cases
+/// move by 10% with it) and puts the spread across processes, as the
+/// checks see it.
+fn run_case(case: &Case, settings: &Settings) -> (Measured, f64) {
+    let exe = std::env::current_exe().expect("current_exe");
+    let name = format!("{}.{}", case.section, case.key);
+    let mut runs: Vec<Measured> = (0..settings.repeat)
+        .map(|_| {
+            let output = Command::new(&exe)
+                .args(["--worker", &name])
+                .stderr(Stdio::inherit())
+                .output()
+                .expect("cannot run a worker");
+            assert!(output.status.success(), "worker failed: {name}");
+            let text = String::from_utf8(output.stdout).unwrap();
+            let mut fields = text.split_whitespace();
+            let mut next = || fields.next().expect("worker output");
+            let mb_s = next().parse().unwrap();
+            let ratio = match next() {
+                "-" => None,
+                r => Some(r.parse().unwrap()),
+            };
+            Measured { mb_s, ratio }
+        })
+        .collect();
+    runs.sort_by(|a, b| a.mb_s.total_cmp(&b.mb_s));
+    let spread = (runs[runs.len() - 1].mb_s - runs[0].mb_s) / runs[runs.len() / 2].mb_s;
+    (runs.swap_remove(runs.len() / 2), spread)
+}
+
 fn main() {
     let options = parse_args();
+    let settings = Settings {
+        rounds: env_number("ZRIP_PERF_ROUNDS", 7) as usize,
+        round_ns: env_number("ZRIP_PERF_ROUND_MS", 50) * 1_000_000,
+        repeat: options.repeat,
+    };
+    if let Some(name) = &options.worker {
+        worker(name, &settings);
+        return;
+    }
+    if !options.builds.is_empty() && !options.list {
+        let passed = run_builds(&options);
+        std::process::exit(i32::from(!passed));
+    }
     let all = cases();
     if options.list {
         for case in &all {
@@ -607,10 +1008,10 @@ fn main() {
         return;
     }
     // `--case` takes a section (`context_l3`) or one case (`context_l3.2k`).
-    let corpus = corpus();
+    let have_corpus = !corpus_paths().is_empty();
     let selected: Vec<&Case> = all
         .iter()
-        .filter(|c| !matches!(c.data, Data::Silesia) || !corpus.is_empty())
+        .filter(|c| !matches!(c.data, Data::Silesia) || have_corpus)
         .filter(|c| {
             options.cases.is_empty()
                 || options
@@ -621,24 +1022,23 @@ fn main() {
         .collect();
     assert!(!selected.is_empty(), "no case matches {:?}", options.cases);
 
+    let build = build_name();
     let path = hw_path();
     let (floors, source) = match std::fs::read_to_string(&path) {
         Ok(contents) => (parse_floors(&contents), path.display().to_string()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (
-            SMOKE.iter().map(|&(k, v)| (k.to_string(), v)).collect(),
+            SMOKE
+                .iter()
+                .map(|&(k, v)| (format!("{build}.{k}"), v))
+                .collect(),
             "smoke floors (no .perf_hw)".to_string(),
         ),
         Err(e) => panic!("cannot read {}: {e}", path.display()),
     };
     let check = !options.measure_only && options.suggest.is_none();
-    let settings = Settings {
-        rounds: env_number("ZRIP_PERF_ROUNDS", 7) as usize,
-        round_ns: env_number("ZRIP_PERF_ROUND_MS", 50) * 1_000_000,
-        repeat: options.repeat,
-    };
     let placement = pin();
     eprintln!(
-        "placement: {placement}; {} rounds of {} ms, best of each, median of {}; floors: {}",
+        "build {build}; {placement}; {} rounds of {} ms, best of each, median of {} processes; floors: {}",
         settings.rounds,
         settings.round_ns / 1_000_000,
         settings.repeat,
@@ -648,29 +1048,37 @@ fn main() {
             "not checked"
         },
     );
-    if corpus.is_empty() {
+    if !have_corpus {
         eprintln!("no Silesia corpus: skipping silesia_* cases");
     }
     if check {
         let unknown: Vec<&String> = floors
             .keys()
             .filter(|k| {
-                !all.iter()
-                    .any(|c| k.starts_with(&format!("{}.{}_", c.section, c.key)))
+                let known_build = BUILDS
+                    .iter()
+                    .any(|b| k.starts_with(&format!("{}.", b.name)));
+                let known_case = all.iter().any(|c| {
+                    BUILDS
+                        .iter()
+                        .any(|b| k.starts_with(&format!("{}.{}.{}_", b.name, c.section, c.key)))
+                });
+                !known_build || !known_case
             })
             .collect();
         assert!(unknown.is_empty(), "unknown keys in floors: {unknown:?}");
+        if !floors.keys().any(|k| k.starts_with(&format!("{build}."))) {
+            eprintln!("no floors for build {build} in {source}");
+        }
     }
 
-    let dict = dictionary();
     let mut failed = Vec::new();
     let mut suggested: BTreeMap<&str, Vec<String>> = BTreeMap::new();
     for case in selected {
-        let inputs = inputs(case, &corpus);
         let name = format!("{}.{}", case.section, case.key);
-        let speed_key = format!("{name}_mb_s");
-        let ratio_key = format!("{name}_ratio");
-        let mut m = measure_median(case, &inputs, &dict, &settings);
+        let speed_key = format!("{build}.{name}_mb_s");
+        let ratio_key = format!("{build}.{name}_ratio");
+        let (mut m, spread) = run_case(case, &settings);
         let below = |m: &Measured| {
             check
                 && (floors.get(&speed_key).is_some_and(|&f| m.mb_s < f)
@@ -678,10 +1086,10 @@ fn main() {
                         .get(&ratio_key)
                         .is_some_and(|&f| m.ratio.is_some_and(|r| r < f)))
         };
-        // A miss is measured once more, keeping the faster run, so one
-        // disturbed run does not fail the gate.
+        // A miss is measured once more in a new process, keeping the faster
+        // run, so one disturbed run does not fail the gate.
         if below(&m) {
-            let again = measure_median(case, &inputs, &dict, &settings);
+            let (again, _) = run_case(case, &settings);
             if again.mb_s > m.mb_s {
                 m = again;
             }
@@ -693,6 +1101,9 @@ fn main() {
                 " (floor {floor:.1}, {:+.1}%)",
                 (m.mb_s / floor - 1.0) * 100.0
             );
+        }
+        if settings.repeat > 1 {
+            let _ = write!(line, " spread {:.1}%", spread * 100.0);
         }
         if let Some(ratio) = m.ratio {
             let _ = write!(line, "  ratio {ratio:.3}");
@@ -711,8 +1122,11 @@ fn main() {
             println!("{line}");
         }
         if let Some(fraction) = options.suggest {
+            // A case whose runs spread widely gets three spreads of room,
+            // but keeps at least `MIN_KEEP`.
+            let keep = fraction.min(1.0 - 3.0 * spread).max(MIN_KEEP);
             let keys = suggested.entry(case.section).or_default();
-            keys.push(format!("{}_mb_s={:.1}", case.key, m.mb_s * fraction));
+            keys.push(format!("{}_mb_s={:.1}", case.key, m.mb_s * keep));
             if let Some(ratio) = m.ratio {
                 // Output sizes are deterministic, so ratios need no margin.
                 keys.push(format!(
@@ -725,12 +1139,11 @@ fn main() {
     }
 
     if let Some(fraction) = options.suggest {
-        println!(
-            "\n# zrip perf gate floors for this machine. This file is ignored.\n# {:.0}% of measured throughput, ratios as measured.",
-            fraction * 100.0
-        );
+        if std::env::var_os("ZRIP_PERF_CHILD").is_none() {
+            print!("{}", floors_header(fraction));
+        }
         for (section, keys) in suggested {
-            println!("\n[{section}]");
+            println!("\n[{build}.{section}]");
             for key in keys {
                 println!("{key}");
             }

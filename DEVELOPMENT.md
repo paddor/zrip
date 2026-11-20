@@ -55,7 +55,8 @@ Do not add a crates.io token secret.
 
 4. **Build and verify.** Run the JSR commands below and any additional release
    audit warranted by the changes. Run `npm test` in `npm/` as well. Run the
-   [performance gate](#performance-gate) on a machine with floors.
+   [performance gate](#performance-gate) with `--builds all` on a machine
+   with floors.
 
 5. **Merge the release PR after CI passes.** Monitor `release-plz` for crate
    publication and `.github/workflows/jsr.yml` for JSR publication.
@@ -169,48 +170,75 @@ cargo +nightly fuzz run zrip_fuzz_corrupt_decompress /path/to/adversarial/corpus
 ## Performance gate
 
 `zrip_perf_verify` measures throughput and ratio for the ways zrip is used:
-one-shot calls, reused contexts, push streams, `FrameEncoder`, dictionary
-frames, and decoding, on generated logs and metric records plus slices of
-every Silesia file. It fails when a case falls below its floor. It runs in
-about 20 s, pinned to one CPU, and reports the best of 7 rounds per case.
+one-shot calls, contexts reused or created per message, `compress_into`, push
+streams with and without flushes, `FrameEncoder`, dictionary frames, and the
+matching decoders (one-shot, contexts, `decompress_into`, `FrameDecoder`,
+`PushDecoder`). Inputs run from 64 B messages to 4 MiB streams: generated
+logs, sensor records, training metric points, and slices of every Silesia
+file. It fails when a case falls below its floor. Each case runs in a fresh
+worker process pinned to one CPU and reports the best of 7 rounds; a pass
+over the 80 cases takes about 35 s per build.
 
 ```bash
-cargo run --release --manifest-path bench/Cargo.toml --bin zrip_perf_verify
+cargo run --release --manifest-path bench/Cargo.toml --bin zrip_perf_verify -- \
+  --builds all
 ```
 
-Floors are per machine, in the ignored `.perf_hw` at the repository root:
+Code generation differs between builds, so `--builds` builds the gate several
+ways and runs each, serially:
+
+| Build | Flags |
+|-------|-------|
+| `native` | the repository's `.cargo/config.toml`: `target-cpu=native` |
+| `portable` | no rustflags, as dependent crates build: runtime SIMD dispatch |
+| `portable-lto` | portable with fat LTO and one codegen unit |
+| `paranoid` | native with the `paranoid` feature |
+
+Without `--builds`, the gate runs as built, which is `native` from the
+repository root. Most users get `portable`. A regression can show in only
+one build: an `or_else` closure in the DFast loop stayed out of line only in
+portable builds and cost them a third of their level 3 speed.
+
+Floors are per machine and per build, in the ignored `.perf_hw` at the
+repository root:
 
 ```text
-[context_l3]
+[portable.context_l3]
 16k_mb_s=187.6
 16k_ratio=4.722
 ```
 
 Keys are `<case>_mb_s` and, for encode cases, `<case>_ratio`. Without the
 file, loose smoke floors catch only collapses. To set floors, run a
-known-good build on an idle machine, keep 97% of
-its throughput, and review the file:
+known-good build on an idle machine and review the file:
 
 ```bash
 cargo run --release --manifest-path bench/Cargo.toml --bin zrip_perf_verify -- \
-  --repeat 3 --suggest 0.97 > .perf_hw
+  --builds all --repeat 5 --suggest 0.95 > .perf_hw
 ```
 
-Floors only hold for the code layout and machine they were measured on. A
-new toolchain can move them by a few percent; reset them from a known-good
-build after a toolchain update.
+`--suggest F` keeps `F` of each case's median throughput, or less for a case
+whose `--repeat` runs spread widely: three spreads below the median, but no
+less than 85%. On a 2018 Mac Mini VM, repeated runs of one binary spread by
+0.5-0.8% at the median and 2-3% at the 90th percentile, and an unrelated
+code change moved cases by up to 3.5%, so 0.95 catches drops of about 5% or
+more without false alarms. Floors only hold for the machine and toolchain
+they were measured on; reset them from a known-good build after a toolchain
+update.
 
-Options: `--list`, `--case NAME` (a section or one case, repeatable),
-`--repeat N` (median of N), and `--measure-only`. `ZRIP_PERF_CPU` picks the
-pinned CPU (`none` to leave it unpinned), `ZRIP_PERF_ROUNDS` and
-`ZRIP_PERF_ROUND_MS` set the timing, `ZRIP_PERF_HW` names another floors
-file, and `ZRIP_PERF_CORPUS` another Silesia directory. Without the corpus,
-the `silesia_*` cases are skipped.
+Options: `--builds LIST` (comma-separated, or `all`), `--list`, `--case NAME`
+(a section or one case, repeatable), `--repeat N` (median of N worker
+processes), and `--measure-only`. `ZRIP_PERF_CPU` picks the pinned CPU (`none`
+to leave it unpinned), `ZRIP_PERF_ROUNDS` and `ZRIP_PERF_ROUND_MS` set the
+timing, `ZRIP_PERF_HW` names another floors file, and `ZRIP_PERF_CORPUS`
+another Silesia directory. Without the corpus, the `silesia_*` cases are
+skipped. Each build goes to `perf-<build>` next to the gate's own target
+directory.
 
-Run the gate before merging encoder or decoder changes and before each
-release. A case below its floor is measured once more, keeping the faster
-run. To compare two commits more finely than the floors allow, build the
-gate in a worktree for each and run them alternately.
+Run the gate with `--builds all` before merging encoder or decoder changes
+and before each release. A case below its floor is measured once more,
+keeping the faster run. To compare two commits more finely than the floors
+allow, build the gate in a worktree for each and run them alternately.
 
 ## Benchmarks
 

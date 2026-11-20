@@ -33,3 +33,7 @@ path = "examples/bench_streaming_dict.rs"
 [[example]]
 name = "zrip_bench_streaming_steady"
 path = "examples/bench_streaming_steady.rs"
+
+[features]
+# Builds zrip without its unsafe primitives, for the perf gate's paranoid build.
+paranoid = ["zrip/paranoid"]
