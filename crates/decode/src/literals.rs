@@ -5,6 +5,7 @@
 use crate::BlockDecodeWorkspace;
 use crate::fast_vec::{LITERAL_OVERREAD, Literals};
 use zrip_core::error::DecompressError;
+use zrip_core::huffman::FAST_TABLE_LOG;
 use zrip_core::huffman::decode::{
     build_pair_table, decode_4_streams_into, decode_4_streams_pairs_into, decode_single_stream_vec,
     prefers_pairs,
@@ -117,6 +118,13 @@ pub(crate) enum LiteralsAt {
 }
 
 impl LiteralsAt {
+    /// Number of literals.
+    pub(crate) fn len(self) -> usize {
+        match self {
+            Self::Buffer(len) | Self::Block { len, .. } => len,
+        }
+    }
+
     /// The literals, given the block they were decoded from and the
     /// workspace's literal buffer.
     pub(crate) fn resolve<'a>(self, data: &'a [u8], buf: &'a [u8]) -> Literals<'a> {
@@ -131,9 +139,13 @@ impl LiteralsAt {
 /// and where the literals are. Raw literals stay in the block when it has
 /// enough bytes after them for the executor's chunked copies; all others go
 /// to `ws.literal_buf` with that much zeroed slack.
+///
+/// More than `block_size_max` literals, the frame's `Block_Maximum_Size`,
+/// fail, as in C zstd.
 pub(crate) fn decode_literals_ws(
     data: &[u8],
     ws: &mut BlockDecodeWorkspace,
+    block_size_max: usize,
 ) -> Result<(usize, LiteralsAt), DecompressError> {
     if data.is_empty() {
         return Err(DecompressError::CorruptLiterals);
@@ -150,7 +162,7 @@ pub(crate) fn decode_literals_ws(
     let (consumed, at) = match block_type {
         LiteralsBlockType::Raw => {
             let (regen_size, header_size) = parse_raw_rle_header(data)?;
-            if regen_size > zrip_core::frame::MAX_BLOCK_SIZE {
+            if regen_size > block_size_max {
                 return Err(DecompressError::CorruptLiterals);
             }
             if data.len() < header_size + regen_size {
@@ -174,7 +186,7 @@ pub(crate) fn decode_literals_ws(
         }
         LiteralsBlockType::Rle => {
             let (regen_size, header_size) = parse_raw_rle_header(data)?;
-            if regen_size > zrip_core::frame::MAX_BLOCK_SIZE {
+            if regen_size > block_size_max {
                 return Err(DecompressError::CorruptLiterals);
             }
             if data.len() < header_size + 1 {
@@ -191,7 +203,12 @@ pub(crate) fn decode_literals_ws(
             let (regen_size, compressed_size, num_streams, header_size) =
                 parse_compressed_header(data)?;
 
-            if regen_size > zrip_core::frame::MAX_BLOCK_SIZE {
+            if regen_size > block_size_max {
+                return Err(DecompressError::CorruptLiterals);
+            }
+            // As C zstd (`MIN_LITERALS_FOR_4_STREAMS`): four streams need six
+            // literals. With six or nine, the fourth stream is empty.
+            if num_streams == 4 && regen_size < 6 {
                 return Err(DecompressError::CorruptLiterals);
             }
             if data.len() < header_size + compressed_size {
@@ -254,7 +271,9 @@ pub(crate) fn decode_literals_ws(
                     regen_size,
                     &mut ws.literal_buf,
                 )?;
-            } else if prefers_pairs(regen_size, compressed_stream.len()) {
+            } else if ws.huf_table_log <= FAST_TABLE_LOG
+                && prefers_pairs(regen_size, compressed_stream.len())
+            {
                 // Two symbols per lookup; the pair table is built lazily.
                 if !ws.huf_pairs_valid {
                     build_pair_table(&ws.huf_table, ws.huf_table_log, &mut ws.huf_pairs)?;
@@ -306,7 +325,8 @@ mod tests {
     fn raw_literals_stay_in_the_block_when_slack_follows() {
         let mut ws = BlockDecodeWorkspace::new();
         let data = raw_section(40, LITERAL_OVERREAD);
-        let (consumed, at) = decode_literals_ws(&data, &mut ws).unwrap();
+        let (consumed, at) =
+            decode_literals_ws(&data, &mut ws, zrip_core::frame::MAX_BLOCK_SIZE).unwrap();
         assert_eq!(consumed, 42);
         assert!(matches!(at, LiteralsAt::Block { start: 2, len: 40 }));
         let lits = at.resolve(&data, &ws.literal_buf);
@@ -317,7 +337,7 @@ mod tests {
     fn literals_without_block_slack_are_copied_with_zeroed_slack() {
         let mut ws = BlockDecodeWorkspace::new();
         let data = raw_section(40, LITERAL_OVERREAD - 1);
-        let (_, at) = decode_literals_ws(&data, &mut ws).unwrap();
+        let (_, at) = decode_literals_ws(&data, &mut ws, zrip_core::frame::MAX_BLOCK_SIZE).unwrap();
         assert!(matches!(at, LiteralsAt::Buffer(40)));
         assert_eq!(ws.literal_buf.len(), 40 + LITERAL_OVERREAD);
         assert!(ws.literal_buf[40..].iter().all(|&b| b == 0));
@@ -326,7 +346,8 @@ mod tests {
 
         // RLE literals get the same slack.
         let rle = [0b0001 | (5 << 3), b'q'];
-        let (consumed, at) = decode_literals_ws(&rle, &mut ws).unwrap();
+        let (consumed, at) =
+            decode_literals_ws(&rle, &mut ws, zrip_core::frame::MAX_BLOCK_SIZE).unwrap();
         assert_eq!(consumed, 2);
         assert_eq!(at.resolve(&rle, &ws.literal_buf).as_slice(), b"qqqqq");
         assert_eq!(ws.literal_buf.len(), 5 + LITERAL_OVERREAD);

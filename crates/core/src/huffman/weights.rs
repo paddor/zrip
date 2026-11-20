@@ -295,13 +295,14 @@ fn parse_fse_compressed_weights_into(
 }
 
 /// Builds a decode table from explicit weights, adding the implied last
-/// one. Returns [`DECODE_TABLE_SIZE`](crate::huffman::DECODE_TABLE_SIZE)
-/// entries and the table log.
+/// one. Returns at least
+/// [`DECODE_TABLE_SIZE`](crate::huffman::DECODE_TABLE_SIZE) entries, and the
+/// table log.
 #[cfg(feature = "alloc")]
 pub fn build_huffman_decode_table(
     weights: &[u8],
 ) -> Result<(Vec<crate::huffman::HuffmanDecodeEntry>, u8), DecompressError> {
-    use crate::huffman::{HuffmanDecodeEntry, MAX_BITS};
+    use crate::huffman::{HuffmanDecodeEntry, MAX_TABLE_LOG};
 
     if weights.is_empty() || weights.len() > 255 {
         return Err(DecompressError::BadHuffmanWeights);
@@ -316,7 +317,7 @@ pub fn build_huffman_decode_table(
         }
     }
 
-    if max_weight > MAX_BITS + 1 {
+    if max_weight > MAX_TABLE_LOG {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
@@ -325,7 +326,7 @@ pub fn build_huffman_decode_table(
     }
 
     let table_log = high_bit(weight_sum) + 1;
-    if table_log > MAX_BITS as u32 {
+    if table_log > MAX_TABLE_LOG as u32 {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
@@ -337,11 +338,19 @@ pub fn build_huffman_decode_table(
         return Err(DecompressError::BadHuffmanWeights);
     }
     let last_weight = high_bit(last_weight_value) as u8 + 1;
+    // As C zstd (`HUF_readStats`): at least two symbols, an even number,
+    // have weight 1, so the longest code is `table_log` bits.
+    let longest =
+        weights.iter().map(|&w| usize::from(w == 1)).sum::<usize>() + usize::from(last_weight == 1);
+    if longest < 2 || longest % 2 == 1 {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
 
     let mut all_weights: Vec<u8> = weights.to_vec();
     all_weights.push(last_weight);
 
-    let mut table = vec![HuffmanDecodeEntry::default(); super::DECODE_TABLE_SIZE];
+    let size = super::DECODE_TABLE_SIZE.max(1 << table_log);
+    let mut table = vec![HuffmanDecodeEntry::default(); size];
 
     let max_w = table_log as u8 + 1;
 
@@ -387,7 +396,7 @@ pub fn build_huffman_decode_table_into(
     table: &mut Vec<crate::huffman::HuffmanDecodeEntry>,
     all_weights: &mut Vec<u8>,
 ) -> Result<u8, DecompressError> {
-    use crate::huffman::{HuffmanDecodeEntry, MAX_BITS};
+    use crate::huffman::{HuffmanDecodeEntry, MAX_TABLE_LOG};
 
     if weights.is_empty() || weights.len() > 255 {
         return Err(DecompressError::BadHuffmanWeights);
@@ -402,7 +411,7 @@ pub fn build_huffman_decode_table_into(
         }
     }
 
-    if max_weight > MAX_BITS + 1 {
+    if max_weight > MAX_TABLE_LOG {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
@@ -411,7 +420,7 @@ pub fn build_huffman_decode_table_into(
     }
 
     let table_log = high_bit(weight_sum) + 1;
-    if table_log > MAX_BITS as u32 {
+    if table_log > MAX_TABLE_LOG as u32 {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
@@ -423,14 +432,22 @@ pub fn build_huffman_decode_table_into(
         return Err(DecompressError::BadHuffmanWeights);
     }
     let last_weight = high_bit(last_weight_value) as u8 + 1;
+    // As C zstd (`HUF_readStats`): at least two symbols, an even number,
+    // have weight 1, so the longest code is `table_log` bits.
+    let longest =
+        weights.iter().map(|&w| usize::from(w == 1)).sum::<usize>() + usize::from(last_weight == 1);
+    if longest < 2 || longest % 2 == 1 {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
 
     all_weights.clear();
     all_weights.extend_from_slice(weights);
     all_weights.push(last_weight);
 
-    if table.len() != super::DECODE_TABLE_SIZE {
+    let size = super::DECODE_TABLE_SIZE.max(1 << table_log);
+    if table.len() != size {
         table.clear();
-        table.resize(super::DECODE_TABLE_SIZE, HuffmanDecodeEntry::default());
+        table.resize(size, HuffmanDecodeEntry::default());
     }
 
     let max_w = table_log as usize + 1;
@@ -558,16 +575,19 @@ mod tests {
 
     #[test]
     fn build_table_two_symbols() {
-        // weight 2 means 2^1=2 slots. Sum=2. Implied symbol needs 2 slots too.
-        // Total = 4 = 2^2, so table_log = 2.
-        let weights = vec![2];
-        let (table, table_log) = build_huffman_decode_table(&weights).unwrap();
-        assert_eq!(table_log, 2);
+        // Weight 1 takes one slot and the implied symbol the other: two 1-bit
+        // codes, table_log 1.
+        let (table, table_log) = build_huffman_decode_table(&[1]).unwrap();
+        assert_eq!(table_log, 1);
         assert_eq!(table.len(), crate::huffman::DECODE_TABLE_SIZE);
-        let sym0_count = table[..4].iter().filter(|e| e.symbol == 0).count();
-        let sym1_count = table[..4].iter().filter(|e| e.symbol == 1).count();
-        assert_eq!(sym0_count, 2);
-        assert_eq!(sym1_count, 2);
+        assert_eq!((table[0].symbol, table[0].num_bits), (0, 1));
+        assert_eq!((table[1].symbol, table[1].num_bits), (1, 1));
+        // Weight 2 and an implied 2 fill a table of log 2 with 1-bit codes.
+        // No code is `table_log` bits, which C zstd rejects.
+        assert_eq!(
+            build_huffman_decode_table(&[2]).err(),
+            Some(DecompressError::BadHuffmanWeights)
+        );
     }
 
     /// FSE-compressed weight header whose stream decodes to `count` weights.

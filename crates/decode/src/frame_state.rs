@@ -16,7 +16,7 @@ use crate::exec::SequenceOutputScope;
 use crate::fast_vec::WILDCOPY_OVERLENGTH;
 use crate::literals::decode_literals_ws;
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
-use zrip_core::block::BlockHeader;
+use zrip_core::block::{BlockHeader, BlockType};
 use zrip_core::dict::Dictionary;
 use zrip_core::error::DecompressError;
 use zrip_core::frame::header::parse_frame_header;
@@ -167,23 +167,17 @@ impl FrameState {
             Some(_) => {
                 usize::try_from(header.window_size).map_err(|_| too_large(usize::MAX as u64))?
             }
-            // A single-segment frame's window is its content size, which
-            // `max_output` already bounds.
-            None if header.window_size > MAX_WINDOW_SIZE && header.single_segment => {
-                MAX_WINDOW_SIZE as usize
-            }
+            // As C zstd's `ZSTD_d_windowLogMax`, also for single-segment
+            // frames, whose window is their content size.
             None if header.window_size > MAX_WINDOW_SIZE => {
                 return Err(too_large(MAX_WINDOW_SIZE));
             }
             None => header.window_size as usize,
         };
 
-        // The limit spans the stream, so earlier frames' output counts.
-        if let Some(fcs) = header.frame_content_size
-            && fcs > (self.max_output as u64).saturating_sub(self.bytes_output)
-        {
-            return Err(DecompressError::OutputTooSmall);
-        }
+        // As in C zstd's streaming decoder, a content size over the output
+        // limit fails only once the output passes the limit: a frame that
+        // ends with an empty block skips the content size check.
 
         self.window_size = window_size;
         self.history.clear();
@@ -227,11 +221,22 @@ impl FrameState {
     /// Checks a parsed block header against `Block_Maximum_Size`: the
     /// window, at most 128 KiB. As in C zstd, it bounds the compressed size
     /// too.
+    ///
+    /// As in C zstd's streaming decoder, an RLE block counts as one byte
+    /// here, and its output is held to the maximum, too.
     pub(crate) fn check_block_header(&self, header: BlockHeader) -> Result<(), DecompressError> {
-        if header.block_size as usize > self.window_size.min(MAX_BLOCK_SIZE) {
+        let size = header.block_size as usize;
+        let rle = header.block_type == BlockType::Rle;
+        let max = self.block_size_max();
+        if size.max(usize::from(rle)) > max {
             return Err(DecompressError::BlockTooLarge);
         }
         Ok(())
+    }
+
+    /// `Block_Maximum_Size`: the window, at most 128 KiB.
+    fn block_size_max(&self) -> usize {
+        self.window_size.min(MAX_BLOCK_SIZE)
     }
 
     /// The most a block may write: 128 KiB, or less once a known content
@@ -323,7 +328,8 @@ impl FrameState {
         };
         let max_block_output = self.max_block();
 
-        let (lit_consumed, lits_at) = decode_literals_ws(block_data, &mut self.ws)?;
+        let block_size_max = self.block_size_max();
+        let (lit_consumed, lits_at) = decode_literals_ws(block_data, &mut self.ws, block_size_max)?;
         let remaining = &block_data[lit_consumed..];
 
         // As in C zstd, the sequence count is required, and a block without
@@ -359,7 +365,7 @@ impl FrameState {
             &mut self.history,
             scope,
         )?;
-        if self.history.len() - self.block_start > MAX_BLOCK_SIZE {
+        if self.history.len() - self.block_start > self.block_size_max() {
             return Err(DecompressError::BlockTooLarge);
         }
         Ok(())
@@ -367,15 +373,23 @@ impl FrameState {
 
     /// Accounts for the block: checksum, limits, and the frame content size.
     /// On error, the block has no output.
-    pub(crate) fn end_block(&mut self, last: bool) -> Result<AfterBlock, DecompressError> {
-        let result = self.account_block(last);
+    ///
+    /// `empty` is a raw or compressed block of size 0. As C zstd's streaming
+    /// decoder, it decodes to nothing, and a frame that ends with one skips
+    /// the content size check.
+    pub(crate) fn end_block(
+        &mut self,
+        last: bool,
+        empty: bool,
+    ) -> Result<AfterBlock, DecompressError> {
+        let result = self.account_block(last, empty);
         if result.is_err() {
             self.discard_block();
         }
         result
     }
 
-    fn account_block(&mut self, last: bool) -> Result<AfterBlock, DecompressError> {
+    fn account_block(&mut self, last: bool, empty: bool) -> Result<AfterBlock, DecompressError> {
         let block = &self.history[self.block_start..];
         if let Some(ref mut hasher) = self.hasher {
             hasher.update(block);
@@ -387,7 +401,7 @@ impl FrameState {
         }
         if let Some(fcs) = self.frame_content_size {
             let written = self.frame_bytes;
-            if written > fcs || last && written != fcs {
+            if written > fcs || last && !empty && written != fcs {
                 return Err(DecompressError::FrameSizeMismatch);
             }
         }

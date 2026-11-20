@@ -237,10 +237,12 @@ It settles on the best measured level, which the caller applies with
 [SAFETY.md](SAFETY.md) describes how zrip stays fast without `unsafe` and
 catalogs C zstd memory safety bugs that Rust prevents by construction.
 
-All codec paths are fuzz-tested (20 targets). Fuzz targets cover round-trip
+All codec paths are fuzz-tested (21 targets). Fuzz targets cover round-trip
 correctness, cross-validation against C zstd, streaming, dictionary modes,
 push chunking, and corruption resistance (bitflip, splice, truncate,
-overwrite).
+overwrite). A differential test and fuzz target check that the decoder
+accepts exactly the frames C zstd accepts; [DEVELOPMENT.md](DEVELOPMENT.md)
+lists the one exception.
 
 ## Design
 

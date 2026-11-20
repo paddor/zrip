@@ -461,7 +461,7 @@ impl PushDecoder {
                 if have + n < size {
                     return Ok(false);
                 }
-                self.end_block(last)?;
+                self.end_block(last, size == 0)?;
             }
             Unit::Rle { size, last } => {
                 if avail == 0 {
@@ -470,8 +470,11 @@ impl PushDecoder {
                 let byte = input[*consumed];
                 *consumed += 1;
                 self.frame.rle_block(byte, size);
-                self.end_block(last)?;
+                self.end_block(last, false)?;
             }
+            // An empty compressed block decodes to nothing, as in C zstd's
+            // streaming decoder.
+            Unit::Compressed { size: 0, last } => self.end_block(last, true)?,
             Unit::Compressed { size, last } => {
                 if self.stage.is_empty() && avail >= size {
                     self.frame
@@ -484,7 +487,7 @@ impl PushDecoder {
                     self.frame.decode_compressed(&self.stage)?;
                     self.stage.clear();
                 }
-                self.end_block(last)?;
+                self.end_block(last, false)?;
             }
             Unit::Checksum => {
                 if self.stage.is_empty() && avail >= CHECKSUM_SIZE {
@@ -506,8 +509,8 @@ impl PushDecoder {
         Ok(true)
     }
 
-    fn end_block(&mut self, last: bool) -> Result<(), DecompressError> {
-        self.unit = match self.frame.end_block(last)? {
+    fn end_block(&mut self, last: bool, empty: bool) -> Result<(), DecompressError> {
+        self.unit = match self.frame.end_block(last, empty)? {
             AfterBlock::Block => Unit::BlockHeader,
             AfterBlock::Checksum => Unit::Checksum,
             AfterBlock::FrameEnd => {

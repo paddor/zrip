@@ -31,7 +31,7 @@ use alloc::vec::Vec;
 
 use crate::exec::{SequenceOutputScope, decode_execute_sequences, decode_execute_single_sequence};
 use crate::fast_vec::{Literals, WILDCOPY_OVERLENGTH};
-use crate::literals::decode_literals_ws;
+use crate::literals::{LiteralsAt, decode_literals_ws};
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
 use zrip_core::block::{BlockType, parse_block_header};
 use zrip_core::error::DecompressError;
@@ -358,6 +358,9 @@ fn decompress_frame_with_header(
 
     let mut offset = header.header_size;
     let output_start = output.len();
+    let block_size_max = header
+        .window_size
+        .min(zrip_core::frame::MAX_BLOCK_SIZE as u64) as usize;
 
     let dict_history: &[u8] = if let Some(d) = dict { d.content() } else { &[] };
 
@@ -399,13 +402,10 @@ fn decompress_frame_with_header(
 
         let block_size = block_header.block_size as usize;
 
-        // `Block_Maximum_Size`: the window, at most 128 KiB. As in C zstd, it
-        // bounds the compressed size too.
-        if block_size as u64
-            > header
-                .window_size
-                .min(zrip_core::frame::MAX_BLOCK_SIZE as u64)
-        {
+        // `Block_Maximum_Size`: the window, at most 128 KiB. As C zstd's
+        // one-shot decoder, only compressed blocks are held to it, and their
+        // compressed size, too. Raw and RLE blocks only have to fit the output.
+        if block_header.block_type == BlockType::Compressed && block_size > block_size_max {
             return Err(DecompressError::BlockTooLarge);
         }
 
@@ -454,6 +454,7 @@ fn decompress_frame_with_header(
                     output,
                     output_start,
                     max_output,
+                    block_size_max,
                     seq_tables
                         .as_deref_mut()
                         .expect("sequence tables are initialized before compressed blocks"),
@@ -548,20 +549,30 @@ fn initial_sequence_state(
     }
 }
 
+/// C zstd's `WILDCOPY_OVERLENGTH`: in one-shot decoding, it puts a block's
+/// literals this far past the block's maximum in the output buffer.
+const ONE_SHOT_BLOCK_SLACK: usize = 32;
+
 /// Decodes one compressed block body and appends its output. Fails with
 /// `OutputTooSmall` past `max_output` bytes since `output_start`.
+///
+/// As in C zstd's one-shot decoder, the literals may not exceed
+/// `block_size_max`, the frame's `Block_Maximum_Size`. The output may
+/// exceed it by [`ONE_SHOT_BLOCK_SLACK`] bytes, or by any amount when the
+/// literals stay outside the output buffer.
 #[allow(clippy::too_many_arguments)]
 fn decode_compressed_block(
     data: &[u8],
     output: &mut Vec<u8>,
     output_start: usize,
     max_output: usize,
+    block_size_max: usize,
     seq_tables: &mut SequenceDecodeTables,
     rep_offsets: &mut [u32; 3],
     ws: &mut BlockDecodeWorkspace,
     dict_history: &[u8],
 ) -> Result<(), DecompressError> {
-    let (lit_consumed, lits_at) = decode_literals_ws(data, ws)?;
+    let (lit_consumed, lits_at) = decode_literals_ws(data, ws, block_size_max)?;
 
     let remaining = &data[lit_consumed..];
 
@@ -586,26 +597,49 @@ fn decode_compressed_block(
     let seq_data = &table_data[tables_consumed..];
 
     let before = output.len();
-    let max_block_output = remaining_output_limit(output.len(), output_start, max_output)?
-        .min(zrip_core::frame::MAX_BLOCK_SIZE);
-    let scope = SequenceOutputScope {
-        output_base: output_start,
-        max_block_output,
-        history: dict_history,
+    let room = remaining_output_limit(output.len(), output_start, max_output)?;
+    // C zstd keeps raw literals in place when 32 bytes follow them in the
+    // block. Other literals go to the output buffer, after the block's
+    // maximum, when it has room for both, and stop the output there. Else
+    // they go to a side buffer, and the output may fill the buffer.
+    let in_output = !matches!(lits_at, LiteralsAt::Block { .. })
+        && room > block_size_max + 2 * ONE_SHOT_BLOCK_SLACK + lits_at.len();
+    let max_block = if in_output {
+        room.min(block_size_max + ONE_SHOT_BLOCK_SLACK)
+    } else {
+        room
     };
 
-    let result = decode_sequences_dispatch(
-        seq_data,
-        num_sequences,
-        seq_tables,
-        rep_offsets,
-        lits_at.resolve(data, &ws.literal_buf),
-        output,
-        scope,
-    );
-    result?;
-    if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
-        return Err(DecompressError::BlockTooLarge);
+    // Valid blocks write at most 128 KiB, and the block's room is zeroed up
+    // front. A block that C zstd lets write more retries with more room.
+    let mut max_block_output =
+        max_block.min(zrip_core::frame::MAX_BLOCK_SIZE + ONE_SHOT_BLOCK_SLACK);
+    loop {
+        let scope = SequenceOutputScope {
+            output_base: output_start,
+            max_block_output,
+            history: dict_history,
+        };
+        let result = decode_sequences_dispatch(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            lits_at.resolve(data, &ws.literal_buf),
+            output,
+            scope,
+        );
+        match result {
+            Err(DecompressError::BlockTooLarge) if max_block_output < max_block => {
+                output.truncate(before);
+                max_block_output = max_block.min(max_block_output.saturating_mul(2));
+            }
+            // The output limit, not the block's maximum, ran out.
+            Err(DecompressError::BlockTooLarge) if max_block_output == room => {
+                return Err(DecompressError::OutputTooSmall);
+            }
+            result => break result?,
+        }
     }
     if output.len() - output_start > max_output {
         return Err(DecompressError::OutputTooSmall);

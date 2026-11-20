@@ -86,7 +86,7 @@ jobs:
           path: tmp/overnight-fuzz/ci/
 
   ignored:
-    name: ignored tests and push soak
+    name: ignored tests, differential and push soak
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -97,6 +97,10 @@ jobs:
         run: >-
           cargo test --release -p zrip-core -p zrip-encode -p zrip-decode -p zrip
           --lib --tests -- --ignored --skip uninit_matches_init_soak
+      - name: Decoder differential against C zstd, long
+        env:
+          ZRIP_DIFF_MUTATIONS: "20000"
+        run: cargo test --release --test zrip_differential
       - name: Push soak, one process per core
         env:
           ZRIP_SOAK_SECS: ${{ env.SOAK_SECONDS }}

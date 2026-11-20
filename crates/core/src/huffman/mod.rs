@@ -9,14 +9,19 @@ pub mod weights;
 
 /// Largest literal byte value.
 pub const MAX_SYMBOL_VALUE: usize = 255;
-/// Longest code, 11 bits, per RFC 8878. C zstd's decoder also takes 12.
+/// Longest code the encoder writes: 11 bits, per RFC 8878.
 pub const MAX_BITS: u8 = 11;
-/// Largest decode table log, equal to [`MAX_BITS`].
-pub const MAX_TABLE_LOG: u8 = 11;
-/// Decode tables always hold this many entries, whatever their table log.
-/// A fixed size lets lookups index a `[HuffmanDecodeEntry; N]` without bounds
-/// checks. Entries past `1 << table_log` are unused.
-pub const DECODE_TABLE_SIZE: usize = 1 << MAX_TABLE_LOG;
+/// Largest decode table log: 12, as C zstd's decoder (`HUF_TABLELOG_MAX`)
+/// takes. RFC 8878 allows 11.
+pub const MAX_TABLE_LOG: u8 = 12;
+/// Largest table log of the fast decode loops, which read five codes per
+/// refill. Deeper tables decode four codes per refill.
+pub const FAST_TABLE_LOG: u8 = 11;
+/// Decode tables hold at least this many entries, and `1 << table_log`
+/// when that is more. The fixed size lets the fast loops index a
+/// `[HuffmanDecodeEntry; N]` without bounds checks. Entries past
+/// `1 << table_log` are unused.
+pub const DECODE_TABLE_SIZE: usize = 1 << FAST_TABLE_LOG;
 
 /// Bits every two-symbol lookup reads, whatever the tree's depth: C zstd's
 /// `HUF_DECODER_FAST_TABLELOG` for trees of at most 11 bits.

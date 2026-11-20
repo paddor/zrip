@@ -5,7 +5,10 @@ use crate::bitstream::primitives as bitstream_primitives;
 use crate::bitstream::reader_reverse::ReverseBitReader;
 use crate::error::DecompressError;
 use crate::huffman::primitives as huffman_primitives;
-use crate::huffman::{DECODE_TABLE_SIZE, HuffmanDecodeEntry, PAIR_TABLE_LOG, PAIR_TABLE_SIZE};
+use crate::huffman::{
+    DECODE_TABLE_SIZE, FAST_TABLE_LOG, HuffmanDecodeEntry, MAX_TABLE_LOG, PAIR_TABLE_LOG,
+    PAIR_TABLE_SIZE,
+};
 
 /// Decodes the 4-stream section `data` into `output[..output_size]`, one
 /// `output_size.div_ceil(4)`-byte segment per stream, the last shorter.
@@ -39,10 +42,11 @@ pub(super) fn decode_4_streams_core(
         return Err(DecompressError::BadHuffmanStream);
     }
 
-    // The fourth segment must not be empty. C zstd differs at the edges: it
-    // takes sizes 6 and 9 (empty fourth segment) and rejects 4 (under 6).
+    // As C zstd: at least six symbols, so three full segments fit. At six
+    // and nine the fourth segment is empty, and its stream holds only the
+    // end mark.
     let seg = output_size.div_ceil(4);
-    if seg * 3 >= output_size {
+    if output_size < 6 {
         return Err(DecompressError::BadHuffmanStream);
     }
     let remaining = output_size - seg * 3;
@@ -93,11 +97,20 @@ pub(super) fn decode_4_streams_core(
     let mut o4_idx: usize = 0;
 
     let tl = table_log as u32;
-    // `shift >= 53` bounds every fast-round index below the 2048-entry table,
-    // so the lookups need neither a mask nor a bounds check.
-    if !(1..=11).contains(&tl) {
+    if !(1..=u32::from(MAX_TABLE_LOG)).contains(&tl) {
         return Err(DecompressError::BadHuffmanStream);
     }
+    // The fast rounds take five codes per refill, up to 11 bits each. Deeper
+    // tables, which C zstd accepts and its encoder does not write, decode
+    // every stream with the checked tail.
+    if tl > u32::from(FAST_TABLE_LOG) {
+        super::decode::decode_stream_tail(table, table_log, &mut r1, out1)?;
+        super::decode::decode_stream_tail(table, table_log, &mut r2, out2)?;
+        super::decode::decode_stream_tail(table, table_log, &mut r3, out3)?;
+        return super::decode::decode_stream_tail(table, table_log, &mut r4, out4);
+    }
+    // `shift >= 53` bounds every fast-round index below the 2048-entry table,
+    // so the lookups need neither a mask nor a bounds check.
     let shift = 64 - tl;
 
     /// Whether a refill can load eight bytes inside the stream.

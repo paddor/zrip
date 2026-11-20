@@ -510,8 +510,14 @@ fn decode_limit_counts_earlier_frames() {
     let b = zrip::compress(&mixed(1000, 2), 1).unwrap();
     let header = zrip::frame::header::parse_frame_header(&b).unwrap();
     assert_eq!(header.frame_content_size, Some(1000));
-    // The second header's content size crosses the limit.
+    // The second frame's output crosses the limit. As in C zstd, its
+    // content size alone does not fail.
     let input = [&a[..], &b[..header.header_size]].concat();
+    let mut out = Vec::new();
+    PushDecoder::with_limit(1500)
+        .decode_to_vec(&input, &mut out)
+        .unwrap();
+    let input = [&a[..], &b[..]].concat();
     let mut out = Vec::new();
     let err = PushDecoder::with_limit(1500)
         .decode_to_vec(&input, &mut out)

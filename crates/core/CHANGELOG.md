@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- Huffman decode tables take 12 bits (`huffman::MAX_TABLE_LOG`), as C
+  zstd's decoder does; `FAST_TABLE_LOG` (11) bounds the fast loops, and
+  `MAX_BITS` (11) the encoder. Weights need at least two symbols of weight
+  1, as in C zstd.
+- 4-stream Huffman sections take 6 symbols and more, with an empty fourth
+  stream at 6 and 9, as in C zstd.
+- Frame headers with a window log over 31 (30 on 32-bit targets) fail with
+  `WindowTooLarge`.
+
 ## [0.12.2] - 2026-11-20
 
 - `finalize_dictionary` writes a Huffman table with a code for every byte,

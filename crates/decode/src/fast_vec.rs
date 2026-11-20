@@ -44,7 +44,7 @@ impl<'a> BlockOutput<'a> {
     }
 
     /// Starts a sequence of `literal_len` literals and a `match_len` match.
-    /// Fails with `CorruptSequences` if they pass the block's limit.
+    /// Fails with `BlockTooLarge` if they pass the block's limit.
     #[inline(always)]
     pub(crate) fn begin_sequence(
         &mut self,
@@ -54,7 +54,7 @@ impl<'a> BlockOutput<'a> {
         debug_assert!(self.vec.len() <= self.block_limit);
         let remaining = self.block_limit - self.vec.len();
         if unlikely(literal_len > remaining || match_len > remaining - literal_len) {
-            return Err(DecompressError::CorruptSequences);
+            return Err(DecompressError::BlockTooLarge);
         }
         Ok(SequenceOutput {
             output: self,
@@ -67,7 +67,7 @@ impl<'a> BlockOutput<'a> {
     fn ensure_block_space(&self, len: usize) -> Result<(), DecompressError> {
         debug_assert!(self.vec.len() <= self.block_limit);
         if unlikely(len > self.block_limit - self.vec.len()) {
-            return Err(DecompressError::CorruptSequences);
+            return Err(DecompressError::BlockTooLarge);
         }
         Ok(())
     }
@@ -330,7 +330,7 @@ impl<const NARROW: bool> SeqOut<'_, NARROW> {
         let lit_end = op + ll;
         let match_end = lit_end + ml;
         if unlikely(match_end + WILDCOPY_OVERLENGTH > self.buf.len()) {
-            return Err(DecompressError::CorruptSequences);
+            return Err(DecompressError::BlockTooLarge);
         }
         // `checked_sub` tells the compiler that the source is at most
         // `lit_end`, which bounds its first chunk.
@@ -363,7 +363,7 @@ impl<const NARROW: bool> SeqOut<'_, NARROW> {
             return Err(DecompressError::CorruptLiterals);
         }
         if unlikely(len > self.limit() - self.op) {
-            return Err(DecompressError::CorruptSequences);
+            return Err(DecompressError::BlockTooLarge);
         }
         let op = self.op;
         Dst(self.buf).put(op, &lits[lp..lp + len]);
@@ -696,7 +696,7 @@ mod tests {
         let err = output
             .extend_literals_range(b"abcde", 0, 5)
             .expect_err("literal range should exceed the block limit");
-        assert_eq!(err, DecompressError::CorruptSequences);
+        assert_eq!(err, DecompressError::BlockTooLarge);
     }
 
     #[test]
@@ -759,11 +759,11 @@ mod tests {
         with_seq_out::<true, _>(&mut v, 8, 0, |out| {
             assert_eq!(
                 out.execute(Literals::new(&lits, 10), 0, 4, 5, 1, &[]),
-                Err(DecompressError::CorruptSequences)
+                Err(DecompressError::BlockTooLarge)
             );
             assert_eq!(
                 out.extend_literals(Literals::new(&lits, 10), 0, 9),
-                Err(DecompressError::CorruptSequences)
+                Err(DecompressError::BlockTooLarge)
             );
             assert_eq!(
                 out.extend_literals(Literals::new(&lits, 10), 4, 7),

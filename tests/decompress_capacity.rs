@@ -115,11 +115,10 @@ fn compressed_blocks_past_the_declared_size_are_rejected() {
     let data = compressible(1_000_000);
     let frame = zrip::compress(&data, 1).unwrap();
     let short = with_declared_size(&frame, data.len() as u64 - 1_000);
-    // A sequence past the limit is rejected as corrupt, as it is for the
-    // caller's limit.
+    // A sequence past the declared size fails as a size mismatch.
     assert_eq!(
         zrip::decompress(&short),
-        Err(DecompressError::CorruptSequences)
+        Err(DecompressError::FrameSizeMismatch)
     );
 }
 

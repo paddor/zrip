@@ -90,11 +90,17 @@ impl HuffmanEncodeTable {
     }
 
     /// Rebuilds the codes of a decode table, such as a dictionary's, to
-    /// encode with them. `None` for fewer than two symbols.
+    /// encode with them. `None` for fewer than two symbols, or codes over
+    /// [`MAX_BITS`] bits.
     pub fn from_decode_table(
         decode_table: &[super::HuffmanDecodeEntry],
         table_log: u8,
     ) -> Option<Self> {
+        // The encoder writes codes of at most `MAX_BITS`; C zstd's decoder
+        // also takes 12-bit tables.
+        if table_log > MAX_BITS {
+            return None;
+        }
         let table_size = 1usize << table_log;
         if decode_table.len() < table_size {
             return None;

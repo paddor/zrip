@@ -23,6 +23,14 @@ pub struct FrameHeader {
     pub header_size: usize,
 }
 
+/// Largest window log a frame header may give, as C zstd's
+/// `ZSTD_WINDOWLOG_MAX`.
+const WINDOW_LOG_MAX: u64 = if cfg!(target_pointer_width = "32") {
+    30
+} else {
+    31
+};
+
 /// Parses the frame header at the start of `data`, magic number first.
 pub fn parse_frame_header(data: &[u8]) -> Result<FrameHeader, DecompressError> {
     if data.len() < 4 {
@@ -77,6 +85,14 @@ pub fn parse_frame_header_after_magic(
         let mantissa = (window_desc & 0x07) as u64;
         let window_base = 1u64 << (10 + exponent);
         let window_add = (window_base >> 3) * mantissa;
+        // As C zstd (`ZSTD_WINDOWLOG_MAX`): at most 2^31 bytes, 2^30 on
+        // 32-bit targets.
+        if 10 + exponent > WINDOW_LOG_MAX {
+            return Err(DecompressError::WindowTooLarge {
+                requested: window_base + window_add,
+                max: 1 << WINDOW_LOG_MAX,
+            });
+        }
         window_base + window_add
     };
 
