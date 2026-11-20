@@ -35,6 +35,10 @@
   write past the block size limit. `FrameDecoder` and `PushDecoder` reject
   single-segment frames over 128 MiB up front instead of failing at a far
   match.
+- On big-endian targets, the Fast levels extended matches backward by a
+  wrong count, so frames could decode to other data.
+- Long distance matching with 256-entry buckets (`bucket_size_log` 8),
+  which C zstd allows, kept one entry per bucket.
 
 ### Fixed
 

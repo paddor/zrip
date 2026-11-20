@@ -16,7 +16,7 @@ pub enum Strategy {
 pub struct LdmParams {
     /// Log2 of the LDM table's entries.
     pub hash_log: u32,
-    /// Log2 of the entries per bucket, at most `hash_log` and 7.
+    /// Log2 of the entries per bucket, at most `hash_log` and 8.
     pub bucket_size_log: u32,
     /// Shortest LDM match in bytes. Each split point indexes this many
     /// bytes before it.

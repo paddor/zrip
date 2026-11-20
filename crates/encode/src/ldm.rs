@@ -456,8 +456,10 @@ impl LdmState {
         let bucket_start = (hash as usize) << self.params.bucket_size_log;
         let offset = self.bucket_offsets[hash as usize];
         self.table[bucket_start + offset as usize] = entry;
-        let bucket_mask = (1u8 << self.params.bucket_size_log) - 1;
-        self.bucket_offsets[hash as usize] = (offset + 1) & bucket_mask;
+        // Up to 8, as C zstd (`ZSTD_LDM_BUCKETSIZELOG_MAX`): 256 entries,
+        // whose offsets fill a byte.
+        let bucket_mask = ((1u32 << self.params.bucket_size_log) - 1) as u8;
+        self.bucket_offsets[hash as usize] = offset.wrapping_add(1) & bucket_mask;
         self.entries_inserted += 1;
     }
 

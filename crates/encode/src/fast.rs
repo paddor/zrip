@@ -1016,11 +1016,17 @@ pub(crate) fn count_back(src: &[u8], a: usize, b: usize, max: usize) -> usize {
             }
             return back;
         }
-        // `rd64` reads native order. On little-endian targets the byte
-        // below `pa` is the top byte, so `leading_zeros` counts backward.
+        // `rd64` reads native order. The byte below `pa` is the top byte on
+        // little-endian targets and the bottom byte on big-endian ones, so
+        // counting zeros from that end counts equal bytes backward.
         let diff = rd64!(src, pa - 8) ^ rd64!(src, pb - 8);
         if diff != 0 {
-            return (back + (diff.leading_zeros() / 8) as usize).min(max);
+            let equal_bits = if cfg!(target_endian = "little") {
+                diff.leading_zeros()
+            } else {
+                diff.trailing_zeros()
+            };
+            return (back + (equal_bits / 8) as usize).min(max);
         }
         back += 8;
     }

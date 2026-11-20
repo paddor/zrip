@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- `fast::count_back` counts equal bytes from the right end on big-endian
+  targets; it counted from the wrong end and extended matches over unequal
+  bytes.
+- LDM buckets of 256 entries (`LdmParams::bucket_size_log` 8, C zstd's
+  maximum) cycle through all entries; the mask was computed in `u8` and
+  overflowed.
+
 - Level -3 hashes eight bytes at level -4's step (`min_match` 8,
   `target_length` 2) in a table of 2^14 entries, so it sits between -4 and -2
   in speed and ratio. The Fast finder gets a constant-table path for it.
