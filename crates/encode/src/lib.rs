@@ -746,20 +746,38 @@ mod tests {
 
     #[test]
     fn options_clamp_window_log_before_ldm_defaults() {
-        let mut params = strategy::level_params(1).unwrap();
-        let opts = strategy::Options::default().window_log(0);
-
-        strategy::apply_options(&mut params, &opts);
-
-        assert_eq!(params.window_log, strategy::WINDOW_LOG_MIN);
+        let window_log = |log: u32| {
+            let mut params = strategy::level_params(1).unwrap();
+            strategy::apply_options(&mut params, &strategy::Options::default().window_log(log));
+            params.window_log
+        };
+        assert_eq!(window_log(1), strategy::WINDOW_LOG_MIN);
+        assert_eq!(window_log(40), strategy::WINDOW_LOG_MAX);
         #[cfg(feature = "ldm")]
         {
             let mut params = strategy::level_params(1).unwrap();
-            let opts = strategy::Options::default().window_log(0).ldm(true);
+            let opts = strategy::Options::default().window_log(1).ldm(true);
             strategy::apply_options(&mut params, &opts);
 
             let ldm = params.ldm_params.unwrap();
             assert!(ldm.hash_log >= ldm.bucket_size_log);
+        }
+    }
+
+    #[test]
+    fn window_log_zero_selects_the_default() {
+        let default = strategy::level_params(3).unwrap();
+        let mut params = default;
+        let opts = strategy::Options::default().window_log(20).window_log(0);
+        strategy::apply_options(&mut params, &opts);
+        assert_eq!(params.window_log, default.window_log);
+
+        #[cfg(feature = "ldm")]
+        {
+            let mut params = default;
+            let opts = strategy::Options::default().window_log(0).ldm(true);
+            strategy::apply_options(&mut params, &opts);
+            assert_eq!(params.window_log, 27);
         }
     }
 

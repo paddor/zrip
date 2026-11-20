@@ -3,12 +3,38 @@
 #![forbid(unsafe_code)]
 
 use alloc::vec::Vec;
+use core::mem::MaybeUninit;
 
 use crate::frame_state::EncodeState;
 use crate::strategy::{self, LevelParams};
 use zrip_core::dict::Dictionary;
 use zrip_core::error::CompressError;
 pub use zrip_core::push::{Progress, Status};
+
+/// A buffer that frame bytes are copied into.
+trait Output {
+    /// Copies as much of `data` as fits from `pos` on and returns how much.
+    fn put(&mut self, pos: usize, data: &[u8]) -> usize;
+}
+
+impl Output for [u8] {
+    fn put(&mut self, pos: usize, data: &[u8]) -> usize {
+        let n = data.len().min(self.len() - pos);
+        self[pos..pos + n].copy_from_slice(&data[..n]);
+        n
+    }
+}
+
+impl Output for [MaybeUninit<u8>] {
+    fn put(&mut self, pos: usize, data: &[u8]) -> usize {
+        let n = data.len().min(self.len() - pos);
+        // Compiles to a memcpy. `write_copy_of_slice` needs Rust 1.93.
+        for (dst, &src) in self[pos..pos + n].iter_mut().zip(data) {
+            dst.write(src);
+        }
+        n
+    }
+}
 
 /// What [`PushEncoder::encode`] should do once it has consumed the input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,6 +168,29 @@ impl PushEncoder {
         output: &mut [u8],
         op: EndOp,
     ) -> Result<Progress, CompressError> {
+        self.encode_with(input, output, op)
+    }
+
+    /// Like [`encode`](Self::encode), but `output` may be uninitialized,
+    /// so callers need not zero their buffers. On return, the first
+    /// `produced` bytes of `output` are initialized. Bytes past them are left
+    /// as they were, and no byte is ever made uninitialized, so callers may
+    /// rely on both in unsafe code, as when they track initialized capacity.
+    pub fn encode_uninit(
+        &mut self,
+        input: &[u8],
+        output: &mut [MaybeUninit<u8>],
+        op: EndOp,
+    ) -> Result<Progress, CompressError> {
+        self.encode_with(input, output, op)
+    }
+
+    fn encode_with<O: Output + ?Sized>(
+        &mut self,
+        input: &[u8],
+        output: &mut O,
+        op: EndOp,
+    ) -> Result<Progress, CompressError> {
         if let Some(e) = &self.error {
             return Err(e.clone());
         }
@@ -218,10 +267,10 @@ impl PushEncoder {
         self.error = None;
     }
 
-    fn run(
+    fn run<O: Output + ?Sized>(
         &mut self,
         input: &[u8],
-        output: &mut [u8],
+        output: &mut O,
         op: EndOp,
         consumed: &mut usize,
         produced: &mut usize,
@@ -229,8 +278,7 @@ impl PushEncoder {
         loop {
             if self.has_pending_output() {
                 let src = &self.pending[self.pending_pos..];
-                let n = src.len().min(output.len() - *produced);
-                output[*produced..*produced + n].copy_from_slice(&src[..n]);
+                let n = output.put(*produced, src);
                 *produced += n;
                 self.pending_pos += n;
                 if self.has_pending_output() {

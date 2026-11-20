@@ -69,6 +69,13 @@ impl LevelParams {
 /// Default compression level used when level 0 is requested.
 pub const DEFAULT_LEVEL: i32 = 1;
 
+/// Lowest compression level. Level -8, a separate level in earlier
+/// versions, is still accepted and runs as -7.
+pub const MIN_LEVEL: i32 = -7;
+
+/// Highest compression level.
+pub const MAX_LEVEL: i32 = 4;
+
 /// Returns the compression parameters for a given level, or `None` if out of range.
 ///
 /// Level 0 is treated as "library default" and maps to level 1.
@@ -143,7 +150,9 @@ fn short_input_search_strength(level: i32, input_len: usize) -> Option<u32> {
 
 pub const HASH_LOG_MIN: u32 = 6;
 pub const HASH_LOG_MAX: u32 = 30;
+/// Smallest window log, a 1 KiB window.
 pub const WINDOW_LOG_MIN: u32 = 10;
+/// Largest window log, a 128 MiB window.
 pub const WINDOW_LOG_MAX: u32 = 27;
 #[cfg(feature = "ldm")]
 const LDM_DEFAULT_WINDOW_LOG: u32 = 27;
@@ -419,9 +428,13 @@ pub struct Options {
 }
 
 impl Options {
+    /// Sets the window to 2^`log` bytes. `log` is clamped to
+    /// [`WINDOW_LOG_MIN`]..=[`WINDOW_LOG_MAX`], 1 KiB to 128 MiB, and `0`
+    /// selects the level's default, as in C zstd. One-shot calls shrink the
+    /// window to the input.
     #[must_use]
     pub fn window_log(mut self, log: u32) -> Self {
-        self.window_log = Some(log);
+        self.window_log = (log != 0).then_some(log);
         self
     }
 

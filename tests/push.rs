@@ -520,6 +520,91 @@ fn decode_limit_counts_earlier_frames() {
     assert_eq!(out.len(), 1000);
 }
 
+#[test]
+fn uninit_buffers_match_initialized_ones() {
+    use std::mem::MaybeUninit;
+
+    let data = mixed(300_000, 11);
+    for (level, out_buf) in [(1, 13), (3, 4096), (-7, 1 << 20)] {
+        let expected = push_encode(&mut PushEncoder::new(level).unwrap(), &data, 1000, out_buf);
+
+        let mut enc = PushEncoder::new(level).unwrap();
+        let mut frame = Vec::new();
+        let mut buf = vec![MaybeUninit::uninit(); out_buf];
+        for (input, op) in [(&data[..], EndOp::Continue), (&[][..], EndOp::End)] {
+            let mut input = input;
+            loop {
+                let p = enc.encode_uninit(input, &mut buf, op).unwrap();
+                frame.extend(buf[..p.produced].iter().map(|b| unsafe { b.assume_init() }));
+                input = &input[p.consumed..];
+                if p.status != Status::NeedsOutput {
+                    break;
+                }
+            }
+        }
+        assert_eq!(frame, expected, "L{level} out={out_buf}");
+
+        let mut dec = PushDecoder::new();
+        let mut out = Vec::new();
+        let mut input = &frame[..];
+        loop {
+            let p = dec.decode_uninit(input, &mut buf).unwrap();
+            out.extend(buf[..p.produced].iter().map(|b| unsafe { b.assume_init() }));
+            input = &input[p.consumed..];
+            if p.status == Status::Finished {
+                break;
+            }
+        }
+        dec.finish().unwrap();
+        assert_eq!(out, data, "L{level} out={out_buf}");
+    }
+}
+
+#[test]
+fn at_frame_end_holds_until_the_next_frame() {
+    let a = zrip::compress(&mixed(200_000, 5), 1).unwrap();
+    let b = zrip::compress(b"second", 1).unwrap();
+    let both = [&a[..], &b[..]].concat();
+    let mut dec = PushDecoder::new();
+    assert!(!dec.at_frame_end());
+
+    // Output still pending after all of `a` was read: not at the end yet.
+    let mut buf = [0u8; 4096];
+    let mut input = &both[..];
+    loop {
+        let p = dec.decode(input, &mut buf).unwrap();
+        input = &input[p.consumed..];
+        if p.status == Status::Finished {
+            break;
+        }
+        assert!(!dec.at_frame_end());
+    }
+    assert!(dec.at_frame_end());
+
+    // The one `Finished` was seen; empty calls keep the frame end.
+    assert_eq!(
+        dec.decode(&[], &mut buf).unwrap().status,
+        Status::NeedsInput
+    );
+    assert!(dec.at_frame_end());
+
+    // The next frame's first bytes end it.
+    let p = dec.decode(&input[..2], &mut buf).unwrap();
+    assert_eq!(p.consumed, 2);
+    assert!(!dec.at_frame_end());
+    let p = dec.decode(&input[2..], &mut buf).unwrap();
+    assert_eq!(p.status, Status::Finished);
+    assert!(dec.at_frame_end());
+    dec.reset();
+    assert!(!dec.at_frame_end());
+
+    let mut out = Vec::new();
+    dec.decode_to_vec(&both, &mut out).unwrap();
+    assert!(dec.at_frame_end());
+    dec.decode_to_vec(&b[..3], &mut out).unwrap();
+    assert!(!dec.at_frame_end());
+}
+
 /// Skewed literals with few repeats: about 5 bits per byte.
 fn skewed(range: core::ops::Range<u32>) -> Vec<u8> {
     range

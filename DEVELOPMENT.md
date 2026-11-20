@@ -157,6 +157,27 @@ The dict decode test uses a pre-built fixture
 (`tests/fixtures/corpus_dict_roundtrip.bin`). Regenerate after corpus changes:
 `cargo test --features dict_builder -- fuzz_corpus_dict_generate`
 
+### Push API soak
+
+`tests/push_uninit_soak.rs` drives the push encoder and decoder in lockstep:
+the same random calls go to `encode`/`decode` with initialized buffers and
+to `encode_uninit`/`decode_uninit` with poisoned or truly uninitialized
+ones (a vector's spare capacity). Every call must return the same result
+and bytes, write nothing past `produced`, and leave the same state. Scenarios
+cover every level, options, dictionaries, flushes, abandoned frames, buffers
+of 0 B to 1 MiB, C zstd frames, skippable frames, output limits, and cut or
+bit-flipped input. `cargo test` runs a short pass. Before a release, run the
+timed soak, one process per core:
+
+```bash
+ZRIP_SOAK_SECS=1800 cargo test --release --test zrip_push_uninit_soak -- \
+  --ignored --nocapture
+```
+
+A failure prints the case's `ZRIP_SOAK_SEED`, which replays it alone.
+Under Miri, the short pass runs a few small cases without C zstd:
+`cargo +nightly miri test --test zrip_push_uninit_soak`.
+
 ### Adversarial corpus
 
 If you have an adversarial corpus of small/malformed zstd files (e.g. from

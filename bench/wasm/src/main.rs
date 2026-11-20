@@ -171,7 +171,7 @@ fn levels_for_codec(codec: &str, level_filter: &[i32]) -> Vec<i32> {
         "C zstd" | "structured-zstd" => levels
             .iter()
             .copied()
-            .filter(|&level| (-7..=4).contains(&level))
+            .filter(|&level| (zrip::MIN_LEVEL..=zrip::MAX_LEVEL).contains(&level))
             .collect(),
         "ruzstd" => levels.iter().copied().filter(|&level| level == 1).collect(),
         _ => levels.to_vec(),

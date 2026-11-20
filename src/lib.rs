@@ -28,6 +28,8 @@
 //! | 3..=4 | `DFast` | Better ratio, still fast |
 //!
 //! Level -8, a separate zrip level in earlier versions, runs as -7.
+//! [`MIN_LEVEL`], [`MAX_LEVEL`] and [`DEFAULT_LEVEL`] name the bounds and
+//! the default.
 //!
 //! # Streaming
 //!
@@ -100,7 +102,9 @@ pub use zrip_core::dict;
 #[cfg(feature = "alloc")]
 pub use zrip_core::dict::Dictionary;
 #[cfg(feature = "alloc")]
-pub use zrip_encode::strategy::{DEFAULT_LEVEL, LdmParams, LevelParams, Options};
+pub use zrip_encode::strategy::{
+    DEFAULT_LEVEL, LdmParams, LevelParams, MAX_LEVEL, MIN_LEVEL, Options,
+};
 
 pub const DEFAULT_DECOMPRESS_LIMIT: usize = usize::MAX;
 pub use zrip_core::SAFE_DECOMPRESS_LIMIT;

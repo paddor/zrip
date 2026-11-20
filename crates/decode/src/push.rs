@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 use alloc::vec::Vec;
+use core::mem::MaybeUninit;
 
 use crate::frame_state::{
     AfterBlock, BLOCK_HEADER_SIZE, CHECKSUM_SIZE, FRAME_PREFIX_SIZE, FrameState,
@@ -94,6 +95,8 @@ pub struct PushDecoder {
     output_end: usize,
     /// A frame ended; report it once its output is delivered.
     frame_done: bool,
+    /// A frame ended, its output was delivered, and no later input was read.
+    at_frame_end: bool,
     error: Option<DecompressError>,
 }
 
@@ -127,6 +130,23 @@ impl Sink for SliceSink<'_> {
     fn put(&mut self, data: &[u8]) -> usize {
         let n = data.len().min(self.buf.len() - self.pos);
         self.buf[self.pos..self.pos + n].copy_from_slice(&data[..n]);
+        self.pos += n;
+        n
+    }
+}
+
+struct UninitSink<'a> {
+    buf: &'a mut [MaybeUninit<u8>],
+    pos: usize,
+}
+
+impl Sink for UninitSink<'_> {
+    fn put(&mut self, data: &[u8]) -> usize {
+        let n = data.len().min(self.buf.len() - self.pos);
+        // Compiles to a memcpy. `write_copy_of_slice` needs Rust 1.93.
+        for (dst, &src) in self.buf[self.pos..self.pos + n].iter_mut().zip(data) {
+            dst.write(src);
+        }
         self.pos += n;
         n
     }
@@ -178,6 +198,7 @@ impl PushDecoder {
             output_pos: 0,
             output_end: 0,
             frame_done: false,
+            at_frame_end: false,
             error: None,
         }
     }
@@ -201,6 +222,28 @@ impl PushDecoder {
     /// `consumed` can be less than `input.len()` then too.
     pub fn decode(&mut self, input: &[u8], output: &mut [u8]) -> Result<Progress, DecompressError> {
         let mut sink = SliceSink {
+            buf: output,
+            pos: 0,
+        };
+        let (consumed, status) = self.run(input, &mut sink, true)?;
+        Ok(Progress {
+            consumed,
+            produced: sink.pos,
+            status,
+        })
+    }
+
+    /// Like [`decode`](Self::decode), but `output` may be uninitialized,
+    /// so callers need not zero their buffers. On return, the first
+    /// `produced` bytes of `output` are initialized. Bytes past them are left
+    /// as they were, and no byte is ever made uninitialized, so callers may
+    /// rely on both in unsafe code, as when they track initialized capacity.
+    pub fn decode_uninit(
+        &mut self,
+        input: &[u8],
+        output: &mut [MaybeUninit<u8>],
+    ) -> Result<Progress, DecompressError> {
+        let mut sink = UninitSink {
             buf: output,
             pos: 0,
         };
@@ -239,6 +282,17 @@ impl PushDecoder {
         }
     }
 
+    /// Whether the decoder stands at the end of a frame: one ended, all of
+    /// its output was delivered, and no input after it was read yet.
+    ///
+    /// [`Status::Finished`] is reported once, so that a loop calling until
+    /// [`Status::NeedsInput`] ends. This stays true until the next frame's
+    /// input arrives or [`reset`](Self::reset), for callers that learn of
+    /// the frame end later, such as after draining output in a flush.
+    pub fn at_frame_end(&self) -> bool {
+        self.at_frame_end
+    }
+
     /// Whether decoded output is still waiting to be delivered.
     pub fn has_pending_output(&self) -> bool {
         self.output_pos < self.output_end
@@ -252,6 +306,7 @@ impl PushDecoder {
         self.output_pos = 0;
         self.output_end = 0;
         self.frame_done = false;
+        self.at_frame_end = false;
         self.error = None;
     }
 
@@ -274,14 +329,21 @@ impl PushDecoder {
             }
             if self.frame_done {
                 self.frame_done = false;
+                self.at_frame_end = true;
                 if stop_at_frame_end {
                     return Ok((consumed, Status::Finished));
                 }
             }
-            match self.step(input, &mut consumed) {
+            let before = consumed;
+            let stepped = self.step(input, &mut consumed);
+            if consumed > before {
+                self.at_frame_end = false;
+            }
+            match stepped {
                 Ok(true) => {}
                 Ok(false) => return Ok((consumed, Status::NeedsInput)),
                 Err(e) => {
+                    self.at_frame_end = false;
                     self.unit = Unit::Failed;
                     self.frame.discard_block();
                     self.output_pos = 0;
