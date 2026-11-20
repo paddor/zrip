@@ -767,7 +767,7 @@ mod tests {
     #[test]
     fn window_log_zero_selects_the_default() {
         let default = strategy::level_params(3).unwrap();
-        let mut params = default.clone();
+        let mut params = default;
         let opts = strategy::Options::default().window_log(20).window_log(0);
         strategy::apply_options(&mut params, &opts);
         assert_eq!(params.window_log, default.window_log);
