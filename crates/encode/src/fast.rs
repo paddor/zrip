@@ -123,6 +123,15 @@ pub(crate) fn compress_fast_block(
             hash_table,
             sequences,
         ),
+        (8.., 14) => compress_fast_block_h14_mls8(
+            src,
+            block_start,
+            block_end,
+            params,
+            rep_offsets,
+            hash_table,
+            sequences,
+        ),
         (8.., _) => compress_fast_block_mls8(
             src,
             block_start,
@@ -429,6 +438,28 @@ fn compress_fast_block_h13_mls8(
     sequences: &mut Vec<Sequence>,
 ) {
     simd_body!(compress_fast_block_impl::<13, 8>(
+        src,
+        block_start,
+        block_end,
+        params,
+        rep_offsets,
+        hash_table,
+        sequences,
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn compress_fast_block_h14_mls8(
+    src: &[u8],
+    block_start: usize,
+    block_end: usize,
+    params: &LevelParams,
+    rep_offsets: &[u32; 3],
+    hash_table: &mut [u32],
+    sequences: &mut Vec<Sequence>,
+) {
+    simd_body!(compress_fast_block_impl::<14, 8>(
         src,
         block_start,
         block_end,

@@ -250,8 +250,10 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         // confirms eight bytes), so frames decode with few sequences. Blocks
         // that are almost all literals try Huffman literals instead, so
         // low-compressibility data still shrinks a little. It steps 3 bytes
-        // and grows the step every 16 bytes without a match. L-8, a separate
-        // level before, runs as L-7.
+        // and grows the step every 8 bytes without a match: text with few
+        // long matches leaves almost all bytes to Huffman coding anyway, so a
+        // denser search only cost time there. L-8, a separate level before,
+        // runs as L-7.
         -8 | -7 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
@@ -260,12 +262,12 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             search_log: 0,
             min_match: 8,
             target_length: 2,
-            search_strength: 4,
+            search_strength: 3,
             force_raw_literals: true,
             #[cfg(feature = "ldm")]
             ldm_params: None,
         },
-        // L-6 to L-4 hash and confirm 8 bytes. With Huffman literals, longer
+        // L-6 to L-3 hash and confirm 8 bytes. With Huffman literals, longer
         // matches at short steps beat shorter matches at long steps on both
         // ratio and speed, as fewer bytes are left to code as literals and
         // frames decode with fewer sequences. The step grows every 8 or 16
@@ -309,22 +311,26 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             #[cfg(feature = "ldm")]
             ldm_params: None,
         },
-        // L-3 through L-1 hash seven bytes. L-3 and L-2 grow the step every
-        // 16 bytes without a match, L-1 every 32, so frequent matches keep
-        // the initial step while long literal runs need few probes.
+        // L-3 searches as L-4 does, in a table twice the size. Seven-byte
+        // hashes at a longer step, as before, gained almost no ratio over
+        // L-4 on highly compressible data, and lost ratio on inputs up to
+        // 256 KiB.
         -3 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
             hash_log: 14,
             chain_log: 14,
             search_log: 0,
-            min_match: 7,
-            target_length: 3,
+            min_match: 8,
+            target_length: 2,
             search_strength: 4,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
             ldm_params: None,
         },
+        // L-2 and L-1 hash seven bytes. L-2 grows the step every 16 bytes
+        // without a match, L-1 every 32, so frequent matches keep the
+        // initial step while long literal runs need few probes.
         -2 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,

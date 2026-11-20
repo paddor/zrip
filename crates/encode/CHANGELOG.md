@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Level -3 hashes eight bytes at level -4's step (`min_match` 8,
+  `target_length` 2) in a table of 2^14 entries, so it sits between -4 and -2
+  in speed and ratio. The Fast finder gets a constant-table path for it.
+- Level -7 grows its step every 8 bytes without a match (`search_strength`
+  3), so it encodes faster than -6 on text, too.
+
 ## [0.9.10] - 2026-11-20
 
 - `strategy::MIN_LEVEL` and `strategy::MAX_LEVEL` name the lowest and
