@@ -54,7 +54,8 @@ Do not add a crates.io token secret.
    Keep `npm/package.json` at the same WASM version.
 
 4. **Build and verify.** Run the JSR commands below and any additional release
-   audit warranted by the changes. Run `npm test` in `npm/` as well.
+   audit warranted by the changes. Run `npm test` in `npm/` as well. Run the
+   [performance gate](#performance-gate) on a machine with floors.
 
 5. **Merge the release PR after CI passes.** Monitor `release-plz` for crate
    publication and `.github/workflows/jsr.yml` for JSR publication.
@@ -164,6 +165,52 @@ prior fuzzing campaigns), seed them into the corrupt_decompress target:
 cargo +nightly fuzz run zrip_fuzz_corrupt_decompress /path/to/adversarial/corpus \
   -- -max_total_time=10800 -jobs=2
 ```
+
+## Performance gate
+
+`zrip_perf_verify` measures throughput and ratio for the ways zrip is used:
+one-shot calls, reused contexts, push streams, `FrameEncoder`, dictionary
+frames, and decoding, on generated logs and metric records plus slices of
+every Silesia file. It fails when a case falls below its floor. It runs in
+about 20 s, pinned to one CPU, and reports the best of 7 rounds per case.
+
+```bash
+cargo run --release --manifest-path bench/Cargo.toml --bin zrip_perf_verify
+```
+
+Floors are per machine, in the ignored `.perf_hw` at the repository root:
+
+```text
+[context_l3]
+16k_mb_s=187.6
+16k_ratio=4.722
+```
+
+Keys are `<case>_mb_s` and, for encode cases, `<case>_ratio`. Without the
+file, loose smoke floors catch only collapses. To set floors, run a
+known-good build on an idle machine, keep 97% of
+its throughput, and review the file:
+
+```bash
+cargo run --release --manifest-path bench/Cargo.toml --bin zrip_perf_verify -- \
+  --repeat 3 --suggest 0.97 > .perf_hw
+```
+
+Floors only hold for the code layout and machine they were measured on. A
+new toolchain can move them by a few percent; reset them from a known-good
+build after a toolchain update.
+
+Options: `--list`, `--case NAME` (a section or one case, repeatable),
+`--repeat N` (median of N), and `--measure-only`. `ZRIP_PERF_CPU` picks the
+pinned CPU (`none` to leave it unpinned), `ZRIP_PERF_ROUNDS` and
+`ZRIP_PERF_ROUND_MS` set the timing, `ZRIP_PERF_HW` names another floors
+file, and `ZRIP_PERF_CORPUS` another Silesia directory. Without the corpus,
+the `silesia_*` cases are skipped.
+
+Run the gate before merging encoder or decoder changes and before each
+release. A case below its floor is measured once more, keeping the faster
+run. To compare two commits more finely than the floors allow, build the
+gate in a worktree for each and run them alternately.
 
 ## Benchmarks
 
