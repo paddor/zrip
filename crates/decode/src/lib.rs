@@ -334,13 +334,14 @@ fn decompress_frame_with_header(
 
         let block_size = block_header.block_size as usize;
 
-        if block_size > zrip_core::frame::MAX_BLOCK_SIZE {
-            match block_header.block_type {
-                BlockType::Raw | BlockType::Rle => {
-                    return Err(DecompressError::BlockTooLarge);
-                }
-                BlockType::Compressed => {}
-            }
+        // `Block_Maximum_Size`: the window, at most 128 KiB. As in C zstd, it
+        // bounds the compressed size too.
+        if block_size as u64
+            > header
+                .window_size
+                .min(zrip_core::frame::MAX_BLOCK_SIZE as u64)
+        {
+            return Err(DecompressError::BlockTooLarge);
         }
 
         let block_output_start = output.len();
@@ -494,18 +495,13 @@ fn decode_compressed_block(
 
     let remaining = &data[lit_consumed..];
 
-    if remaining.is_empty() {
-        let lits = lits_at.resolve(data, &ws.literal_buf).as_slice();
-        if output.len() - output_start + lits.len() > max_output {
-            return Err(DecompressError::OutputTooSmall);
-        }
-        output.extend_from_slice(lits);
-        return Ok(());
-    }
-
+    // As in C zstd, the sequence count is required, and a block without
+    // sequences ends right after it.
     let (num_sequences, seq_count_size) = parse_sequence_count(remaining)?;
-
     if num_sequences == 0 {
+        if remaining.len() != seq_count_size {
+            return Err(DecompressError::CorruptSequences);
+        }
         let lits = lits_at.resolve(data, &ws.literal_buf).as_slice();
         if output.len() - output_start + lits.len() > max_output {
             return Err(DecompressError::OutputTooSmall);

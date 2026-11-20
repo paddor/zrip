@@ -16,7 +16,7 @@ use crate::exec::SequenceOutputScope;
 use crate::fast_vec::WILDCOPY_OVERLENGTH;
 use crate::literals::decode_literals_ws;
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
-use zrip_core::block::{BlockHeader, BlockType};
+use zrip_core::block::BlockHeader;
 use zrip_core::dict::Dictionary;
 use zrip_core::error::DecompressError;
 use zrip_core::frame::header::parse_frame_header;
@@ -67,9 +67,9 @@ pub(crate) struct FrameState {
     hasher: Option<Xxh64State>,
     max_output: usize,
     max_window: Option<u64>,
-    bytes_output: usize,
+    bytes_output: u64,
     frame_content_size: Option<u64>,
-    frame_bytes: usize,
+    frame_bytes: u64,
     dict: Option<Dictionary>,
     /// Window history, then the current block's output from `block_start`.
     /// Blocks decode straight into it, so their output needs no copy.
@@ -161,7 +161,7 @@ impl FrameState {
 
         // The limit spans the stream, so earlier frames' output counts.
         if let Some(fcs) = header.frame_content_size
-            && fcs > self.max_output.saturating_sub(self.bytes_output) as u64
+            && fcs > (self.max_output as u64).saturating_sub(self.bytes_output)
         {
             return Err(DecompressError::OutputTooSmall);
         }
@@ -205,14 +205,14 @@ impl FrameState {
         Ok(())
     }
 
-    /// Checks a parsed block header against the format's size limits.
-    pub(crate) fn check_block_header(header: BlockHeader) -> Result<(), DecompressError> {
-        match header.block_type {
-            BlockType::Raw | BlockType::Rle if header.block_size as usize > MAX_BLOCK_SIZE => {
-                Err(DecompressError::BlockTooLarge)
-            }
-            _ => Ok(()),
+    /// Checks a parsed block header against `Block_Maximum_Size`: the
+    /// window, at most 128 KiB. As in C zstd, it bounds the compressed size
+    /// too.
+    pub(crate) fn check_block_header(&self, header: BlockHeader) -> Result<(), DecompressError> {
+        if header.block_size as usize > self.window_size.min(MAX_BLOCK_SIZE) {
+            return Err(DecompressError::BlockTooLarge);
         }
+        Ok(())
     }
 
     /// The most a block may write: 128 KiB, or less once a known content
@@ -220,7 +220,7 @@ impl FrameState {
     fn max_block(&self) -> usize {
         match self.frame_content_size {
             Some(fcs) => fcs
-                .saturating_sub(self.frame_bytes as u64)
+                .saturating_sub(self.frame_bytes)
                 .min(MAX_BLOCK_SIZE as u64) as usize,
             None => MAX_BLOCK_SIZE,
         }
@@ -245,7 +245,7 @@ impl FrameState {
     /// hold. Plain doubling would reserve four windows.
     pub(crate) fn start_block(&mut self) {
         let window = self.window_size;
-        if self.frame_bytes >= window && self.history.len() > 2 * window {
+        if self.frame_bytes >= window as u64 && self.history.len() > 2 * window {
             let start = self.history.len() - window;
             self.history.copy_within(start.., 0);
             self.history.truncate(window);
@@ -296,7 +296,7 @@ impl FrameState {
         // Matches reach the last window before the block. Until the frame has
         // produced a full window, all history stays reachable, so the whole
         // dictionary is.
-        let output_base = if self.frame_bytes >= self.window_size {
+        let output_base = if self.frame_bytes >= self.window_size as u64 {
             self.block_start.saturating_sub(self.window_size)
         } else {
             0
@@ -306,14 +306,13 @@ impl FrameState {
         let (lit_consumed, lits_at) = decode_literals_ws(block_data, &mut self.ws)?;
         let remaining = &block_data[lit_consumed..];
 
-        if remaining.is_empty() {
-            let lits = lits_at.resolve(block_data, &self.ws.literal_buf);
-            self.history.extend_from_slice(lits.as_slice());
-            return Ok(());
-        }
-
+        // As in C zstd, the sequence count is required, and a block without
+        // sequences ends right after it.
         let (num_sequences, seq_count_size) = parse_sequence_count(remaining)?;
         if num_sequences == 0 {
+            if remaining.len() != seq_count_size {
+                return Err(DecompressError::CorruptSequences);
+            }
             let lits = lits_at.resolve(block_data, &self.ws.literal_buf);
             self.history.extend_from_slice(lits.as_slice());
             return Ok(());
@@ -361,13 +360,13 @@ impl FrameState {
         if let Some(ref mut hasher) = self.hasher {
             hasher.update(block);
         }
-        self.bytes_output += block.len();
-        self.frame_bytes += block.len();
-        if self.bytes_output > self.max_output {
+        self.bytes_output += block.len() as u64;
+        self.frame_bytes += block.len() as u64;
+        if self.bytes_output > self.max_output as u64 {
             return Err(DecompressError::OutputTooSmall);
         }
         if let Some(fcs) = self.frame_content_size {
-            let written = self.frame_bytes as u64;
+            let written = self.frame_bytes;
             if written > fcs || last && written != fcs {
                 return Err(DecompressError::FrameSizeMismatch);
             }

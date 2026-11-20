@@ -872,3 +872,79 @@ fn predefined_mode_replaces_dictionary_tables_in_zrip_frames() {
         assert_dict_paths_decode(&frames, &records, &dict_bytes);
     }
 }
+
+/// A frame with a 1 KiB window and one compressed block: "Hello" as raw
+/// literals, followed by `seq`, the sequence section.
+fn hello_frame(seq: &[u8]) -> Vec<u8> {
+    let block_size = 6 + seq.len() as u32;
+    let header = (block_size << 3) | (2 << 1) | 1;
+    let mut frame = vec![0x28, 0xB5, 0x2F, 0xFD, 0, 0];
+    frame.extend_from_slice(&header.to_le_bytes()[..3]);
+    frame.push(5 << 3); // raw literals, 5 bytes
+    frame.extend_from_slice(b"Hello");
+    frame.extend_from_slice(seq);
+    frame
+}
+
+#[test]
+fn sequence_section_is_required_and_ends_after_zero_count() {
+    let ok = hello_frame(&[0]);
+    assert_eq!(zrip::decompress(&ok).unwrap(), b"Hello");
+    #[cfg(feature = "std")]
+    assert_eq!(zstd::stream::decode_all(&ok[..]).unwrap(), b"Hello");
+
+    // As in C zstd: no sequence count at all, or bytes after a zero count.
+    for seq in [&[][..], &[0, 0], &[0, 0x80, 0, 0]] {
+        let bad = hello_frame(seq);
+        assert_eq!(
+            zrip::decompress(&bad),
+            Err(zrip::DecompressError::CorruptSequences),
+            "{seq:?}"
+        );
+        #[cfg(feature = "std")]
+        {
+            use std::io::Read;
+            assert!(zstd::stream::decode_all(&bad[..]).is_err(), "C {seq:?}");
+            let mut out = Vec::new();
+            assert!(
+                zrip::FrameDecoder::new(bad.as_slice())
+                    .read_to_end(&mut out)
+                    .is_err()
+            );
+            let mut dec = zrip::push::PushDecoder::new();
+            assert_eq!(
+                dec.decode_to_vec(&bad, &mut out),
+                Err(zrip::DecompressError::CorruptSequences)
+            );
+        }
+    }
+}
+
+/// `Block_Maximum_Size` is the window, at most 128 KiB, and bounds the
+/// compressed size too. A single-segment frame's window is its content
+/// size, so a 7-byte block for 5 bytes of content is too large.
+#[test]
+fn block_larger_than_the_window_is_rejected() {
+    let mut frame = hello_frame(&[0]);
+    frame[4] = 0x20; // single segment, 1-byte content size
+    frame[5] = 5;
+    assert_eq!(
+        zrip::decompress(&frame),
+        Err(zrip::DecompressError::BlockTooLarge)
+    );
+    #[cfg(feature = "std")]
+    {
+        use std::io::Read;
+        assert!(zstd::stream::decode_all(&frame[..]).is_err());
+        let mut out = Vec::new();
+        assert!(
+            zrip::FrameDecoder::new(frame.as_slice())
+                .read_to_end(&mut out)
+                .is_err()
+        );
+        assert_eq!(
+            zrip::push::PushDecoder::new().decode_to_vec(&frame, &mut out),
+            Err(zrip::DecompressError::BlockTooLarge)
+        );
+    }
+}
