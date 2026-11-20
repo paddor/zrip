@@ -22,6 +22,8 @@ FUZZ_SECONDS_SHORT="${FUZZ_SECONDS_SHORT:-${FUZZ_SECONDS_PER_TARGET:-180}}"
 # FUZZ_SHARD=i/n runs every n-th target starting at the i-th, to split one
 # run across n hosts.
 FUZZ_SHARD="${FUZZ_SHARD:-1/1}"
+# FUZZ_TARGETS="a b" runs only those targets, as CI does with one per job.
+FUZZ_TARGETS="${FUZZ_TARGETS:-}"
 SHARD_INDEX="${FUZZ_SHARD%/*}"
 SHARD_COUNT="${FUZZ_SHARD#*/}"
 if ! [[ "$SHARD_INDEX" =~ ^[0-9]+$ && "$SHARD_COUNT" =~ ^[0-9]+$ ]] ||
@@ -205,7 +207,7 @@ main() {
   status "log_dir=$LOG_DIR"
   status "config cpu_count=$CPU_COUNT smoke=$SMOKE"
   status "config fuzz_seconds_long=$FUZZ_SECONDS_LONG fuzz_seconds_short=$FUZZ_SECONDS_SHORT"
-  status "config shard=$FUZZ_SHARD"
+  status "config shard=$FUZZ_SHARD targets=${FUZZ_TARGETS:-all}"
   status "config fuzz_max_len=$FUZZ_MAX_LEN"
 
   if ! cargo +nightly fuzz list >"$fuzz_list_log" 2>&1; then
@@ -218,6 +220,15 @@ main() {
     return 1
   fi
   mapfile -t targets < <(ordered_fuzz_targets "${available_targets[@]}")
+  if [ -n "$FUZZ_TARGETS" ]; then
+    read -r -a targets <<<"$FUZZ_TARGETS"
+    for target in "${targets[@]}"; do
+      if ! contains_target "$target" "${available_targets[@]}"; then
+        status "unknown fuzz target $target"
+        return 1
+      fi
+    done
+  fi
   if [ "$FUZZ_TARGET_LIMIT" -gt 0 ] &&
     [ "${#targets[@]}" -gt "$FUZZ_TARGET_LIMIT" ]; then
   targets=("${targets[@]:0:$FUZZ_TARGET_LIMIT}")
