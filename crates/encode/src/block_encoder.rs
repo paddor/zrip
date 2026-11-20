@@ -809,6 +809,12 @@ fn encode_compressed_block_raw_impl(
         return encode_raw_block(src, last, output);
     }
 
+    // The decoder now holds the predefined tables, so later blocks must not
+    // repeat the dictionary's.
+    workspace.prev_ll = None;
+    workspace.prev_of = None;
+    workspace.prev_ml = None;
+
     let block_size = block_len as u32;
     let header = (block_size << 3) | 0x04 | if last { 1 } else { 0 };
     output.push(header as u8)?;

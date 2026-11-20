@@ -7,6 +7,9 @@
   in speed and ratio. The Fast finder gets a constant-table path for it.
 - Level -7 grows its step every 8 bytes without a match (`search_strength`
   3), so it encodes faster than -6 on text, too.
+- Fixed: a level -7 block written with the predefined sequence tables now
+  drops the dictionary's tables, so a later literal-heavy block cannot
+  repeat them. Such frames failed to decode since 0.9.6.
 
 ## [0.9.10] - 2026-11-20
 
