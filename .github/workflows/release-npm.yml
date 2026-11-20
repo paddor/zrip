@@ -116,6 +116,4 @@ jobs:
           name: npm-release-tarball
           path: dist
       - name: Publish package
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish "./dist/paddor-zrip-${{ needs.package.outputs.version }}.tgz" --access public --provenance
