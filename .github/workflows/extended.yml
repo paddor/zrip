@@ -1,0 +1,117 @@
+name: extended
+
+# Weekly runs too slow for every PR: each fuzz target in its own job, the
+# ignored large-input tests, and the timed push soak. Pull requests that
+# touch the fuzz setup run a short pass.
+on:
+  schedule:
+    - cron: "17 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      fuzz_seconds:
+        description: Seconds per decoder fuzz target (round-trip targets get a sixth)
+        default: "1800"
+      soak_seconds:
+        description: Seconds for the push soak
+        default: "1800"
+  pull_request:
+    paths:
+      - .github/workflows/extended.yml
+      - scripts/overnight_fuzz.sh
+      - fuzz/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extended-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  FUZZ_SECONDS: ${{ github.event_name == 'pull_request' && '120' || inputs.fuzz_seconds || '1800' }}
+  SOAK_SECONDS: ${{ github.event_name == 'pull_request' && '120' || inputs.soak_seconds || '1800' }}
+
+jobs:
+  fuzz-targets:
+    name: list fuzz targets
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: list
+        run: |
+          targets=$(sed -n 's/^name = "\(zrip_fuzz_[a-z0-9_]*\)"$/\1/p' fuzz/Cargo.toml | jq -R . | jq -cs .)
+          echo "$targets"
+          test "$targets" != "[]"
+          echo "targets=$targets" >>"$GITHUB_OUTPUT"
+
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    needs: fuzz-targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.fuzz-targets.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - run: cargo install cargo-fuzz --locked
+      # Corpora carry over from run to run, so fuzzing time adds up.
+      - uses: actions/cache@v6
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Fuzz
+        run: |
+          export CPU_COUNT=$(nproc) FUZZ_TARGETS=${{ matrix.target }} RUN_ID=ci
+          export FUZZ_SECONDS_LONG=$FUZZ_SECONDS FUZZ_SECONDS_SHORT=$((FUZZ_SECONDS / 6))
+          scripts/overnight_fuzz.sh
+      - name: Show failure
+        if: failure()
+        run: |
+          column -t tmp/overnight-fuzz/ci/summary.tsv || true
+          tail -n 60 tmp/overnight-fuzz/ci/*.log tmp/overnight-fuzz/ci/worker-logs/*/fuzz-*.log || true
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: tmp/overnight-fuzz/ci/
+
+  ignored:
+    name: ignored tests and push soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Large-input tests
+        run: >-
+          cargo test --release -p zrip-core -p zrip-encode -p zrip-decode -p zrip
+          --lib --tests -- --ignored --skip uninit_matches_init_soak
+      - name: Push soak, one process per core
+        env:
+          ZRIP_SOAK_SECS: ${{ env.SOAK_SECONDS }}
+        run: |
+          cargo test --release --test zrip_push_uninit_soak --no-run
+          pids=()
+          for i in $(seq "$(nproc)"); do
+            cargo test --release --test zrip_push_uninit_soak -- --ignored --nocapture >"soak-$i.log" 2>&1 &
+            pids+=("$!")
+          done
+          status=0
+          for i in "${!pids[@]}"; do
+            wait "${pids[$i]}" || status=1
+            echo "::group::soak $((i + 1))"
+            cat "soak-$((i + 1)).log"
+            echo "::endgroup::"
+          done
+          exit "$status"

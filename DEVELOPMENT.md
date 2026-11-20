@@ -151,6 +151,7 @@ SMOKE=1 scripts/overnight_fuzz.sh      # quick harness check
 CPU_COUNT=8 scripts/overnight_fuzz.sh  # build/fuzz parallelism
 FUZZ_SECONDS_LONG=3600 FUZZ_SECONDS_SHORT=300 scripts/overnight_fuzz.sh
 FUZZ_SECONDS_PER_TARGET=600 scripts/overnight_fuzz.sh  # sets both
+FUZZ_TARGETS="zrip_fuzz_push_decode zrip_fuzz_push_roundtrip" scripts/overnight_fuzz.sh
 ```
 
 The dict decode test uses a pre-built fixture
@@ -187,6 +188,22 @@ prior fuzzing campaigns), seed them into the corrupt_decompress target:
 cargo +nightly fuzz run zrip_fuzz_corrupt_decompress /path/to/adversarial/corpus \
   -- -max_total_time=10800 -jobs=2
 ```
+
+## Weekly extended CI
+
+`.github/workflows/extended.yml` runs every Sunday. Each fuzz target gets its
+own job running `scripts/overnight_fuzz.sh`: 30 minutes for decoder targets,
+5 for round-trip targets. Corpora are cached from run to run. The workflow
+also runs the ignored large-input tests and the push soak for 30 minutes,
+one process per core. A failed fuzz job prints its log tails and uploads its
+logs and crash inputs as an artifact. Start a run by hand with:
+
+```bash
+gh workflow run extended.yml -f fuzz_seconds=3600 -f soak_seconds=3600
+```
+
+Pull requests that change the workflow, the fuzz script, or `fuzz/` run a
+short pass of every job.
 
 ## Performance gate
 
