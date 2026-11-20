@@ -1,3 +1,6 @@
+//! Long distance matching, after C zstd's `zstd_ldm.c`. A gear rolling hash
+//! picks split points; a bucketed table of their checksums finds long
+//! matches across the window, and the regular finder fills the gaps.
 #![forbid(unsafe_code)]
 
 use crate::dfast;
@@ -6,6 +9,7 @@ use crate::strategy::{LdmParams, LevelParams, Strategy};
 use zrip_core::Sequence;
 use zrip_core::xxhash::xxh64;
 
+/// Split points [`GearHash::feed`] collects before the caller handles them.
 const LDM_BATCH_SIZE: usize = 64;
 
 // Gear hash table from C zstd (BSD/GPLv2 licensed).
@@ -270,12 +274,15 @@ static GEAR_TABLE: [u64; 256] = [
     0x2b4da14f2613d8f4,
 ];
 
+/// An indexed split point: its position in the buffer (`offset`, 0 marks an
+/// empty slot) and the high 32 bits of the XXH64 of the bytes it covers.
 #[derive(Clone, Copy, Default)]
 struct LdmEntry {
     offset: u32,
     checksum: u32,
 }
 
+/// An LDM match, with the literals since the previous one.
 #[derive(Clone, Copy)]
 struct RawLdmSeq {
     lit_length: u32,
@@ -283,6 +290,7 @@ struct RawLdmSeq {
     offset: u32,
 }
 
+/// Gear rolling hash that marks split points.
 struct GearHash {
     rolling: u64,
     stop_mask: u64,
@@ -290,6 +298,10 @@ struct GearHash {
 
 impl GearHash {
     fn new(params: &LdmParams) -> Self {
+        // Bit `k` of the hash depends on the last `k + 1` bytes. As in
+        // C zstd, the mask takes the top `hash_rate_log` bits below
+        // `min_match_length`, so a split depends only on the bytes it
+        // indexes and fires about once every 2^`hash_rate_log` bytes.
         let max_bits = (params.min_match_length as u64).min(64);
         let hrl = params.hash_rate_log;
         let stop_mask = if hrl > 0 && hrl <= max_bits as u32 {
@@ -303,12 +315,16 @@ impl GearHash {
         }
     }
 
+    /// Rolls `data` into the hash without looking for split points.
     fn reset(&mut self, data: &[u8]) {
         for &b in data {
             self.rolling = (self.rolling << 1).wrapping_add(GEAR_TABLE[b as usize]);
         }
     }
 
+    /// Rolls `data` into the hash and appends to `splits` the byte counts
+    /// after which the mask hit. Stops when the batch is full and returns
+    /// how many bytes it took. Unrolled by four, as in C zstd.
     fn feed(
         &mut self,
         data: &[u8],
@@ -369,17 +385,22 @@ impl GearHash {
     }
 }
 
+/// Long distance matcher state, kept across the blocks of a frame.
 pub struct LdmState {
+    /// Buckets of 2^`bucket_size_log` entries.
     table: Vec<LdmEntry>,
+    /// The slot each bucket overwrites next, so the oldest entry goes first.
     bucket_offsets: Vec<u8>,
     params: LdmParams,
     splits: [usize; LDM_BATCH_SIZE],
     raw_sequences: Vec<RawLdmSeq>,
+    /// Sequences the regular finder found in one gap.
     segment_sequences: Vec<Sequence>,
     entries_inserted: u32,
 }
 
 impl LdmState {
+    /// An empty index sized by `params`.
     #[allow(
         clippy::disallowed_methods,
         reason = "LDM tables are filled once here and cleared only by `reset`"
@@ -398,6 +419,7 @@ impl LdmState {
         }
     }
 
+    /// Empties the index for a new frame, keeping allocations.
     #[allow(
         clippy::disallowed_methods,
         reason = "clears a used state for the next frame"
@@ -409,6 +431,8 @@ impl LdmState {
         self.entries_inserted = 0;
     }
 
+    /// Moves stored positions down by `shift`, as the match tables move,
+    /// and drops those that fall below it.
     pub fn reduce_positions(&mut self, shift: u32) {
         if shift == 0 {
             return;
@@ -422,19 +446,25 @@ impl LdmState {
         }
     }
 
+    /// Hash bits that pick a bucket.
     fn h_bits(&self) -> u32 {
         self.params.hash_log - self.params.bucket_size_log
     }
 
+    /// Stores `entry` in bucket `hash`, over its oldest entry once full.
     fn insert_entry(&mut self, hash: u32, entry: LdmEntry) {
         let bucket_start = (hash as usize) << self.params.bucket_size_log;
         let offset = self.bucket_offsets[hash as usize];
         self.table[bucket_start + offset as usize] = entry;
-        let bucket_mask = (1u8 << self.params.bucket_size_log) - 1;
-        self.bucket_offsets[hash as usize] = (offset + 1) & bucket_mask;
+        // Up to 8, as C zstd (`ZSTD_LDM_BUCKETSIZELOG_MAX`): 256 entries,
+        // whose offsets fill a byte.
+        let bucket_mask = ((1u32 << self.params.bucket_size_log) - 1) as u8;
+        self.bucket_offsets[hash as usize] = offset.wrapping_add(1) & bucket_mask;
         self.entries_inserted += 1;
     }
 
+    /// Indexes the split points of `combined[scan_start..scan_end]` without
+    /// looking up matches.
     fn fill_only(&mut self, combined: &[u8], scan_start: usize, scan_end: usize) {
         let min_match = self.params.min_match_length as usize;
         let h_bits = self.h_bits();
@@ -458,10 +488,14 @@ impl LdmState {
                 if trigger_pos < scan_start + min_match {
                     continue;
                 }
+                // The entry covers the `min_match` bytes before the point
+                // where the mask hit.
                 let split = trigger_pos - min_match;
                 if split + min_match > combined.len() {
                     continue;
                 }
+                // Low bits pick the bucket. The high half filters bucket
+                // entries before any byte compare.
                 let xxhash = xxh64(&combined[split..split + min_match], 0);
                 let hash = (xxhash as u32) & ((1u32 << h_bits) - 1);
                 let checksum = (xxhash >> 32) as u32;
@@ -478,6 +512,9 @@ impl LdmState {
         }
     }
 
+    /// Finds LDM matches in `combined[scan_start..scan_end]` and stores them
+    /// in `raw_sequences`, indexing every split point. Matches reach at most
+    /// `window_size` back.
     fn generate_sequences(
         &mut self,
         combined: &[u8],
@@ -526,6 +563,7 @@ impl LdmState {
                     checksum,
                 };
 
+                // Inside the last match: index only.
                 if split < anchor {
                     self.insert_entry(hash, new_entry);
                     continue;
@@ -591,6 +629,8 @@ impl LdmState {
 
                 anchor = match_start + match_length;
 
+                // The match runs past this batch: restart the hash at its
+                // end and drop the batch's later splits.
                 if anchor > ip + hashed {
                     let reset_start = anchor.saturating_sub(min_match);
                     if reset_start + min_match <= scan_end {
@@ -615,6 +655,9 @@ impl LdmState {
     /// Generates LDM sequences, then for each gap between LDM matches runs
     /// the regular Fast/DFast compressor. Output sequences go into `sequences`.
     /// LDM offsets stay within `window_size`, the window the frame advertises.
+    ///
+    /// `hash_table` is the Fast table or the DFast short table, and
+    /// `hash_long` the DFast long table, which Fast ignores.
     #[allow(clippy::too_many_arguments)]
     pub fn compress_block(
         &mut self,
@@ -628,6 +671,8 @@ impl LdmState {
         hash_long: &mut [u32],
         sequences: &mut Vec<Sequence>,
     ) {
+        // Nothing indexed yet, so no LDM match can exist: index the block
+        // and search it with the regular finder only.
         if self.entries_inserted == 0 {
             self.fill_only(src, block_start, block_end);
             match params.strategy {
@@ -732,6 +777,8 @@ impl LdmState {
                     .sum();
                 last_lits = (gap_end - cursor) - consumed;
 
+                // Rep history for the next gap's search only. It may be
+                // off; the block encoder derives the real repeat codes.
                 if let Some(last) = self.segment_sequences.last() {
                     reps = [last.offset, reps[0], reps[1]];
                 }

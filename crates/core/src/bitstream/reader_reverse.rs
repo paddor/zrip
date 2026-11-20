@@ -1,3 +1,6 @@
+//! Reverse bit reader for FSE and Huffman streams, which are read from
+//! the last byte backward.
+
 #![forbid(unsafe_code)]
 
 use crate::bitstream::primitives;
@@ -12,13 +15,21 @@ use crate::hint::{likely, unlikely};
 /// 3 ops (shift + mask + subtract).
 pub struct ReverseBitReader<'a> {
     pub(crate) data: &'a [u8],
+    /// The eight bytes at `ptr`, little-endian. Bits are read from the top.
     pub(crate) container: u64,
+    /// Bits taken from the top of `container`. Above 64 means a read went
+    /// past the start of the stream.
     pub(crate) bits_consumed: u32,
+    /// Byte offset of `container` in `data`. Moves toward 0.
     pub(crate) ptr: usize,
+    /// Lowest `ptr` at which the fast decode loops refill, as C zstd's
+    /// `limitPtr`: 8, or 0 for streams under 8 bytes.
     pub(crate) limit_ptr: usize,
 }
 
 impl<'a> ReverseBitReader<'a> {
+    /// Positions the reader below the end mark, the highest set bit of the
+    /// last byte. Fails on empty data or a zero last byte.
     pub fn new(data: &'a [u8]) -> Result<Self, DecompressError> {
         if data.is_empty() {
             return Err(DecompressError::InputExhausted);
@@ -29,6 +40,7 @@ impl<'a> ReverseBitReader<'a> {
             return Err(DecompressError::CorruptSequences);
         }
 
+        // The zeros above the end mark, and the mark itself.
         let initial_consumed = last_byte.leading_zeros() + 1;
 
         let ptr = if data.len() >= 8 { data.len() - 8 } else { 0 };
@@ -43,6 +55,8 @@ impl<'a> ReverseBitReader<'a> {
             val
         };
 
+        // A stream under 8 bytes sits in the low bytes of the container; the
+        // empty top bytes count as consumed.
         let bits_consumed = if data.len() >= 8 {
             initial_consumed
         } else {
@@ -60,6 +74,9 @@ impl<'a> ReverseBitReader<'a> {
         })
     }
 
+    /// Steps back over the fully read bytes, at most to the stream start, and
+    /// reloads the container. Afterwards at most 7 bits are consumed, unless
+    /// the start was reached.
     #[inline(always)]
     pub fn refill(&mut self) {
         if self.bits_consumed <= 7 || self.ptr == 0 {
@@ -81,6 +98,8 @@ impl<'a> ReverseBitReader<'a> {
         }
     }
 
+    /// Refills, then reads `n` bits, at most 32. Fails with
+    /// [`DecompressError::InputExhausted`] past the start of the stream.
     #[inline]
     pub fn read_bits(&mut self, n: u8) -> Result<u32, DecompressError> {
         debug_assert!(n <= 32);
@@ -97,6 +116,7 @@ impl<'a> ReverseBitReader<'a> {
         Ok(result)
     }
 
+    /// Skips `n` bits, which the container must hold, then refills.
     #[inline(always)]
     pub fn consume_bits(&mut self, n: u8) {
         debug_assert!((n as u32) <= 64u32.saturating_sub(self.bits_consumed));
@@ -104,14 +124,21 @@ impl<'a> ReverseBitReader<'a> {
         self.refill();
     }
 
+    /// Reads `n` bits (0 to 32) with no refill and no check. The caller makes
+    /// sure the container holds them.
     #[inline(always)]
     pub fn read_bits_branchless(&mut self, n: u8) -> u32 {
         debug_assert!(n <= 32);
+        // `>> 1 >> (63 - n)` is `>> (64 - n)` without a shift by 64 at
+        // `n == 0`. `& 63` keeps the first shift in range.
         let result = ((self.container << (self.bits_consumed & 63)) >> 1 >> (63 - n as u32)) as u32;
         self.bits_consumed += n as u32;
         result
     }
 
+    /// Refills without the stream-start handling of [`refill`](Self::refill),
+    /// for streams of 8 bytes or more while the step stays inside the
+    /// stream. Otherwise returns false and changes nothing.
     #[inline(always)]
     pub fn try_refill_fast(&mut self) -> bool {
         let byte_shift = (self.bits_consumed >> 3) as usize;
@@ -127,6 +154,8 @@ impl<'a> ReverseBitReader<'a> {
         false
     }
 
+    /// [`try_refill_fast`](Self::try_refill_fast), falling back to
+    /// [`refill`](Self::refill) near the stream start.
     #[inline(always)]
     pub fn refill_fast_or_regular(&mut self) {
         if unlikely(!self.try_refill_fast()) {
@@ -134,16 +163,21 @@ impl<'a> ReverseBitReader<'a> {
         }
     }
 
+    /// Byte offset of the current container load.
     #[inline]
     pub fn ptr(&self) -> usize {
         self.ptr
     }
 
+    /// Lowest `ptr` at which the fast decode loops refill: 8, or 0 for
+    /// streams under 8 bytes.
     #[inline]
     pub fn limit_ptr(&self) -> usize {
         self.limit_ptr
     }
 
+    /// The next `n` bits (at most 32), without consuming them or refilling.
+    /// The container must hold them.
     #[inline]
     pub fn peek_bits(&self, n: u8) -> u32 {
         debug_assert!(n <= 32);
@@ -154,6 +188,8 @@ impl<'a> ReverseBitReader<'a> {
         ((self.container << self.bits_consumed) >> (64 - n as u32)) as u32
     }
 
+    /// Bits left to read: the rest of the container and the bytes below
+    /// `ptr`.
     #[inline]
     pub fn bits_remaining(&self) -> usize {
         64usize.saturating_sub(self.bits_consumed as usize) + self.ptr * 8
@@ -167,6 +203,8 @@ impl<'a> ReverseBitReader<'a> {
         self.ptr == 0 && self.bits_consumed == 64
     }
 
+    /// Whether nothing is left to read, including after reads past the start
+    /// that [`is_exhausted`](Self::is_exhausted) rejects.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.bits_consumed >= 64 && self.ptr == 0

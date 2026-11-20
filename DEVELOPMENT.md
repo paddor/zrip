@@ -187,13 +187,35 @@ cargo +nightly fuzz run zrip_fuzz_corrupt_decompress /path/to/adversarial/corpus
   -- -max_total_time=10800 -jobs=2
 ```
 
+## Decoder differential
+
+`tests/differential.rs` checks that zrip's decoders accept exactly the inputs
+C zstd accepts, with the same output: one-shot calls against
+`ZSTD_decompressDCtx`, `FrameDecoder` and `PushDecoder` against
+`ZSTD_decompressStream`. It decodes valid frames from C zstd and zrip,
+seeded mutations of them, and hand-built frames. C zstd runs without legacy
+format support. The `zrip_fuzz_decode_differential` fuzz target runs the
+same check (`tests/differential/check.rs`) on fuzzer input.
+
+```bash
+ZRIP_DIFF_MUTATIONS=20000 cargo test --release --test zrip_differential
+# Log and dump every disagreement:
+ZRIP_DIFF_LOG=1 ZRIP_DIFF_DUMP=/tmp/diff cargo test --release --test zrip_differential
+```
+
+One difference is allowed. On 64-bit little-endian targets, C zstd's fast
+4-stream Huffman decoder checks how much each stream decodes, not where it
+ends, so it decodes some corrupt streams to garbage. Where it stops depends
+on the CPU. zrip rejects such streams.
+
 ## Weekly extended CI
 
 `.github/workflows/extended.yml` runs every Sunday. Each fuzz target gets its
 own job running `scripts/overnight_fuzz.sh`: 30 minutes for decoder targets,
 5 for round-trip targets. Corpora are cached from run to run. The workflow
-also runs the ignored large-input tests and the push soak for 30 minutes,
-one process per core. A failed fuzz job prints its log tails and uploads its
+also runs the ignored large-input tests, the decoder differential with 20,000
+mutations per seed frame, and the push soak for 30 minutes, one process per
+core. A failed fuzz job prints its log tails and uploads its
 logs and crash inputs as an artifact. Start a run by hand with:
 
 ```bash

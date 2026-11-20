@@ -1,3 +1,6 @@
+//! Block encoder: turns a block's sequences into a literals section and an
+//! FSE-coded sequences section, or writes the block raw when that is not
+//! smaller.
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
@@ -43,6 +46,7 @@ macro_rules! add_extra_bits_macro {
     };
 }
 
+/// Writes the Number_of_Sequences field, 1 to 3 bytes.
 #[inline]
 fn write_seq_count(output: &mut Vec<u8>, num_seq: u32) {
     if num_seq < 128 {
@@ -58,6 +62,8 @@ fn write_seq_count(output: &mut Vec<u8>, num_seq: u32) {
     }
 }
 
+/// A sequence's three codes and their extra bits, packed from the low bit:
+/// literal length, then match length, then offset.
 #[derive(Clone, Copy, Default)]
 struct PackedSeq {
     extra_bits: u64,
@@ -89,14 +95,21 @@ impl Default for SeqFreqs {
     }
 }
 
+/// Buffers and entropy tables kept across the blocks of a frame.
 pub(crate) struct BlockEncodeWorkspace {
     /// Literals of the last packed block in `lit_buf[..lit_len]`. The buffer
     /// only grows, so packing a block does not clear it.
     pub lit_buf: Vec<u8>,
     lit_len: usize,
+    /// Literals section header, then the Huffman streams when the literals
+    /// are coded. Raw literals stay in `lit_buf`.
     pub lit_section: Vec<u8>,
+    /// Sequences section with the predefined tables.
     pub pred_seq: Vec<u8>,
+    /// Sequences section with tables built for the block.
     pub cust_seq: Vec<u8>,
+    /// Sequences section in repeat mode, with `prev_ll`, `prev_of` and
+    /// `prev_ml`.
     pub repeat_seq: Vec<u8>,
     /// Huffman literal streams; bytes past the encoded length are scratch.
     pub huf_concat: Vec<u8>,
@@ -112,12 +125,18 @@ pub(crate) struct BlockEncodeWorkspace {
     /// that block is written compressed, so no table is copied.
     huffman: [Option<HuffmanEncodeTable>; 2],
     huffman_prev: usize,
+    /// The dictionary's literal length table, for repeat mode.
+    /// `encode_compressed_block` clears all three once it codes a block's
+    /// sequences.
     pub prev_ll: Option<FseEncodeTable>,
+    /// The dictionary's offset table; see `prev_ll`.
     pub prev_of: Option<FseEncodeTable>,
+    /// The dictionary's match length table; see `prev_ll`.
     pub prev_ml: Option<FseEncodeTable>,
 }
 
 impl BlockEncodeWorkspace {
+    /// Empty buffers, no previous tables.
     pub fn new() -> Self {
         Self {
             lit_buf: Vec::new(),
@@ -167,7 +186,7 @@ fn huffman_slots(
 
 /// C zstd-style symbolTT entry. Two fields per symbol encode the
 /// variable-width bit emission and state transition in one lookup.
-/// Total predefined table footprint: ~1.3 KB (was ~20 KB).
+/// An [`FseEncodeTable`] holds 64 of them and 512 states, about 1.5 KB.
 #[derive(Clone, Copy)]
 #[repr(C)]
 struct SymbolTT {
@@ -175,9 +194,12 @@ struct SymbolTT {
     delta_find_state: i32,
 }
 
+/// FSE encoding table for literal length, offset or match length codes.
 #[derive(Clone)]
 pub(crate) struct FseEncodeTable {
     symbol_tt: [SymbolTT; MAX_SYMBOLS],
+    /// `table_size + slot` for each decode table slot, grouped by symbol,
+    /// as C zstd's `stateTable`.
     state_table: [u16; MAX_TABLE_SIZE],
     table_size: u32,
     table_log: u8,
@@ -215,6 +237,8 @@ const MAX_SYMBOLS: usize = 64;
 const MAX_TABLE_SIZE: usize = 512;
 
 impl FseEncodeTable {
+    /// The encode table for a dictionary's decode table of
+    /// 2^`accuracy_log` entries and codes up to `max_symbol`.
     pub(crate) fn from_decode_table(
         decode_table: &[FseDecodeEntry],
         accuracy_log: u8,
@@ -243,6 +267,9 @@ impl FseEncodeTable {
             cumul[s + 1] = cumul[s] + count[s];
         }
 
+        // As C zstd's `FSE_buildCTable`: a symbol emits
+        // `(state + delta_nb_bits) >> 16` bits, and its next state is
+        // `state_table[(state >> bits) + delta_find_state]`.
         let default_delta = (table_log as u32 + 1) << 16;
         let mut symbol_tt = [SymbolTT {
             delta_nb_bits: default_delta,
@@ -292,6 +319,9 @@ impl FseEncodeTable {
             .all(|(s, &f)| f == 0 || (s < MAX_SYMBOLS && self.present >> s & 1 == 1))
     }
 
+    /// Rebuilds the table from a normalized `distribution`, where -1 marks
+    /// a low-probability symbol. Returns false, leaving the table as it
+    /// was, if the distribution does not fill a table.
     #[allow(
         clippy::disallowed_methods,
         reason = "rebuilds a small FSE table in place"
@@ -347,6 +377,8 @@ impl FseEncodeTable {
             total += c as i32;
         }
 
+        // The format's symbol spread: -1 symbols take the last slots, the
+        // rest step through the others by `step`.
         let step = (table_size >> 1) + (table_size >> 3) + 3;
         let mask = table_size - 1;
         let mut high_threshold = table_size - 1;
@@ -363,6 +395,7 @@ impl FseEncodeTable {
         }
 
         let mut position = 0usize;
+        // Without -1 symbols no slot is skipped, so four go at a time.
         if high_threshold == table_size - 1 {
             for (s, &probability) in distribution.iter().enumerate().take(num_symbols) {
                 if probability <= 0 {
@@ -439,6 +472,8 @@ impl FseEncodeTable {
         (state & ((1u32 << nb) - 1), nb, next)
     }
 
+    /// The starting state for `symbol`, the block's last code, as C zstd's
+    /// `FSE_initCState2`.
     #[inline]
     fn init_state(&self, symbol: u8) -> u32 {
         let tt = &self.symbol_tt[symbol as usize];
@@ -459,11 +494,13 @@ fn predefined_tables() -> &'static PredefinedEncodeTables {
     &PREDEFINED_TABLES
 }
 
+/// Without `std` there is no `LazyLock`, so each call builds the tables.
 #[cfg(not(feature = "std"))]
 fn predefined_tables() -> PredefinedEncodeTables {
     PredefinedEncodeTables::build()
 }
 
+/// Encode tables for the format's predefined distributions.
 struct PredefinedEncodeTables {
     ll: FseEncodeTable,
     ml: FseEncodeTable,
@@ -501,12 +538,15 @@ impl PredefinedEncodeTables {
     }
 }
 
+/// Writes `data` as a raw block. `last` marks the frame's last block.
 pub fn encode_raw_block(
     data: &[u8],
     last: bool,
     output: &mut impl OutputSink,
 ) -> Result<(), CompressError> {
     let block_size = data.len() as u32;
+    // Block_Header, 3 bytes: Last_Block in bit 0, Block_Type in bits 1-2
+    // (0 raw, 2 compressed), Block_Size above.
     let header = (block_size << 3) | if last { 1 } else { 0 };
     output.push(header as u8)?;
     output.push((header >> 8) as u8)?;
@@ -514,6 +554,9 @@ pub fn encode_raw_block(
     output.extend_from_slice(data)
 }
 
+/// Writes `src` as one block coded from `sequences`, or raw if that is not
+/// smaller. The sequences cover `src` from its start; bytes past the last
+/// one are literals. `rep_offsets` advances unless the block goes out raw.
 pub(crate) fn encode_compressed_block(
     src: &[u8],
     sequences: &[Sequence],
@@ -546,10 +589,12 @@ fn encode_compressed_block_impl(
 ) -> Result<(), CompressError> {
     let n = sequences.len();
     let total_match: usize = sequences.iter().map(|s| s.match_length as usize).sum();
+    // Matches of 3 bytes on average do not pay for their sequences.
     if n == 0 || total_match <= n * 3 {
         return encode_literals_only_block(src, last, output, workspace, policy);
     }
 
+    // Restored if the block goes out raw.
     let saved_rep = *rep_offsets;
 
     pack_sequences_and_literals::<true>(
@@ -730,6 +775,9 @@ const LITERAL_HEAVY_POLICY: BlockPolicy = BlockPolicy {
     max_literal_entropy_fp8: 6 * 256 + 24,
 };
 
+/// [`encode_compressed_block`] for parameters that keep literals raw: raw
+/// literals and the predefined sequence tables. Blocks over 32 KiB that
+/// are almost all literals may take Huffman literals.
 pub(crate) fn encode_compressed_block_raw(
     src: &[u8],
     sequences: &[Sequence],
@@ -882,6 +930,7 @@ fn pack_sequences_and_literals_impl<const COUNT: bool>(
     for (seq, packed) in sequences.iter().zip(&mut workspace.packed_seqs[..n]) {
         let ll = seq.literal_length as usize;
         debug_assert!(lit_offset + ll <= src_len);
+        // Short runs copy a fixed 32 bytes; `lit_buf` has 32 bytes of slack.
         if ll <= 32 && lit_offset + 32 <= src_len {
             let s32: &[u8; 32] = src[lit_offset..].first_chunk().unwrap();
             let d32: &mut [u8; 32] = lit_buf[lit_pos.min(lit_total)..].first_chunk_mut().unwrap();
@@ -974,52 +1023,10 @@ pub(crate) fn log2_fp8(x: u32) -> u32 {
     msb * 256 + (shifted - 256)
 }
 
-/// Cheap entropy estimate: returns true if Huffman is likely to produce savings.
-/// Avoids the expensive build-table-encode-discard cycle for blocks where
-/// Huffman overhead exceeds the compression benefit.
+/// Whether a fresh Huffman table is worth trying for literals whose policy
+/// does not ask for one: above 32 KiB.
 fn huf_worth_trying(data: &[u8]) -> bool {
-    if data.len() > 32768 {
-        return true;
-    }
-    if data.len() < 32768 {
-        return false;
-    }
-
-    let n = data.len() as u32;
-    let mut freqs = [0u32; 256];
-    let mut max_sym = 0u8;
-    for &b in data {
-        freqs[b as usize] += 1;
-        if b > max_sym {
-            max_sym = b;
-        }
-    }
-
-    if max_sym > 128 {
-        return false;
-    }
-
-    let active = freqs[..=max_sym as usize]
-        .iter()
-        .filter(|&&f| f > 0)
-        .count();
-    if active < 2 {
-        return false;
-    }
-
-    let log2_n = log2_fp8(n);
-    let mut entropy_bits_fp8: u64 = 0;
-    for &f in &freqs[..=max_sym as usize] {
-        if f > 0 {
-            entropy_bits_fp8 += f as u64 * (log2_n - log2_fp8(f)) as u64;
-        }
-    }
-
-    let estimated_bytes = entropy_bits_fp8.div_ceil(2048);
-    let tree_overhead = 1 + (max_sym as u64).div_ceil(2);
-    let min_gain = n as u64 / 32;
-
-    estimated_bytes + tree_overhead + min_gain < n as u64
+    data.len() > 32 * 1024
 }
 
 /// Literals the entropy gate samples. Shorter literal runs are measured
@@ -1067,6 +1074,10 @@ const SUSPECT_SAMPLE: usize = 4096;
 /// measure about 8.02 with the `log2_fp8` estimate.
 const FLAT_LITERALS_FP8: u32 = 8 * 256 - 8;
 
+/// Writes the literals section for `lits` to `output`: its header, and the
+/// Huffman streams when they win. Returns true if the literals stay raw;
+/// the caller then appends them. A table built here goes to
+/// `fresh_huffman`.
 fn encode_literals_section(
     lits: &[u8],
     num_seq: usize,
@@ -1216,6 +1227,8 @@ fn encode_compressed_literals_header(
     encode_huf_literals_header(0x02, regen_size, comp_size, four_streams, output);
 }
 
+/// Writes a Huffman literals header of 3 to 5 bytes. Size_Format 0 means
+/// one stream; 1 to 3 mean four streams with 10-, 14- or 18-bit sizes.
 fn encode_huf_literals_header(
     block_type: u8,
     regen_size: usize,
@@ -1263,6 +1276,7 @@ fn huf_literals_header_len(regen_size: usize, comp_size: usize) -> usize {
     }
 }
 
+/// Writes a raw literals header of 1 to 3 bytes.
 fn encode_raw_literals_header(size: usize, output: &mut Vec<u8>) {
     if size <= 31 {
         output.push((size as u8) << 3);
@@ -1281,6 +1295,7 @@ fn encode_raw_literals_header(size: usize, output: &mut Vec<u8>) {
     }
 }
 
+/// Writes the sequences section of `packed` with the predefined tables.
 fn encode_seq_predefined(packed: &[PackedSeq], output: &mut Vec<u8>, extra_bits: u64) {
     simd_body!(encode_seq_predefined_impl(packed, output, extra_bits));
 }
@@ -1302,6 +1317,7 @@ fn encode_seq_predefined_impl(packed: &[PackedSeq], output: &mut Vec<u8>, extra_
 
     write_seq_count(output, num_seq);
 
+    // Symbol compression modes: predefined for all three.
     output.push(0x00);
 
     let tables = predefined_tables();
@@ -1343,6 +1359,8 @@ fn encode_seq_predefined_impl(packed: &[PackedSeq], output: &mut Vec<u8>, extra_
         }};
     }
 
+    // The decoder reads the stream from its end, so sequences go in
+    // backward. The last one only seeds the states and adds its extra bits.
     add_bits!(last.extra_bits, last.extra_nbits);
 
     for k in (0..n - 1).rev() {
@@ -1356,6 +1374,7 @@ fn encode_seq_predefined_impl(packed: &[PackedSeq], output: &mut Vec<u8>, extra_
     }
 
     flush_fast!();
+    // Final states, then the end mark.
     let ll_ts = tables.ll.table_size;
     let of_ts = tables.of.table_size;
     let ml_ts = tables.ml.table_size;
@@ -1374,6 +1393,8 @@ fn encode_seq_predefined_impl(packed: &[PackedSeq], output: &mut Vec<u8>, extra_
     bitstream.finish(pos);
 }
 
+/// Writes the sequences section of `packed` in repeat mode with the given
+/// tables.
 fn encode_seq_repeat(
     packed: &[PackedSeq],
     ll_t: &FseEncodeTable,
@@ -1476,16 +1497,20 @@ fn encode_seq_repeat_impl(
     bitstream.finish(pos);
 }
 
+/// How a custom table codes one code type: FSE, or RLE of one code.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TableMode {
     Compressed,
     Rle(u8),
 }
 
+/// A custom table for one code type, rebuilt per block.
 struct TableEnc {
     mode: TableMode,
     enc_table: FseEncodeTable,
+    /// The serialized table description.
     header: Vec<u8>,
+    /// The normalized distribution.
     dist: Vec<i16>,
 }
 
@@ -1516,6 +1541,9 @@ impl CustomSeqTables {
     }
 }
 
+/// Scales `freqs` to a distribution that sums to 2^`accuracy_log`. Codes
+/// that would round to 0 get -1, and the most frequent code takes the
+/// remainder. Simpler than C zstd's `FSE_normalizeCount`.
 fn normalize_counts_into(freqs: &[u32], accuracy_log: u8, dist: &mut Vec<i16>) {
     let table_size = 1i32 << accuracy_log;
     let total: u64 = freqs.iter().map(|&f| f as u64).sum();
@@ -1562,6 +1590,7 @@ fn normalize_counts_into(freqs: &[u32], accuracy_log: u8, dist: &mut Vec<i16>) {
     dist[largest_idx] = (table_size - distributed) as i16;
 }
 
+/// Writes the format's FSE table description of `distribution` to `out`.
 fn serialize_fse_table_description_into(distribution: &[i16], accuracy_log: u8, out: &mut Vec<u8>) {
     let buf = core::mem::take(out);
     let mut writer = BitWriter::from_vec(buf);
@@ -1622,6 +1651,9 @@ fn serialize_fse_table_description_into(distribution: &[i16], accuracy_log: u8, 
     *out = writer.into_bytes();
 }
 
+/// Builds `out` for `n` codes up to `max_sym`: RLE for a single distinct
+/// code, else an FSE table of at most `max_log`. Returns false if no valid
+/// table fits.
 fn build_table_enc(
     out: &mut TableEnc,
     freqs: &[u32],
@@ -1666,6 +1698,9 @@ fn build_table_enc(
     true
 }
 
+/// Writes the sequences section of `packed` with tables built for it.
+/// Returns false, with nothing usable in `output`, if the estimate does not
+/// beat `pred_size` or a table cannot be built.
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
 fn encode_seq_custom(
@@ -1712,6 +1747,8 @@ fn encode_seq_custom_impl(
         return false;
     }
 
+    // The format's largest accuracy logs: 9 for literal and match
+    // lengths, 8 for offsets.
     if !build_table_enc(&mut tables.ll, ll_freq, ll_max, 9, n) {
         return false;
     }
@@ -1722,6 +1759,7 @@ fn encode_seq_custom_impl(
         return false;
     }
 
+    // Symbol compression modes: 1 RLE, 2 FSE compressed.
     let ll_mode: u8 = match tables.ll.mode {
         TableMode::Compressed => 2,
         TableMode::Rle(_) => 1,
@@ -1916,6 +1954,8 @@ static OF_PRED_COST_256: [u16; 32] = [
     1280, 1280, 1280, 1280, 1280, 1280, 1280, 1280,
 ];
 
+/// Bytes of the sequences section with the predefined tables: code costs,
+/// extra bits, 17 bits of final states, the end mark, and the header.
 fn estimate_predefined_cost(
     ll_freq: &[u32; 36],
     ml_freq: &[u32; 53],
@@ -1945,6 +1985,8 @@ fn estimate_predefined_cost(
     (total_bits as usize + 17 + 8) / 8 + header_bytes
 }
 
+/// Rough FSE cost of codes with counts `freqs`, in bits: about
+/// log2(`total` / f) per code, with integer logs.
 fn estimate_fse_bits(freqs: &[u32], total: usize) -> usize {
     if total == 0 {
         return 0;
@@ -1961,6 +2003,9 @@ fn estimate_fse_bits(freqs: &[u32], total: usize) -> usize {
     bits as usize
 }
 
+/// Accuracy log for a custom table of `num_seq` codes: about
+/// log2(`num_seq`) - 2, at least 5 and wide enough for `max_symbol`, at
+/// most `max_log`.
 fn optimal_table_log(max_log: u8, num_seq: usize, max_symbol: usize) -> u8 {
     let min_log = 5u8;
     if num_seq <= 1 {
@@ -1976,6 +2021,7 @@ fn optimal_table_log(max_log: u8, num_seq: usize, max_symbol: usize) -> u8 {
     target.max(min_log).max(min_bits_sym).min(max_log)
 }
 
+/// Literal length code of each length below 64.
 #[rustfmt::skip]
 const LL_CODE_TABLE: [u8; 64] = [
      0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
@@ -1997,6 +2043,7 @@ const ML_CODE_TABLE: [u8; 128] = [
     42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42,
 ];
 
+/// Offset code: the high bit of the Offset_Value.
 #[inline]
 fn of_code(offset_value: u32) -> u8 {
     (31 - offset_value.leading_zeros()) as u8
@@ -2038,6 +2085,8 @@ fn ll_split(ll: u32) -> (u8, u32, u32) {
         let row = LL_ROWS[ll as usize];
         (row as u8, (row >> 8) & 0xFF, ll - (row >> 16))
     } else {
+        // Past the table, the code is the high bit plus 19 (36 for match
+        // lengths), as in C zstd.
         let high_bit = 31 - ll.leading_zeros();
         (high_bit as u8 + 19, high_bit, ll - (1 << high_bit))
     }

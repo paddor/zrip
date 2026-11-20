@@ -1,3 +1,6 @@
+//! FSE table descriptions (parse and write), normalization, and decode
+//! table construction.
+
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
@@ -14,6 +17,9 @@ use crate::hint::unlikely;
 /// covers the sequence tables (accuracy log <= 9) and Huffman weights.
 const SPREAD_MAX: usize = 1 << 9;
 
+/// Parses an FSE table description into `distribution`: `max_symbol + 1`
+/// probabilities, -1 for "less than one", zero-padded. Returns the
+/// accuracy log and leaves `reader` on the next byte boundary.
 pub fn parse_fse_table_description_into(
     reader: &mut BitReader,
     max_symbol: u8,
@@ -121,6 +127,7 @@ pub fn parse_fse_table_description_into(
     Ok(accuracy_log)
 }
 
+/// Allocating form of [`parse_fse_table_description_into`].
 pub fn parse_fse_table_description(
     reader: &mut BitReader,
     max_symbol: u8,
@@ -130,6 +137,7 @@ pub fn parse_fse_table_description(
     Ok((distribution, accuracy_log))
 }
 
+/// The description of `distribution` as bytes, the last one zero-padded.
 pub fn serialize_fse_table_description(distribution: &[i16], accuracy_log: u8) -> Vec<u8> {
     use crate::bitstream::writer::BitWriter;
 
@@ -159,6 +167,7 @@ pub fn write_fse_table_description(
         let count = (prob + 1) as i32;
         let max_val = (2 * threshold - 1) - remaining;
 
+        // The parser's count code: low values take `nb_bits - 1` bits.
         if count < max_val {
             put(count as u32, nb_bits - 1);
         } else if count < threshold {
@@ -173,6 +182,8 @@ pub fn write_fse_table_description(
             remaining -= prob as i32;
         }
 
+        // A zero is followed by 2-bit repeat codes: 3 means three more zeros
+        // and another code.
         if prob == 0 {
             let mut zeros = 0;
             let start = i + 1;
@@ -201,6 +212,7 @@ pub fn write_fse_table_description(
     }
 }
 
+/// Allocating form of [`normalize_counts_into`].
 pub fn normalize_counts(freqs: &[u32], accuracy_log: u8) -> Vec<i16> {
     let mut dist = vec![0i16; freqs.len()];
     normalize_counts_into(freqs, accuracy_log, &mut dist);
@@ -225,6 +237,10 @@ pub fn normalize_counts_into(freqs: &[u32], accuracy_log: u8, dist: &mut [i16]) 
         }
     }
 
+    // Simpler than C zstd's `FSE_normalizeCount`: shares round down, shares
+    // below one become -1, and the most frequent symbol takes the rest.
+    // Once the budget is spent, later symbols get 0, so callers need fewer
+    // symbols than cells.
     let budget = table_size - 1;
     let mut distributed = 0i32;
 
@@ -249,21 +265,23 @@ pub fn normalize_counts_into(freqs: &[u32], accuracy_log: u8, dist: &mut [i16]) 
     dist[largest_idx] = (table_size - distributed) as i16;
 }
 
+/// Allocating form of [`build_decode_table_into`].
 pub fn build_decode_table(
     distribution: &[i16],
     accuracy_log: u8,
 ) -> Result<Vec<FseDecodeEntry>, DecompressError> {
     let mut table = Vec::new();
-    let mut symbol_next = Vec::new();
-    build_decode_table_into(distribution, accuracy_log, &mut table, &mut symbol_next)?;
+    build_decode_table_into(distribution, accuracy_log, &mut table)?;
     Ok(table)
 }
 
+/// Builds the decode table for `distribution` into `table`, resized to
+/// `1 << accuracy_log` cells. The probabilities, -1 counting as 1, must
+/// sum to the table size, as parsed ones do.
 pub fn build_decode_table_into(
     distribution: &[i16],
     accuracy_log: u8,
     table: &mut Vec<FseDecodeEntry>,
-    symbol_next: &mut Vec<u16>,
 ) -> Result<(), DecompressError> {
     let table_size = 1usize << accuracy_log;
     if table.len() != table_size {
@@ -286,9 +304,9 @@ pub fn build_decode_table_into(
     // symbol needs none either.
     let table = &mut table[..table_size];
     let mask = table.len() - 1;
+    // C zstd's spread step. It is odd, so the walk visits every cell once.
     let step = (table_size >> 1) + (table_size >> 3) + 3;
     let mut next = [0u16; 256];
-    symbol_next.clear();
 
     // Zero and positive probabilities mix unpredictably, so `next` is set
     // without a branch. "Less than one" (-1) symbols are rare and take the
@@ -356,10 +374,15 @@ pub fn build_decode_table_into(
         }
     }
 
+    // A walk that does not end at 0 means the probabilities do not fill the
+    // table.
     if position != 0 {
         return Err(DecompressError::BadFseTable);
     }
 
+    // The k-th cell of a symbol with probability p gets state number p + k.
+    // It reads `nb` bits so `(p + k) << nb` lands in
+    // `table_size..2 * table_size`; `base_line` removes the offset.
     for entry in table.iter_mut() {
         let s = entry.symbol as usize;
         let next_state = next[s] as u32;
@@ -374,6 +397,7 @@ pub fn build_decode_table_into(
     Ok(())
 }
 
+/// Decode table for a predefined distribution. Panics on an invalid one.
 pub fn build_decode_table_from_default(
     default_dist: &[i16],
     accuracy_log: u8,
@@ -701,7 +725,7 @@ mod tests {
             seed ^= seed << 17;
             seed
         };
-        let (mut table, mut next) = (Vec::new(), Vec::new());
+        let mut table = Vec::new();
         for round in 0..4000 {
             let accuracy_log = 5 + (rand() % 5) as u8;
             let size = 1i32 << accuracy_log;
@@ -735,7 +759,7 @@ mod tests {
             }
             dist[last] += remaining as i16;
 
-            build_decode_table_into(&dist, accuracy_log, &mut table, &mut next).unwrap();
+            build_decode_table_into(&dist, accuracy_log, &mut table).unwrap();
             let fields = |t: &[FseDecodeEntry]| -> Vec<(u8, u8, u16)> {
                 t.iter()
                     .map(|e| (e.symbol, e.num_bits, e.base_line))

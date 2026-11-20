@@ -10,7 +10,9 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 zrip = { path = "..", features = ["dict_builder"] }
-zstd = "0.13"
+zrip-core = { path = "../crates/core" }
+# No legacy formats: `decode_differential` compares zrip with C zstd.
+zstd = { version = "0.13", default-features = false, features = ["arrays", "zdict_builder"] }
 
 [[bin]]
 name = "zrip_fuzz_roundtrip_frame"
@@ -110,4 +112,9 @@ doc = false
 [[bin]]
 name = "zrip_fuzz_push_decode"
 path = "fuzz_targets/push_decode.rs"
+doc = false
+
+[[bin]]
+name = "zrip_fuzz_decode_differential"
+path = "fuzz_targets/decode_differential.rs"
 doc = false

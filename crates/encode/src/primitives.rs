@@ -1,3 +1,5 @@
+//! Small helpers the match finders and sequence encoders share: byte reads,
+//! table access, match counting, and the sequence bitstream buffer.
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
@@ -7,6 +9,7 @@ pub(crate) fn rd32(src: &[u8], pos: usize) -> u32 {
     u32::from_ne_bytes(*src[pos..].first_chunk::<4>().unwrap())
 }
 
+/// Eight bytes at `pos`, in native byte order like [`rd32`].
 #[inline(always)]
 pub(crate) fn rd64(src: &[u8], pos: usize) -> u64 {
     u64::from_ne_bytes(*src[pos..].first_chunk::<8>().unwrap())
@@ -64,6 +67,8 @@ pub(crate) fn hash_store(table: &mut [u32], idx: usize, val: u32) {
     table[idx] = val;
 }
 
+/// Counts equal bytes forward from `p1` and `p2`, up to `limit` for `p1`.
+/// `p2` must lie behind `p1`.
 #[inline(always)]
 pub(crate) fn count_match(src: &[u8], p1: usize, p2: usize, limit: usize) -> usize {
     debug_assert!(p1 <= limit && limit <= src.len());
@@ -86,6 +91,8 @@ pub(crate) fn count_match(src: &[u8], p1: usize, p2: usize, limit: usize) -> usi
         .count()
 }
 
+/// Panics if `r0` or `r1` is zero. Rep checks read at `ip - rep`, which
+/// must lie behind the cursor.
 #[inline(always)]
 pub(crate) fn assert_rep_valid(r0: u32, r1: u32) {
     if r0 == 0 || r1 == 0 {
@@ -121,6 +128,8 @@ impl<'a> BitstreamScratch<'a> {
         Self { buf, base }
     }
 
+    /// Stores all 64 `bits` at `pos`. The caller then advances `pos` by
+    /// the whole bytes among them.
     #[inline(always)]
     pub(crate) fn flush(&mut self, pos: usize, bits: u64) {
         let at = self.base + pos;

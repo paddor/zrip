@@ -1,3 +1,5 @@
+//! Compression and decompression errors.
+
 #![forbid(unsafe_code)]
 
 use core::fmt;
@@ -5,14 +7,16 @@ use core::fmt;
 /// Unified error type wrapping both compression and decompression errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZstdError {
+    /// Compression failed.
     Compress(CompressError),
+    /// Decompression failed.
     Decompress(DecompressError),
 }
 
 /// Error returned by compression functions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompressError {
-    /// Output buffer passed to [`compress_into`](crate::compress_into) is too small.
+    /// Output buffer passed to `compress_into` is too small.
     OutputTooSmall,
     /// Compression level is outside the supported range (-7..=4; -8 runs
     /// as -7).
@@ -36,7 +40,8 @@ pub enum DecompressError {
     CorruptLiterals,
     /// Sequences section is malformed.
     CorruptSequences,
-    /// Raw or RLE block exceeds MAX_BLOCK_SIZE.
+    /// A block's size field or decoded size exceeds `Block_Maximum_Size`
+    /// (the window, at most 128 KiB).
     BlockTooLarge,
     /// Sequence offset is invalid (zero or beyond available history).
     InvalidOffset,

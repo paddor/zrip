@@ -1,3 +1,6 @@
+//! Sequence decoding tables: FSE rows merged with each code's baseline and
+//! extra-bit count, so one load yields both the next state and the value.
+
 use zrip_core::fse::{
     FSE_SEQ_TABLE_CAPACITY, FseDecodeEntry, FseSeqDecodeEntry, LL_BASELINE_TABLE, LL_BITS_TABLE,
     ML_BASELINE_TABLE, ML_BITS_TABLE,
@@ -97,9 +100,14 @@ impl BitCount {
 /// decoded value's baseline and extra-bit count.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SeqEntry {
+    /// Next state, before adding the `num_bits` bits read for it.
     pub(crate) base_line: u16,
+    /// Bits to read for the next state.
     pub(crate) num_bits: BitCount,
+    /// Bits to read for the value.
     pub(crate) extra_bits: BitCount,
+    /// Value before adding its extra bits: a literal length, a match
+    /// length, or an offset value.
     pub(crate) baseline_value: u32,
 }
 
@@ -120,7 +128,10 @@ impl From<FseSeqDecodeEntry> for SeqEntry {
     }
 }
 
+/// One sequence table at full capacity (`FSE_SEQ_TABLE_CAPACITY` rows), so
+/// a state masked with `FSE_SEQ_TABLE_MASK` always indexes in bounds.
 pub(crate) struct SeqTable {
+    /// Rows in use: `1 << accuracy_log`, or 1 in RLE mode.
     initialized: usize,
     data: [SeqEntry; FSE_SEQ_TABLE_CAPACITY],
 }
@@ -143,7 +154,8 @@ impl Clone for SeqTable {
 }
 
 impl SeqTable {
-    /// A table with no initialized entries.
+    /// A table of zeroed rows, the first `initialized` of them counted as
+    /// in use.
     fn empty(initialized: usize) -> Self {
         Self {
             initialized,
@@ -156,6 +168,7 @@ impl SeqTable {
         self.data[idx] = entry;
     }
 
+    /// Makes an RLE table: one row. With accuracy log 0, the state stays 0.
     #[inline(always)]
     pub(crate) fn set_single(&mut self, val: FseSeqDecodeEntry) {
         self.set(0, val.into());
@@ -186,14 +199,17 @@ impl SeqTable {
         self.initialized = n;
     }
 
+    /// Rewrites the table from literal length FSE rows.
     pub(crate) fn fill_ll(&mut self, fse: &[FseDecodeEntry]) {
         self.fill(fse, ll_extra);
     }
 
+    /// Rewrites the table from match length FSE rows.
     pub(crate) fn fill_ml(&mut self, fse: &[FseDecodeEntry]) {
         self.fill(fse, ml_extra);
     }
 
+    /// Rewrites the table from offset code FSE rows.
     pub(crate) fn fill_of(&mut self, fse: &[FseDecodeEntry]) {
         self.fill(fse, of_extra);
     }
@@ -204,14 +220,17 @@ impl SeqTable {
         table
     }
 
+    /// A new table from literal length FSE rows.
     pub(crate) fn promote_ll(fse: &[FseDecodeEntry]) -> Self {
         Self::promote(fse, ll_extra)
     }
 
+    /// A new table from match length FSE rows.
     pub(crate) fn promote_ml(fse: &[FseDecodeEntry]) -> Self {
         Self::promote(fse, ml_extra)
     }
 
+    /// A new table from offset code FSE rows.
     pub(crate) fn promote_of(fse: &[FseDecodeEntry]) -> Self {
         Self::promote(fse, of_extra)
     }
@@ -231,6 +250,7 @@ fn ml_extra(symbol: u8) -> (u8, u32) {
     )
 }
 
+/// Offset code `n` reads `n` extra bits onto a baseline of `1 << n`.
 fn of_extra(symbol: u8) -> (u8, u32) {
     (symbol, 1u32 << symbol)
 }

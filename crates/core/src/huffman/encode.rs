@@ -1,3 +1,6 @@
+//! Huffman encoder: length-limited codes, tree descriptions, and single-
+//! and 4-stream encoding, after C zstd's `huf_compress.c`.
+
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
@@ -5,8 +8,11 @@ use alloc::vec::Vec;
 
 use crate::huffman::{MAX_BITS, MAX_SYMBOL_VALUE};
 
+/// Huffman codes for one set of literals, with its serialized tree
+/// description.
 #[derive(Clone)]
 pub struct HuffmanEncodeTable {
+    /// Code length per symbol; 0 for absent symbols.
     num_bits: [u8; MAX_SYMBOL_VALUE + 1],
     /// Per symbol, the code in the top `num_bits` bits and `num_bits` in the
     /// low bits (C zstd's `HUF_CElt`), so one load feeds the whole encode
@@ -14,11 +20,14 @@ pub struct HuffmanEncodeTable {
     celt: [u64; MAX_SYMBOL_VALUE + 1],
     /// Serialized weight description, built once with the table.
     description: Description,
+    /// Longest code length, at most [`MAX_BITS`].
     table_log: u8,
 }
 
 #[cfg(feature = "alloc")]
 impl HuffmanEncodeTable {
+    /// Builds a table for the byte counts of `data`. `None` for fewer than
+    /// two distinct bytes or when no table can be described.
     pub fn from_data(data: &[u8]) -> Option<Self> {
         if data.is_empty() {
             return None;
@@ -80,10 +89,18 @@ impl HuffmanEncodeTable {
         }
     }
 
+    /// Rebuilds the codes of a decode table, such as a dictionary's, to
+    /// encode with them. `None` for fewer than two symbols, or codes over
+    /// [`MAX_BITS`] bits.
     pub fn from_decode_table(
         decode_table: &[super::HuffmanDecodeEntry],
         table_log: u8,
     ) -> Option<Self> {
+        // The encoder writes codes of at most `MAX_BITS`; C zstd's decoder
+        // also takes 12-bit tables.
+        if table_log > MAX_BITS {
+            return None;
+        }
         let table_size = 1usize << table_log;
         if decode_table.len() < table_size {
             return None;
@@ -133,6 +150,7 @@ impl HuffmanEncodeTable {
         })
     }
 
+    /// Longest code length in bits.
     pub fn table_log(&self) -> u8 {
         self.table_log
     }
@@ -150,6 +168,7 @@ impl HuffmanEncodeTable {
         (!missing).then_some(bits)
     }
 
+    /// Whether every byte of `data` has a code.
     pub fn can_encode(&self, data: &[u8]) -> bool {
         for &b in data {
             if self.num_bits[b as usize] == 0 {
@@ -159,6 +178,7 @@ impl HuffmanEncodeTable {
         true
     }
 
+    /// Owned copy of [`weights_description`](Self::weights_description).
     pub fn serialize_weights(&self) -> Vec<u8> {
         self.weights_description().to_vec()
     }
@@ -180,6 +200,8 @@ impl HuffmanEncodeTable {
         &self.description.bytes[..usize::from(self.description.len)]
     }
 
+    /// Encodes `data` as one reverse stream. Every byte needs a code; see
+    /// [`can_encode`](Self::can_encode).
     pub fn encode_single_stream(&self, data: &[u8]) -> Vec<u8> {
         let mut buf = Vec::new();
         let len = self.encode_single_stream_into(data, &mut buf);
@@ -198,6 +220,7 @@ impl HuffmanEncodeTable {
         self.encode_stream(data, out)
     }
 
+    /// Encodes `data` as four streams after a 6-byte jump table.
     pub fn encode_4_streams(&self, data: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         let len = self.encode_4_streams_into(data, &mut out);
@@ -308,6 +331,8 @@ impl HuffmanEncodeTable {
         pos + usize::from(used != 0)
     }
 
+    /// Size in bytes of the single-stream encoding of `data`, end mark
+    /// included.
     pub fn compressed_size_single(&self, data: &[u8]) -> usize {
         let total_bits: usize = data
             .iter()

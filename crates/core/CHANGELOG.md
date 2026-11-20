@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+- Removed unused items: `hash::hash4` to `hash8`, `hash::PRIME32_2`, the
+  `simd` module (`has_bmi2`), `fse::FseEncodeEntry`, `fse::FseTable` and
+  `fse::FSE_SEQ_DECODE_ENTRY_ZERO`. `build_decode_table_into` and
+  `parse_huffman_weights_into` drop their unused `symbol_next` scratch
+  argument. The empty `dict::cover` module is hidden from the docs.
+
+- `fastcover::select_segments` fills the dictionary from the end, best
+  segment first, and cuts the last pick to fit, as C zstd's
+  `COVER_buildDictionary`; it cut the best segment's end.
+- `finalize_dictionary` takes the dictionary ID as C zstd's
+  `ZDICT_finalizeDictionary` does: XXH64 of the content, mapped into
+  `32768..2^31`. The repeat offsets are the three best distinct offsets,
+  then the defaults they leave out.
+
+- Huffman decode tables take 12 bits (`huffman::MAX_TABLE_LOG`), as C
+  zstd's decoder does; `FAST_TABLE_LOG` (11) bounds the fast loops, and
+  `MAX_BITS` (11) the encoder. Weights need at least two symbols of weight
+  1, as in C zstd.
+- 4-stream Huffman sections take 6 symbols and more, with an empty fourth
+  stream at 6 and 9, as in C zstd.
+- Frame headers with a window log over 31 (30 on 32-bit targets) fail with
+  `WindowTooLarge`.
+
 ## [0.12.2] - 2026-11-20
 
 - `finalize_dictionary` writes a Huffman table with a code for every byte,

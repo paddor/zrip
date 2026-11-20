@@ -1,3 +1,5 @@
+//! Reusable one-shot decoding state: [`DecompressContext`].
+
 #[cfg(feature = "alloc")]
 use alloc::borrow::Cow;
 #[cfg(feature = "alloc")]
@@ -152,6 +154,8 @@ impl DecompressContext {
     }
 }
 
+/// Decompresses every frame in `input` and appends at most `max_output`
+/// bytes to `output`. Returns the number of bytes appended.
 fn decompress_into_with_workspace(
     input: &[u8],
     output: &mut Vec<u8>,

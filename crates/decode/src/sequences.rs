@@ -1,3 +1,6 @@
+//! Sequences section header: the sequence count and the literal length,
+//! offset and match length table modes, with a cache for repeated table
+//! descriptions.
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
@@ -17,18 +20,34 @@ use zrip_core::fse::{
 };
 use zrip_core::hint::likely;
 
+/// The literal length, offset and match length tables, kept across blocks
+/// for repeat mode.
 pub(crate) struct SequenceDecodeTables {
+    /// Literal length table.
     pub(crate) ll_table: SeqTable,
+    /// Accuracy log of `ll_table`: 0 in RLE mode, at most 9.
     pub(crate) ll_accuracy: u8,
+    /// Whether `ll_table` is the predefined table, so predefined mode can
+    /// skip the copy.
     pub(crate) ll_kind: SequenceTableKind,
+    /// Offset code table.
     pub(crate) of_table: SeqTable,
+    /// Accuracy log of `of_table`: 0 in RLE mode, at most 8.
     pub(crate) of_accuracy: u8,
+    /// As `ll_kind`, for `of_table`.
     pub(crate) of_kind: SequenceTableKind,
+    /// Match length table.
     pub(crate) ml_table: SeqTable,
+    /// Accuracy log of `ml_table`: 0 in RLE mode, at most 9.
     pub(crate) ml_accuracy: u8,
+    /// As `ll_kind`, for `ml_table`.
     pub(crate) ml_kind: SequenceTableKind,
+    /// `ll_table` was set in this frame or by its dictionary, so repeat
+    /// mode may use it.
     pub(crate) ll_set: bool,
+    /// As `ll_set`, for `of_table`.
     pub(crate) of_set: bool,
+    /// As `ll_set`, for `ml_table`.
     pub(crate) ml_set: bool,
 }
 
@@ -68,13 +87,17 @@ impl Clone for SequenceDecodeTables {
     }
 }
 
+/// What a sequence table holds.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SequenceTableKind {
+    /// The RFC 8878 predefined distribution.
     Predefined,
+    /// An RLE, FSE-compressed or dictionary table.
     Other,
 }
 
 impl SequenceDecodeTables {
+    /// Predefined tables, none set for repeat mode.
     pub(crate) fn new_default() -> Self {
         #[cfg(feature = "std")]
         {
@@ -121,6 +144,8 @@ impl SequenceDecodeTables {
         }
     }
 
+    /// Restores the predefined tables, copying only those that changed, and
+    /// clears the repeat flags.
     pub(crate) fn reset_default(&mut self) {
         if self.ll_kind != SequenceTableKind::Predefined {
             #[cfg(feature = "std")]
@@ -174,6 +199,8 @@ impl SequenceDecodeTables {
         self.ml_set = false;
     }
 
+    /// Makes repeat mode fail until a block sets each table. Keeps the
+    /// tables.
     pub(crate) fn clear_repeat_flags(&mut self) {
         self.ll_set = false;
         self.of_set = false;
@@ -204,11 +231,15 @@ impl SequenceDecodeTables {
     }
 }
 
+/// Parses `Number_of_Sequences`. Returns the count and its size, 1 to 3
+/// bytes.
 pub(crate) fn parse_sequence_count(data: &[u8]) -> Result<(u32, usize), DecompressError> {
     if data.is_empty() {
         return Err(DecompressError::CorruptSequences);
     }
 
+    // Below 128: the count. Below 255: a 15-bit count with the next byte.
+    // 255: `0x7F00` plus the next two bytes, little-endian.
     let byte0 = data[0] as u32;
     if byte0 < 128 {
         Ok((byte0, 1))
@@ -227,6 +258,8 @@ pub(crate) fn parse_sequence_count(data: &[u8]) -> Result<(u32, usize), Decompre
     }
 }
 
+/// Turns an offset value into an offset and updates the repeat offsets,
+/// as `SeqDecoder::decode` in `exec.rs` does for the sequence loop.
 #[inline(always)]
 pub(crate) fn compute_offset(
     offset_value: u32,
@@ -257,6 +290,8 @@ pub(crate) fn compute_offset(
     }
 }
 
+// Predefined tables, built once per process. `no_std` builds rebuild them
+// when needed.
 #[cfg(feature = "std")]
 static LL_PREDEFINED: std::sync::LazyLock<SeqTable> = std::sync::LazyLock::new(|| {
     SeqTable::promote_ll(&build_decode_table_from_default(
@@ -281,6 +316,8 @@ static OF_PREDEFINED: std::sync::LazyLock<SeqTable> = std::sync::LazyLock::new(|
     ))
 });
 
+/// Parses the compression modes byte and the table descriptions after it,
+/// updating `prev`. Returns the bytes consumed.
 pub(crate) fn parse_sequence_tables_ws(
     data: &[u8],
     prev: &mut SequenceDecodeTables,
@@ -290,6 +327,9 @@ pub(crate) fn parse_sequence_tables_ws(
         return Err(DecompressError::CorruptSequences);
     }
 
+    // Modes: literal lengths in bits 7-6, offsets in 5-4, match lengths in
+    // 3-2. Bits 1-0 are reserved and must be 0. Each mode is 0 predefined,
+    // 1 RLE, 2 FSE-compressed, or 3 repeat.
     let mode_byte = data[0];
     if mode_byte & 0x03 != 0 {
         return Err(DecompressError::CorruptSequences);
@@ -297,7 +337,11 @@ pub(crate) fn parse_sequence_tables_ws(
     let ll_mode = (mode_byte >> 6) & 0x03;
     let of_mode = (mode_byte >> 4) & 0x03;
     let ml_mode = (mode_byte >> 2) & 0x03;
+    // Without repeat mode, the tables depend only on these bytes, so the
+    // bytes can key a cache.
     let cacheable = ll_mode != 3 && of_mode != 3 && ml_mode != 3;
+    // Any mode but repeat replaces a table, so the tables no longer match
+    // the dictionary's.
     if ll_mode != 3 || of_mode != 3 || ml_mode != 3 {
         ws.seq_is_dict = false;
     }
@@ -355,16 +399,12 @@ pub(crate) fn parse_sequence_tables_ws(
             prev.ll_set = true;
         }
         2 => {
+            // 35 is the largest literal length code.
             let acc = parse_fse_table_description_into(&mut reader, 35, &mut ws.fse_dist)?;
             if acc > LL_MAX_ACCURACY_LOG {
                 return Err(DecompressError::BadFseTable);
             }
-            build_decode_table_into(
-                &ws.fse_dist,
-                acc,
-                &mut ws.fse_build_buf,
-                &mut ws.fse_symbol_next,
-            )?;
+            build_decode_table_into(&ws.fse_dist, acc, &mut ws.fse_build_buf)?;
             prev.ll_table.fill_ll(&ws.fse_build_buf);
             prev.ll_accuracy = acc;
             prev.ll_kind = SequenceTableKind::Other;
@@ -398,6 +438,7 @@ pub(crate) fn parse_sequence_tables_ws(
         }
         1 => {
             let sym = reader.read_bits(8)? as u8;
+            // 31 is the largest offset code, as in C zstd.
             if sym > 31 {
                 return Err(DecompressError::CorruptSequences);
             }
@@ -412,16 +453,12 @@ pub(crate) fn parse_sequence_tables_ws(
             prev.of_set = true;
         }
         2 => {
+            // 31 is the largest offset code.
             let acc = parse_fse_table_description_into(&mut reader, 31, &mut ws.fse_dist)?;
             if acc > OF_MAX_ACCURACY_LOG {
                 return Err(DecompressError::BadFseTable);
             }
-            build_decode_table_into(
-                &ws.fse_dist,
-                acc,
-                &mut ws.fse_build_buf,
-                &mut ws.fse_symbol_next,
-            )?;
+            build_decode_table_into(&ws.fse_dist, acc, &mut ws.fse_build_buf)?;
             prev.of_table.fill_of(&ws.fse_build_buf);
             prev.of_accuracy = acc;
             prev.of_kind = SequenceTableKind::Other;
@@ -469,16 +506,12 @@ pub(crate) fn parse_sequence_tables_ws(
             prev.ml_set = true;
         }
         2 => {
+            // 52 is the largest match length code.
             let acc = parse_fse_table_description_into(&mut reader, 52, &mut ws.fse_dist)?;
             if acc > ML_MAX_ACCURACY_LOG {
                 return Err(DecompressError::BadFseTable);
             }
-            build_decode_table_into(
-                &ws.fse_dist,
-                acc,
-                &mut ws.fse_build_buf,
-                &mut ws.fse_symbol_next,
-            )?;
+            build_decode_table_into(&ws.fse_dist, acc, &mut ws.fse_build_buf)?;
             prev.ml_table.fill_ml(&ws.fse_build_buf);
             prev.ml_accuracy = acc;
             prev.ml_kind = SequenceTableKind::Other;

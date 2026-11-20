@@ -1,16 +1,26 @@
+//! Sequence output and copy primitives: [`SeqOut`] with chunked wild
+//! copies for the sequence loop, and the appending [`BlockOutput`] for
+//! blocks with one sequence.
+
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 use zrip_core::error::DecompressError;
 use zrip_core::hint::{likely, unlikely};
 
+/// Slack past a block's limit that wild copies may write into. They write
+/// at most 32 bytes past a sequence's end.
 pub(crate) const WILDCOPY_OVERLENGTH: usize = 64;
 
+/// A block's output for the single-sequence path, appended to `vec`.
 pub(crate) struct BlockOutput<'a> {
     vec: &'a mut Vec<u8>,
+    /// `vec.len()` the block may not pass.
     block_limit: usize,
 }
 
+/// One sequence's writes into a [`BlockOutput`]. `begin_sequence` checked
+/// that its lengths fit the block.
 pub(crate) struct SequenceOutput<'block, 'vec> {
     output: &'block mut BlockOutput<'vec>,
     literal_len: usize,
@@ -18,6 +28,8 @@ pub(crate) struct SequenceOutput<'block, 'vec> {
 }
 
 impl<'a> BlockOutput<'a> {
+    /// Starts a block of at most `max_block_size` bytes at the end of `vec`,
+    /// reserving the slack for fixed-size literal copies.
     #[inline(always)]
     pub(crate) fn new(vec: &'a mut Vec<u8>, max_block_size: usize) -> Self {
         vec.reserve(max_block_size + WILDCOPY_OVERLENGTH);
@@ -25,11 +37,14 @@ impl<'a> BlockOutput<'a> {
         Self { vec, block_limit }
     }
 
+    /// Output length, bytes before the block included.
     #[inline(always)]
     pub(crate) fn len(&self) -> usize {
         self.vec.len()
     }
 
+    /// Starts a sequence of `literal_len` literals and a `match_len` match.
+    /// Fails with `BlockTooLarge` if they pass the block's limit.
     #[inline(always)]
     pub(crate) fn begin_sequence(
         &mut self,
@@ -39,7 +54,7 @@ impl<'a> BlockOutput<'a> {
         debug_assert!(self.vec.len() <= self.block_limit);
         let remaining = self.block_limit - self.vec.len();
         if unlikely(literal_len > remaining || match_len > remaining - literal_len) {
-            return Err(DecompressError::CorruptSequences);
+            return Err(DecompressError::BlockTooLarge);
         }
         Ok(SequenceOutput {
             output: self,
@@ -52,11 +67,12 @@ impl<'a> BlockOutput<'a> {
     fn ensure_block_space(&self, len: usize) -> Result<(), DecompressError> {
         debug_assert!(self.vec.len() <= self.block_limit);
         if unlikely(len > self.block_limit - self.vec.len()) {
-            return Err(DecompressError::CorruptSequences);
+            return Err(DecompressError::BlockTooLarge);
         }
         Ok(())
     }
 
+    /// Appends `src[start..start + len]` within the block's limit.
     #[inline(always)]
     pub(crate) fn extend_literals_range(
         &mut self,
@@ -99,11 +115,13 @@ impl<'a> BlockOutput<'a> {
 }
 
 impl SequenceOutput<'_, '_> {
+    /// Output length, bytes before the block included.
     #[inline(always)]
     pub(crate) fn len(&self) -> usize {
         self.output.len()
     }
 
+    /// Appends the sequence's literals from `src[start..]`.
     #[inline(always)]
     pub(crate) fn extend_literals_range(
         &mut self,
@@ -133,6 +151,7 @@ impl SequenceOutput<'_, '_> {
         Ok(())
     }
 
+    /// Appends the sequence's match from `offset` bytes back in the output.
     #[inline(always)]
     pub(crate) fn copy_match_single(&mut self, offset: usize) -> Result<(), DecompressError> {
         if unlikely(offset == 0 || offset > self.output.vec.len()) {
@@ -147,6 +166,9 @@ impl SequenceOutput<'_, '_> {
         Ok(())
     }
 
+    /// Appends the sequence's match when it starts in `history`, before the
+    /// frame, and may continue into the output. `out_pos` is the output
+    /// position from the frame's first byte; `offset` must exceed it.
     #[inline(always)]
     pub(crate) fn copy_match_from_history(
         &mut self,
@@ -233,12 +255,12 @@ const SPREAD_ADD: [usize; 8] = [0, 1, 2, 1, 4, 4, 4, 4];
 /// Bytes then subtracted from the source (C zstd's `dec64table`).
 const SPREAD_SUB: [usize; 8] = [8, 8, 8, 7, 8, 9, 10, 11];
 
-/// One block's sequence output: the output from the frame's first byte,
-/// zeroed through the block's limit plus [`WILDCOPY_OVERLENGTH`], so the
-/// copies index an initialized slice.
+/// One block's sequence output: the output from the lowest byte a match
+/// may copy from, zeroed through the block's limit plus
+/// [`WILDCOPY_OVERLENGTH`], so the copies index an initialized slice.
 ///
-/// Positions count from the frame's first byte, the lowest byte a match
-/// may copy from, and the block's limit is the slice's end less the
+/// Positions count from that byte: the frame's first byte, or the window's
+/// start when streaming. The block's limit is the slice's end less the
 /// overlength. The loop then keeps only the slice and the output position
 /// in registers. With `NARROW`, the slice ends below 4 GiB, and each
 /// sequence masks its positions to 32 bits ([`ix`]).
@@ -249,8 +271,8 @@ pub(crate) struct SeqOut<'a, const NARROW: bool> {
 }
 
 /// Zeroes the room of a block of at most `max_block` bytes appended to `vec`,
-/// whose frame starts at `frame_start`. Returns where the block's [`SeqOut`]
-/// starts in `vec` and its output position there.
+/// whose matches reach back to `frame_start`. Returns where the block's
+/// [`SeqOut`] starts in `vec` and its output position there.
 #[inline(always)]
 pub(crate) fn open_block(
     vec: &mut Vec<u8>,
@@ -308,7 +330,7 @@ impl<const NARROW: bool> SeqOut<'_, NARROW> {
         let lit_end = op + ll;
         let match_end = lit_end + ml;
         if unlikely(match_end + WILDCOPY_OVERLENGTH > self.buf.len()) {
-            return Err(DecompressError::CorruptSequences);
+            return Err(DecompressError::BlockTooLarge);
         }
         // `checked_sub` tells the compiler that the source is at most
         // `lit_end`, which bounds its first chunk.
@@ -341,7 +363,7 @@ impl<const NARROW: bool> SeqOut<'_, NARROW> {
             return Err(DecompressError::CorruptLiterals);
         }
         if unlikely(len > self.limit() - self.op) {
-            return Err(DecompressError::CorruptSequences);
+            return Err(DecompressError::BlockTooLarge);
         }
         let op = self.op;
         Dst(self.buf).put(op, &lits[lp..lp + len]);
@@ -460,6 +482,10 @@ impl Dst<'_> {
                 i += 16;
             }
         } else {
+            // A chunk reads all its bytes before writing, so its source must
+            // be at least its size back. Offsets below 8 spread the first 8
+            // bytes, after which the source sits a multiple of `offset` back,
+            // and at least 8.
             let mut src = src;
             if offset < 8 {
                 for k in 0..4 {
@@ -490,6 +516,8 @@ fn chunk<const N: usize>(out: &mut [u8], src: usize, dst: usize) {
     out[dst..dst + N].copy_from_slice(&value);
 }
 
+/// Appends `len` bytes copied from `offset` bytes before the end of `vec`.
+/// Requires `1 <= offset <= vec.len()`.
 #[inline(always)]
 fn wild_copy_match(vec: &mut Vec<u8>, offset: usize, len: usize) {
     let start = vec.len() - offset;
@@ -498,6 +526,8 @@ fn wild_copy_match(vec: &mut Vec<u8>, offset: usize, len: usize) {
     } else if offset == 1 {
         vec.resize(vec.len() + len, vec[start]);
     } else {
+        // Overlap: copy one period, then keep doubling the copied run. It
+        // stays a multiple of `offset`, so the pattern repeats.
         vec.extend_from_within(start..start + offset);
         let mut copied = offset;
         while copied < len {
@@ -666,7 +696,7 @@ mod tests {
         let err = output
             .extend_literals_range(b"abcde", 0, 5)
             .expect_err("literal range should exceed the block limit");
-        assert_eq!(err, DecompressError::CorruptSequences);
+        assert_eq!(err, DecompressError::BlockTooLarge);
     }
 
     #[test]
@@ -729,11 +759,11 @@ mod tests {
         with_seq_out::<true, _>(&mut v, 8, 0, |out| {
             assert_eq!(
                 out.execute(Literals::new(&lits, 10), 0, 4, 5, 1, &[]),
-                Err(DecompressError::CorruptSequences)
+                Err(DecompressError::BlockTooLarge)
             );
             assert_eq!(
                 out.extend_literals(Literals::new(&lits, 10), 0, 9),
-                Err(DecompressError::CorruptSequences)
+                Err(DecompressError::BlockTooLarge)
             );
             assert_eq!(
                 out.extend_literals(Literals::new(&lits, 10), 4, 7),

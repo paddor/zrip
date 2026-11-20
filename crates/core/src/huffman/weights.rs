@@ -1,3 +1,6 @@
+//! Huffman tree descriptions: weight parsing (direct or FSE-compressed)
+//! and decode table construction.
+
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
@@ -11,6 +14,8 @@ use crate::error::DecompressError;
 use crate::fse::decode::FseState;
 use crate::fse::table_builder::build_decode_table;
 
+/// Parses the tree description at the start of `data`. Returns the explicit
+/// weights (the last symbol's is implied) and the bytes used.
 pub fn parse_huffman_weights(data: &[u8]) -> Result<(Vec<u8>, usize), DecompressError> {
     if data.is_empty() {
         return Err(DecompressError::BadHuffmanWeights);
@@ -18,6 +23,8 @@ pub fn parse_huffman_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompress
 
     let header_byte = data[0];
 
+    // 128 and up: `header - 127` weights, 4 bits each. Below: the size of
+    // the FSE-compressed weights.
     if header_byte >= 128 {
         parse_direct_weights(data)
     } else {
@@ -25,12 +32,13 @@ pub fn parse_huffman_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompress
     }
 }
 
+/// [`parse_huffman_weights`] into reused buffers: `weights` gets the
+/// weights, the `fse_*` vectors are scratch. Returns the bytes used.
 #[cfg(feature = "alloc")]
 pub fn parse_huffman_weights_into(
     data: &[u8],
     weights: &mut Vec<u8>,
     fse_table: &mut Vec<crate::fse::FseDecodeEntry>,
-    fse_symbol_next: &mut Vec<u16>,
     fse_dist: &mut Vec<i16>,
 ) -> Result<usize, DecompressError> {
     if data.is_empty() {
@@ -42,7 +50,7 @@ pub fn parse_huffman_weights_into(
     if header_byte >= 128 {
         parse_direct_weights_into(data, weights)
     } else {
-        parse_fse_compressed_weights_into(data, weights, fse_table, fse_symbol_next, fse_dist)
+        parse_fse_compressed_weights_into(data, weights, fse_table, fse_dist)
     }
 }
 
@@ -99,6 +107,7 @@ fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompr
 
     let compressed = &data[1..=compressed_size];
 
+    // Weights go up to 12; RFC 8878 caps the accuracy log at 6.
     let mut bit_reader = BitReader::new(compressed);
     let (distribution, accuracy_log) =
         crate::fse::table_builder::parse_fse_table_description(&mut bit_reader, 12)?;
@@ -124,6 +133,8 @@ fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompr
     let mut state2 = FseState::new(&table, accuracy_log, &mut rev_reader)
         .map_err(|_| DecompressError::BadHuffmanWeights)?;
 
+    // Two states alternate over one table. When the next update would read
+    // past the stream start, the other state's symbol is the last weight.
     let mut weights = Vec::new();
 
     loop {
@@ -166,7 +177,6 @@ fn parse_fse_compressed_weights_into(
     data: &[u8],
     weights: &mut Vec<u8>,
     fse_table: &mut Vec<crate::fse::FseDecodeEntry>,
-    fse_symbol_next: &mut Vec<u16>,
     fse_dist: &mut Vec<i16>,
 ) -> Result<usize, DecompressError> {
     use crate::fse::table_builder::{build_decode_table_into, parse_fse_table_description_into};
@@ -184,7 +194,7 @@ fn parse_fse_compressed_weights_into(
         return Err(DecompressError::BadHuffmanWeights);
     }
 
-    build_decode_table_into(fse_dist, accuracy_log, fse_table, fse_symbol_next)
+    build_decode_table_into(fse_dist, accuracy_log, fse_table)
         .map_err(|_| DecompressError::BadHuffmanWeights)?;
 
     let table_desc_bytes = bit_reader.bytes_consumed();
@@ -282,11 +292,15 @@ fn parse_fse_compressed_weights_into(
     Ok(1 + compressed_size)
 }
 
+/// Builds a decode table from explicit weights, adding the implied last
+/// one. Returns at least
+/// [`DECODE_TABLE_SIZE`](crate::huffman::DECODE_TABLE_SIZE) entries, and the
+/// table log.
 #[cfg(feature = "alloc")]
 pub fn build_huffman_decode_table(
     weights: &[u8],
 ) -> Result<(Vec<crate::huffman::HuffmanDecodeEntry>, u8), DecompressError> {
-    use crate::huffman::{HuffmanDecodeEntry, MAX_BITS};
+    use crate::huffman::{HuffmanDecodeEntry, MAX_TABLE_LOG};
 
     if weights.is_empty() || weights.len() > 255 {
         return Err(DecompressError::BadHuffmanWeights);
@@ -301,7 +315,7 @@ pub fn build_huffman_decode_table(
         }
     }
 
-    if max_weight > MAX_BITS + 1 {
+    if max_weight > MAX_TABLE_LOG {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
@@ -310,21 +324,31 @@ pub fn build_huffman_decode_table(
     }
 
     let table_log = high_bit(weight_sum) + 1;
-    if table_log > MAX_BITS as u32 {
+    if table_log > MAX_TABLE_LOG as u32 {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
+    // The implied last weight fills the code space up to the next power of
+    // two, so the gap must be a power of two.
     let total_capacity = 1u32 << table_log;
     let last_weight_value = total_capacity - weight_sum;
     if last_weight_value == 0 || !last_weight_value.is_power_of_two() {
         return Err(DecompressError::BadHuffmanWeights);
     }
     let last_weight = high_bit(last_weight_value) as u8 + 1;
+    // As C zstd (`HUF_readStats`): at least two symbols, an even number,
+    // have weight 1, so the longest code is `table_log` bits.
+    let longest =
+        weights.iter().map(|&w| usize::from(w == 1)).sum::<usize>() + usize::from(last_weight == 1);
+    if longest < 2 || longest % 2 == 1 {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
 
     let mut all_weights: Vec<u8> = weights.to_vec();
     all_weights.push(last_weight);
 
-    let mut table = vec![HuffmanDecodeEntry::default(); super::DECODE_TABLE_SIZE];
+    let size = super::DECODE_TABLE_SIZE.max(1 << table_log);
+    let mut table = vec![HuffmanDecodeEntry::default(); size];
 
     let max_w = table_log as u8 + 1;
 
@@ -370,7 +394,7 @@ pub fn build_huffman_decode_table_into(
     table: &mut Vec<crate::huffman::HuffmanDecodeEntry>,
     all_weights: &mut Vec<u8>,
 ) -> Result<u8, DecompressError> {
-    use crate::huffman::{HuffmanDecodeEntry, MAX_BITS};
+    use crate::huffman::{HuffmanDecodeEntry, MAX_TABLE_LOG};
 
     if weights.is_empty() || weights.len() > 255 {
         return Err(DecompressError::BadHuffmanWeights);
@@ -385,7 +409,7 @@ pub fn build_huffman_decode_table_into(
         }
     }
 
-    if max_weight > MAX_BITS + 1 {
+    if max_weight > MAX_TABLE_LOG {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
@@ -394,24 +418,34 @@ pub fn build_huffman_decode_table_into(
     }
 
     let table_log = high_bit(weight_sum) + 1;
-    if table_log > MAX_BITS as u32 {
+    if table_log > MAX_TABLE_LOG as u32 {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
+    // The implied last weight fills the code space up to the next power of
+    // two, so the gap must be a power of two.
     let total_capacity = 1u32 << table_log;
     let last_weight_value = total_capacity - weight_sum;
     if last_weight_value == 0 || !last_weight_value.is_power_of_two() {
         return Err(DecompressError::BadHuffmanWeights);
     }
     let last_weight = high_bit(last_weight_value) as u8 + 1;
+    // As C zstd (`HUF_readStats`): at least two symbols, an even number,
+    // have weight 1, so the longest code is `table_log` bits.
+    let longest =
+        weights.iter().map(|&w| usize::from(w == 1)).sum::<usize>() + usize::from(last_weight == 1);
+    if longest < 2 || longest % 2 == 1 {
+        return Err(DecompressError::BadHuffmanWeights);
+    }
 
     all_weights.clear();
     all_weights.extend_from_slice(weights);
     all_weights.push(last_weight);
 
-    if table.len() != super::DECODE_TABLE_SIZE {
+    let size = super::DECODE_TABLE_SIZE.max(1 << table_log);
+    if table.len() != size {
         table.clear();
-        table.resize(super::DECODE_TABLE_SIZE, HuffmanDecodeEntry::default());
+        table.resize(size, HuffmanDecodeEntry::default());
     }
 
     let max_w = table_log as usize + 1;
@@ -539,16 +573,19 @@ mod tests {
 
     #[test]
     fn build_table_two_symbols() {
-        // weight 2 means 2^1=2 slots. Sum=2. Implied symbol needs 2 slots too.
-        // Total = 4 = 2^2, so table_log = 2.
-        let weights = vec![2];
-        let (table, table_log) = build_huffman_decode_table(&weights).unwrap();
-        assert_eq!(table_log, 2);
+        // Weight 1 takes one slot and the implied symbol the other: two 1-bit
+        // codes, table_log 1.
+        let (table, table_log) = build_huffman_decode_table(&[1]).unwrap();
+        assert_eq!(table_log, 1);
         assert_eq!(table.len(), crate::huffman::DECODE_TABLE_SIZE);
-        let sym0_count = table[..4].iter().filter(|e| e.symbol == 0).count();
-        let sym1_count = table[..4].iter().filter(|e| e.symbol == 1).count();
-        assert_eq!(sym0_count, 2);
-        assert_eq!(sym1_count, 2);
+        assert_eq!((table[0].symbol, table[0].num_bits), (0, 1));
+        assert_eq!((table[1].symbol, table[1].num_bits), (1, 1));
+        // Weight 2 and an implied 2 fill a table of log 2 with 1-bit codes.
+        // No code is `table_log` bits, which C zstd rejects.
+        assert_eq!(
+            build_huffman_decode_table(&[2]).err(),
+            Some(DecompressError::BadHuffmanWeights)
+        );
     }
 
     /// FSE-compressed weight header whose stream decodes to `count` weights.
@@ -576,26 +613,14 @@ mod tests {
         let (weights, _) = parse_huffman_weights(&data).unwrap();
         assert_eq!(weights.len(), 255);
         let mut out = Vec::new();
-        parse_huffman_weights_into(
-            &data,
-            &mut out,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut Vec::new(),
-        )
-        .unwrap();
+        parse_huffman_weights_into(&data, &mut out, &mut Vec::new(), &mut Vec::new()).unwrap();
         assert_eq!(out.len(), 255);
 
         for count in [256, 257] {
             let data = fse_weights_header(count);
             assert!(parse_huffman_weights(&data).is_err(), "{count} weights");
-            let result = parse_huffman_weights_into(
-                &data,
-                &mut out,
-                &mut Vec::new(),
-                &mut Vec::new(),
-                &mut Vec::new(),
-            );
+            let result =
+                parse_huffman_weights_into(&data, &mut out, &mut Vec::new(), &mut Vec::new());
             assert_eq!(
                 result,
                 Err(DecompressError::BadHuffmanWeights),
@@ -615,8 +640,7 @@ mod tests {
             seed ^= seed << 17;
             seed
         };
-        let (mut out, mut table, mut next, mut dist) =
-            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (mut out, mut table, mut dist) = (Vec::new(), Vec::new(), Vec::new());
         let (mut ok, mut too_many) = (0, 0);
         for _ in 0..20_000 {
             let accuracy_log = 5 + (rand() % 2) as u8;
@@ -646,8 +670,7 @@ mod tests {
             data.extend_from_slice(&compressed);
 
             let reference = parse_huffman_weights(&data);
-            let result =
-                parse_huffman_weights_into(&data, &mut out, &mut table, &mut next, &mut dist);
+            let result = parse_huffman_weights_into(&data, &mut out, &mut table, &mut dist);
             match (reference, result) {
                 (Ok((weights, consumed)), Ok(result_consumed)) => {
                     assert_eq!(out, weights);

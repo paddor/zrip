@@ -1,3 +1,4 @@
+//! Streaming decoding through `std::io::Read`: [`FrameDecoder`].
 #![forbid(unsafe_code)]
 
 use std::io::{self, Read};
@@ -11,7 +12,9 @@ use zrip_core::dict::Dictionary;
 use zrip_core::error::DecompressError;
 use zrip_core::frame::ZSTD_MAGIC;
 
+/// What [`FrameDecoder`] reads next.
 enum State {
+    /// A frame or skippable frame, or the end of input.
     FrameHeader,
     BlockHeader,
     BlockData {
@@ -20,10 +23,13 @@ enum State {
         last: bool,
     },
     Checksum,
+    /// The input ended on a frame boundary.
     Done,
+    /// A read failed; only `reset` recovers.
     Failed,
 }
 
+/// Wraps a decode error as an `InvalidData` I/O error.
 fn invalid(e: DecompressError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e)
 }
@@ -50,6 +56,7 @@ fn invalid(e: DecompressError) -> io::Error {
 pub struct FrameDecoder<R: Read> {
     inner: R,
     state: State,
+    /// Frame header or compressed block bytes.
     read_buf: Vec<u8>,
     /// The current block's output in `frame.block()[output_pos..output_end]`
     /// is not read yet.
@@ -135,6 +142,8 @@ impl<R: Read> FrameDecoder<R> {
 
     fn read_frame_header(&mut self) -> io::Result<()> {
         self.read_buf.resize(MAX_FRAME_HEADER_SIZE, 0);
+        // End of input is clean only before a frame's first byte; later
+        // ones fail in `read_exact`.
         loop {
             match self.inner.read(&mut self.read_buf[..1]) {
                 Ok(0) => {
@@ -226,6 +235,9 @@ impl<R: Read> FrameDecoder<R> {
                 self.inner.read_exact(&mut byte)?;
                 self.frame.rle_block(byte[0], block_size);
             }
+            // An empty compressed block decodes to nothing, as in C zstd's
+            // streaming decoder.
+            BlockType::Compressed if block_size == 0 => {}
             BlockType::Compressed => {
                 self.read_buf.resize(block_size, 0);
                 self.inner.read_exact(&mut self.read_buf[..block_size])?;
@@ -235,7 +247,8 @@ impl<R: Read> FrameDecoder<R> {
             }
         }
 
-        self.state = match self.frame.end_block(last).map_err(invalid)? {
+        let empty = block_size == 0 && block_type != BlockType::Rle;
+        self.state = match self.frame.end_block(last, empty).map_err(invalid)? {
             AfterBlock::Block => State::BlockHeader,
             AfterBlock::Checksum => State::Checksum,
             AfterBlock::FrameEnd => State::FrameHeader,

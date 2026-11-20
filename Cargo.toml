@@ -36,8 +36,10 @@ zrip-decode = { version = "0.8.16", path = "crates/decode", default-features = f
 workspace = true
 
 [dev-dependencies]
-zstd = "0.13"
-zstd-safe = "7"
+# No legacy formats: zrip decodes standard zstd only, and the differential
+# tests compare it with C zstd.
+zstd = { version = "0.13", default-features = false, features = ["arrays", "zdict_builder"] }
+zstd-safe = { version = "7", default-features = false, features = ["arrays", "zdict_builder"] }
 proptest = "1"
 libc = "0.2"
 
@@ -110,6 +112,10 @@ path = "tests/compress_into_alloc.rs"
 [[test]]
 name = "zrip_decompress_capacity"
 path = "tests/decompress_capacity.rs"
+
+[[test]]
+name = "zrip_differential"
+path = "tests/differential.rs"
 
 [[test]]
 name = "zrip_dict"

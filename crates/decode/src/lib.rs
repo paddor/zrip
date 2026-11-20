@@ -1,3 +1,6 @@
+//! zstd (RFC 8878) decoder for zrip: one-shot, reusable-context, streaming
+//! (`std::io::Read`) and push (sans-io) decoding. Internal crate; use it
+//! through the `zrip` facade.
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "nightly", feature(optimize_attribute))]
 #![forbid(unsafe_code)]
@@ -5,7 +8,6 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
-pub(crate) mod block_decoder;
 #[cfg(feature = "alloc")]
 pub mod context;
 pub(crate) mod exec;
@@ -15,7 +17,6 @@ pub(crate) mod frame_state;
 pub(crate) mod literals;
 #[cfg(feature = "alloc")]
 pub mod push;
-pub(crate) mod ring_buffer;
 pub(crate) mod seq_table;
 pub(crate) mod sequences;
 #[cfg(feature = "std")]
@@ -28,7 +29,7 @@ use alloc::vec::Vec;
 
 use crate::exec::{SequenceOutputScope, decode_execute_sequences, decode_execute_single_sequence};
 use crate::fast_vec::{Literals, WILDCOPY_OVERLENGTH};
-use crate::literals::decode_literals_ws;
+use crate::literals::{LiteralsAt, decode_literals_ws};
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
 use zrip_core::block::{BlockType, parse_block_header};
 use zrip_core::error::DecompressError;
@@ -39,40 +40,69 @@ use zrip_core::frame::header::{FrameHeader, parse_frame_header};
 use zrip_core::huffman::HuffmanDecodeEntry;
 use zrip_core::xxhash::Xxh64State;
 
+/// Block decoding scratch and table caches, kept across blocks and frames
+/// so repeated decodes neither reallocate nor rebuild unchanged tables.
 #[allow(clippy::struct_excessive_bools)]
 pub(crate) struct BlockDecodeWorkspace {
+    /// Literals decoded out of the block, then `LITERAL_OVERREAD` zero
+    /// bytes of slack for the chunked copies.
     pub literal_buf: Vec<u8>,
+    /// Huffman decode table for compressed and treeless literals.
     pub huf_table: Vec<HuffmanDecodeEntry>,
+    /// Table log of `huf_table`: its longest code, in bits.
     pub huf_table_log: u8,
     /// Two-symbol rows for `huf_table`, built on first use.
     pub huf_pairs: Vec<u32>,
     /// Whether `huf_pairs` describes the current `huf_table`.
     pub huf_pairs_valid: bool,
+    /// `huf_table` came from this frame or its dictionary, so treeless
+    /// literals may use it. Cleared at each frame start.
     pub huf_valid: bool,
+    /// Scratch: `huf_weights` plus the implied last weight.
     pub huf_all_weights: Vec<u8>,
+    /// Weights parsed from the current Huffman tree description.
     pub huf_weights: Vec<u8>,
+    /// Weights `huf_table` was built from. Equal weights skip the rebuild.
     pub huf_last_weights: Vec<u8>,
+    /// Whether `huf_last_weights` describes `huf_table`.
     pub huf_last_weights_valid: bool,
+    /// Raw bytes of the last Huffman tree description. Equal bytes skip
+    /// parsing the weights.
     pub huf_last_header: Vec<u8>,
+    /// Whether `huf_last_header` describes `huf_table`.
     pub huf_last_header_valid: bool,
+    /// Scratch: normalized counts of an FSE table description.
     pub fse_dist: Vec<i16>,
-    pub fse_symbol_next: Vec<u16>,
+    /// Scratch: built FSE decode rows, for sequence tables and Huffman
+    /// weights.
     pub fse_build_buf: Vec<zrip_core::fse::FseDecodeEntry>,
+    /// One-shot sequence tables, kept between frames to avoid reallocating.
+    /// `None` while a frame holds them, or after it failed.
     pub seq_tables: Option<Box<SequenceDecodeTables>>,
+    /// Raw bytes of the last sequence table header without repeat modes:
+    /// the key of `seq_table_cache`.
     pub seq_table_header: Vec<u8>,
+    /// The tables `seq_table_header` decodes to.
     pub seq_table_cache: Option<Box<SequenceDecodeTables>>,
+    /// The live tables still equal `seq_table_cache`, so a cache hit copies
+    /// only the repeat flags.
     pub seq_table_cache_tables_current: bool,
+    /// The context dictionary's sequence tables, built once.
     pub cached_dict_tables: Option<Box<SequenceDecodeTables>>,
+    /// The context dictionary's repeat offsets.
     pub cached_dict_rep: [u32; 3],
+    /// The context dictionary's Huffman table and table log.
     pub cached_dict_huf: Option<(Vec<HuffmanDecodeEntry>, u8)>,
     /// `huf_table` and `seq_tables` still hold the cached dictionary's
     /// tables, unchanged since a frame restored them, so the next frame
     /// needs no copy. Every write to them clears these.
     pub huf_is_dict: bool,
+    /// See `huf_is_dict`.
     pub seq_is_dict: bool,
 }
 
 impl BlockDecodeWorkspace {
+    /// An empty workspace. Tables are built on first use.
     pub(crate) fn new() -> Self {
         Self {
             literal_buf: Vec::new(),
@@ -88,7 +118,6 @@ impl BlockDecodeWorkspace {
             huf_last_header: Vec::new(),
             huf_last_header_valid: false,
             fse_dist: Vec::new(),
-            fse_symbol_next: Vec::new(),
             fse_build_buf: Vec::new(),
             // Built on first use; streaming decoders keep their own tables.
             seq_tables: None,
@@ -96,6 +125,7 @@ impl BlockDecodeWorkspace {
             seq_table_cache: None,
             seq_table_cache_tables_current: false,
             cached_dict_tables: None,
+            // RFC 8878's initial repeat offsets.
             cached_dict_rep: [1, 4, 8],
             cached_dict_huf: None,
             huf_is_dict: false,
@@ -103,6 +133,8 @@ impl BlockDecodeWorkspace {
         }
     }
 
+    /// Starts a frame without a Huffman table, so treeless literals fail
+    /// until one is set. Keeps the header and weight caches.
     pub(crate) fn reset_huffman_state(&mut self) {
         self.huf_valid = false;
     }
@@ -124,6 +156,8 @@ impl BlockDecodeWorkspace {
         self.seq_table_cache_tables_current = false;
     }
 
+    /// Builds `dict`'s sequence tables and copies its Huffman table once,
+    /// for every frame that uses it.
     #[cfg(feature = "alloc")]
     pub(crate) fn cache_dict(&mut self, dict: &zrip_core::dict::Dictionary) {
         let mut st = SequenceDecodeTables::new_default();
@@ -136,22 +170,27 @@ impl BlockDecodeWorkspace {
     }
 }
 
+/// Size of the skippable frame at the start of `data`, its 8-byte header
+/// included, or `None` if `data` does not start with a whole one.
 pub(crate) fn skip_skippable_frame(data: &[u8]) -> Option<usize> {
     if data.len() < 8 {
         return None;
     }
     let magic = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+    // Skippable magics are `0x184D2A50..=0x184D2A5F`.
     if (magic & 0xFFFF_FFF0) != 0x184D_2A50 {
         return None;
     }
     let frame_size = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
-    let total = 8 + frame_size;
+    let total = frame_size.checked_add(8)?;
     if total > data.len() {
         return None;
     }
     Some(total)
 }
 
+/// Bytes still allowed under `max_output`, given the output written since
+/// `output_start`. Fails with `OutputTooSmall` once the limit is passed.
 pub(crate) fn remaining_output_limit(
     output_len: usize,
     output_start: usize,
@@ -165,6 +204,11 @@ pub(crate) fn remaining_output_limit(
         .ok_or(DecompressError::OutputTooSmall)
 }
 
+/// Decompresses every frame in `input`, skipping skippable frames.
+///
+/// The output size is unbounded
+/// ([`DEFAULT_DECOMPRESS_LIMIT`](zrip_core::DEFAULT_DECOMPRESS_LIMIT)). Use
+/// [`decompress_with_limit`] for untrusted input.
 pub fn decompress(input: &[u8]) -> Result<Vec<u8>, DecompressError> {
     decompress_with_dict_and_limit(input, None, zrip_core::DEFAULT_DECOMPRESS_LIMIT)
 }
@@ -181,6 +225,8 @@ pub fn decompress_with_limit(
     decompress_with_dict_and_limit(input, None, max_output_size)
 }
 
+/// Decompresses every frame in `input` and appends the output to `output`.
+/// Returns the number of bytes appended.
 pub fn decompress_into(input: &[u8], output: &mut Vec<u8>) -> Result<usize, DecompressError> {
     let max_output = zrip_core::DEFAULT_DECOMPRESS_LIMIT;
     let mut ws = Box::new(BlockDecodeWorkspace::new());
@@ -199,6 +245,11 @@ pub fn decompress_into(input: &[u8], output: &mut Vec<u8>) -> Result<usize, Deco
     Ok(output.len() - start)
 }
 
+/// Like [`decompress`], with an optional dictionary.
+///
+/// A frame that names a dictionary ID fails with
+/// [`DecompressError::DictRequired`] without `dict`, and with
+/// [`DecompressError::DictMismatch`] if `dict` has another ID.
 pub fn decompress_with_dict(
     input: &[u8],
     dict: Option<&zrip_core::dict::Dictionary>,
@@ -206,6 +257,10 @@ pub fn decompress_with_dict(
     decompress_with_dict_and_limit(input, dict, zrip_core::DEFAULT_DECOMPRESS_LIMIT)
 }
 
+/// Like [`decompress_with_dict`], with an output size limit.
+///
+/// Fails with [`DecompressError::OutputTooSmall`] once the output would
+/// exceed `max_output_size` bytes.
 pub fn decompress_with_dict_and_limit(
     input: &[u8],
     dict: Option<&zrip_core::dict::Dictionary>,
@@ -229,6 +284,8 @@ pub fn decompress_with_dict_and_limit(
     Ok(output)
 }
 
+/// Decodes the frame at the start of `input`, magic included, and appends
+/// at most `max_output` bytes to `output`. Returns the input bytes consumed.
 pub(crate) fn decompress_frame(
     input: &[u8],
     output: &mut Vec<u8>,
@@ -240,6 +297,7 @@ pub(crate) fn decompress_frame(
     decompress_frame_with_header(input, output, max_output, dict, ws, header)
 }
 
+/// Like `decompress_frame`, for a frame whose magic number was stripped.
 #[cfg(feature = "alloc")]
 pub(crate) fn decompress_frame_after_magic(
     input: &[u8],
@@ -284,6 +342,8 @@ fn decompress_frame_with_header(
                 .ok()
                 .filter(|&fcs| fcs <= max_output)
                 .ok_or(DecompressError::OutputTooSmall)?;
+            // Trust the declared size up to 128 MiB, so a forged header
+            // cannot force a huge allocation.
             let hint = fcs.min(MAX_WINDOW_SIZE as usize);
             output.reserve(hint + WILDCOPY_OVERLENGTH);
             (fcs, DecompressError::FrameSizeMismatch)
@@ -293,6 +353,9 @@ fn decompress_frame_with_header(
 
     let mut offset = header.header_size;
     let output_start = output.len();
+    let block_size_max = header
+        .window_size
+        .min(zrip_core::frame::MAX_BLOCK_SIZE as u64) as usize;
 
     let dict_history: &[u8] = if let Some(d) = dict { d.content() } else { &[] };
 
@@ -334,13 +397,10 @@ fn decompress_frame_with_header(
 
         let block_size = block_header.block_size as usize;
 
-        // `Block_Maximum_Size`: the window, at most 128 KiB. As in C zstd, it
-        // bounds the compressed size too.
-        if block_size as u64
-            > header
-                .window_size
-                .min(zrip_core::frame::MAX_BLOCK_SIZE as u64)
-        {
+        // `Block_Maximum_Size`: the window, at most 128 KiB. As C zstd's
+        // one-shot decoder, only compressed blocks are held to it, and their
+        // compressed size, too. Raw and RLE blocks only have to fit the output.
+        if block_header.block_type == BlockType::Compressed && block_size > block_size_max {
             return Err(DecompressError::BlockTooLarge);
         }
 
@@ -389,6 +449,7 @@ fn decompress_frame_with_header(
                     output,
                     output_start,
                     max_output,
+                    block_size_max,
                     seq_tables
                         .as_deref_mut()
                         .expect("sequence tables are initialized before compressed blocks"),
@@ -421,6 +482,7 @@ fn decompress_frame_with_header(
 
     if let Some(ref mut hasher) = hasher {
         let hash = hasher.finish();
+        // The frame stores the low 32 bits of XXH64 with seed 0.
         let expected_checksum = (hash & 0xFFFF_FFFF) as u32;
 
         if offset + 4 > input.len() {
@@ -451,6 +513,8 @@ fn decompress_frame_with_header(
     Ok(offset)
 }
 
+/// Sets up `tables` for a frame's first compressed block. Returns the
+/// frame's initial repeat offsets: the dictionary's, or RFC 8878's.
 fn initial_sequence_state(
     tables: &mut SequenceDecodeTables,
     ws: &mut BlockDecodeWorkspace,
@@ -480,18 +544,30 @@ fn initial_sequence_state(
     }
 }
 
+/// C zstd's `WILDCOPY_OVERLENGTH`: in one-shot decoding, it puts a block's
+/// literals this far past the block's maximum in the output buffer.
+const ONE_SHOT_BLOCK_SLACK: usize = 32;
+
+/// Decodes one compressed block body and appends its output. Fails with
+/// `OutputTooSmall` past `max_output` bytes since `output_start`.
+///
+/// As in C zstd's one-shot decoder, the literals may not exceed
+/// `block_size_max`, the frame's `Block_Maximum_Size`. The output may
+/// exceed it by [`ONE_SHOT_BLOCK_SLACK`] bytes, or by any amount when the
+/// literals stay outside the output buffer.
 #[allow(clippy::too_many_arguments)]
 fn decode_compressed_block(
     data: &[u8],
     output: &mut Vec<u8>,
     output_start: usize,
     max_output: usize,
+    block_size_max: usize,
     seq_tables: &mut SequenceDecodeTables,
     rep_offsets: &mut [u32; 3],
     ws: &mut BlockDecodeWorkspace,
     dict_history: &[u8],
 ) -> Result<(), DecompressError> {
-    let (lit_consumed, lits_at) = decode_literals_ws(data, ws)?;
+    let (lit_consumed, lits_at) = decode_literals_ws(data, ws, block_size_max)?;
 
     let remaining = &data[lit_consumed..];
 
@@ -516,26 +592,49 @@ fn decode_compressed_block(
     let seq_data = &table_data[tables_consumed..];
 
     let before = output.len();
-    let max_block_output = remaining_output_limit(output.len(), output_start, max_output)?
-        .min(zrip_core::frame::MAX_BLOCK_SIZE);
-    let scope = SequenceOutputScope {
-        output_base: output_start,
-        max_block_output,
-        history: dict_history,
+    let room = remaining_output_limit(output.len(), output_start, max_output)?;
+    // C zstd keeps raw literals in place when 32 bytes follow them in the
+    // block. Other literals go to the output buffer, after the block's
+    // maximum, when it has room for both, and stop the output there. Else
+    // they go to a side buffer, and the output may fill the buffer.
+    let in_output = !matches!(lits_at, LiteralsAt::Block { .. })
+        && room > block_size_max + 2 * ONE_SHOT_BLOCK_SLACK + lits_at.len();
+    let max_block = if in_output {
+        room.min(block_size_max + ONE_SHOT_BLOCK_SLACK)
+    } else {
+        room
     };
 
-    let result = decode_sequences_dispatch(
-        seq_data,
-        num_sequences,
-        seq_tables,
-        rep_offsets,
-        lits_at.resolve(data, &ws.literal_buf),
-        output,
-        scope,
-    );
-    result?;
-    if output.len() - before > zrip_core::frame::MAX_BLOCK_SIZE {
-        return Err(DecompressError::BlockTooLarge);
+    // Valid blocks write at most 128 KiB, and the block's room is zeroed up
+    // front. A block that C zstd lets write more retries with more room.
+    let mut max_block_output =
+        max_block.min(zrip_core::frame::MAX_BLOCK_SIZE + ONE_SHOT_BLOCK_SLACK);
+    loop {
+        let scope = SequenceOutputScope {
+            output_base: output_start,
+            max_block_output,
+            history: dict_history,
+        };
+        let result = decode_sequences_dispatch(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            lits_at.resolve(data, &ws.literal_buf),
+            output,
+            scope,
+        );
+        match result {
+            Err(DecompressError::BlockTooLarge) if max_block_output < max_block => {
+                output.truncate(before);
+                max_block_output = max_block.min(max_block_output.saturating_mul(2));
+            }
+            // The output limit, not the block's maximum, ran out.
+            Err(DecompressError::BlockTooLarge) if max_block_output == room => {
+                return Err(DecompressError::OutputTooSmall);
+            }
+            result => break result?,
+        }
     }
     if output.len() - output_start > max_output {
         return Err(DecompressError::OutputTooSmall);
@@ -559,6 +658,8 @@ pub(crate) fn decode_sequences_dispatch(
     output: &mut Vec<u8>,
     scope: SequenceOutputScope<'_>,
 ) -> Result<(), DecompressError> {
+    // A lone sequence, common in tiny payloads, skips the loop's setup.
+    // Without history, both paths drop the dictionary checks.
     if num_sequences == 1 {
         let literals = literals.as_slice();
         if scope.history.is_empty() {
@@ -609,6 +710,7 @@ pub(crate) fn decode_sequences_dispatch(
         });
     }
 
+    // Scalar build: no `std` or no `simd`.
     #[allow(unreachable_code)]
     if scope.history.is_empty() {
         decode_execute_sequences::<false>(

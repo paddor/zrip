@@ -1,3 +1,5 @@
+//! DFast match finder (levels 3 and 4): a long table of 8-byte hashes and
+//! a short table of 4- or 5-byte hashes.
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
@@ -46,6 +48,7 @@ macro_rules! count_match {
     };
 }
 
+/// Searches all of `src` as one block with fresh tables.
 pub(crate) fn compress_dfast(
     src: &[u8],
     params: &LevelParams,
@@ -67,6 +70,10 @@ pub(crate) fn compress_dfast(
     sequences
 }
 
+/// Finds matches in `src[block_start..block_end]` and writes them to
+/// `sequences`. `hash_short` has 2^`chain_log` entries and `hash_long`
+/// 2^`hash_log`; both hold positions in `src`, and bytes before
+/// `block_start` are the window. Rep offsets must be nonzero.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compress_dfast_block(
     src: &[u8],
@@ -296,6 +303,7 @@ fn compress_dfast_block_impl<
     let mut rep0 = rep_offsets[0] as usize;
     let mut rep1 = rep_offsets[1] as usize;
     let mut anchor = block_start;
+    // Nothing lies behind position 0 to match, as in C zstd.
     let mut ip = block_start + usize::from(block_start == 0);
 
     // Table entries always lie behind the current position, so a candidate
@@ -345,6 +353,8 @@ fn compress_dfast_block_impl<
             let hl1 = h8(v1, hash_log);
 
             // Long match at ip.
+            // Entries lie behind ip, so the `min` changes no read; it lets
+            // the compiler drop the bounds check.
             if in_input(idxl0) & (rd64!(src, idxl0.min(ilimit)) == v0) {
                 break Hit::Long { m: idxl0, hl1 };
             }
@@ -561,6 +571,8 @@ pub(crate) fn prefill_hash_tables(
     if prefix_len < 8 {
         return;
     }
+    // About one position per short-table entry, so the cost follows the
+    // table size, then every position of the last 64 bytes.
     let hash_size = hash_short.len();
     let step = (prefix_len / hash_size).max(1);
     let mut i = 0;
@@ -607,6 +619,7 @@ pub(crate) fn zero_long_slots(window: &[u8], hash_log: u32, hash_long: &mut [u32
     end
 }
 
+/// Searches `src` after `prefix` with fresh tables prefilled from it.
 pub(crate) fn compress_dfast_with_prefix(
     src: &[u8],
     params: &LevelParams,
@@ -691,6 +704,7 @@ fn short_hash(v: u64, mls: u32, short_log: u32) -> usize {
     if mls <= 4 {
         h4(first4(v), short_log)
     } else {
+        // On little-endian targets the shift keeps the first `mls` bytes.
         ((v << (64 - 8 * mls)).wrapping_mul(PRIME64_1) >> (64 - short_log)) as usize
     }
 }

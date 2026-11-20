@@ -1,3 +1,6 @@
+//! Huffman stream decoding: single-stream, and 4-stream with an optional
+//! two-symbol table.
+
 #[cfg(feature = "alloc")]
 use alloc::vec;
 #[cfg(feature = "alloc")]
@@ -7,9 +10,12 @@ use super::primitives;
 use crate::bitstream::reader_reverse::ReverseBitReader;
 use crate::error::DecompressError;
 use crate::huffman::{
-    DECODE_TABLE_SIZE, HuffmanDecodeEntry, MAX_TABLE_LOG, PAIR_TABLE_LOG, PAIR_TABLE_SIZE,
+    DECODE_TABLE_SIZE, FAST_TABLE_LOG, HuffmanDecodeEntry, MAX_TABLE_LOG, PAIR_TABLE_LOG,
+    PAIR_TABLE_SIZE,
 };
 
+/// Decodes `output_size` symbols from one reverse stream into a new
+/// `Vec`. The stream must end exactly after the last symbol.
 pub fn decode_single_stream(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -37,6 +43,7 @@ pub fn decode_single_stream(
         if remaining == 0 {
             return Err(DecompressError::BadHuffmanStream);
         }
+        // Near the stream start, missing low bits read as zeros.
         let bits = if remaining >= tl {
             reader.peek_bits(table_log)
         } else {
@@ -57,6 +64,8 @@ pub fn decode_single_stream(
     Ok(output)
 }
 
+/// Decodes one reverse stream into all of `output`. The stream must end
+/// exactly after the last symbol.
 pub fn decode_single_stream_into(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -68,6 +77,8 @@ pub fn decode_single_stream_into(
     decode_stream_tail(table, table_log, &mut reader, output)
 }
 
+/// [`decode_single_stream_into`] with `output` resized to `output_size`.
+/// Clears `output` on error.
 pub fn decode_single_stream_vec(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -84,6 +95,8 @@ pub fn decode_single_stream_vec(
     result
 }
 
+/// Decodes a 4-stream section, a 6-byte jump table and then the streams,
+/// into a new `Vec` of `output_size` bytes.
 pub fn decode_4_streams(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -96,6 +109,8 @@ pub fn decode_4_streams(
     Ok(output)
 }
 
+/// [`decode_4_streams`] with `output` resized to `output_size`. Clears
+/// `output` on error.
 pub fn decode_4_streams_into(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -159,7 +174,7 @@ const PAIR_MIN_LITERALS: usize = 24 * 1024;
 /// 11-bit lookup, and the single-symbol loop is faster (measured on the
 /// Silesia corpus at level 1, where text gains up to 6% and high-entropy
 /// literals lose up to 20% without this limit), and only for sections of at
-/// least [`PAIR_MIN_LITERALS`].
+/// least `PAIR_MIN_LITERALS`.
 pub fn prefers_pairs(literals: usize, compressed: usize) -> bool {
     if literals < PAIR_MIN_LITERALS || compressed * 8 > literals * 5 {
         return false;
@@ -194,6 +209,9 @@ pub fn build_pair_table(
     pairs: &mut Vec<u32>,
 ) -> Result<(), DecompressError> {
     validate_decode_table(table, table_log)?;
+    if table_log > PAIR_TABLE_LOG {
+        return Err(DecompressError::BadHuffmanStream);
+    }
     let table: &[HuffmanDecodeEntry; DECODE_TABLE_SIZE] = table
         .first_chunk()
         .ok_or(DecompressError::BadHuffmanStream)?;
@@ -235,6 +253,7 @@ fn decode_4_streams_with(
     result
 }
 
+/// Rejects table logs outside 1 to 12 and tables shorter than the log.
 fn validate_decode_table(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -264,7 +283,26 @@ fn prepare_output(output: &mut Vec<u8>, output_size: usize) {
     output.resize(output_size, 0);
 }
 
+/// Decodes the rest of `reader`'s stream into `output` and checks that
+/// the stream ends exactly there.
 pub(super) fn decode_stream_tail(
+    table: &[HuffmanDecodeEntry],
+    table_log: u8,
+    reader: &mut ReverseBitReader,
+    output: &mut [u8],
+) -> Result<(), DecompressError> {
+    // A refill leaves at least 57 bits: five codes of up to 11 bits, or four
+    // of 12.
+    if table_log <= FAST_TABLE_LOG {
+        decode_stream_tail_n::<5>(table, table_log, reader, output)
+    } else {
+        decode_stream_tail_n::<4>(table, table_log, reader, output)
+    }
+}
+
+/// [`decode_stream_tail`], decoding `N` symbols per refill.
+#[inline(always)]
+fn decode_stream_tail_n<const N: usize>(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
     reader: &mut ReverseBitReader,
@@ -274,16 +312,16 @@ pub(super) fn decode_stream_tail(
     let tl = table_log as usize;
     let mut pos = 0;
 
-    let tl5 = (tl + tl + tl + tl + tl) as u32;
-    while pos + 5 <= output_size {
+    let round_bits = (N * tl) as u32;
+    while pos + N <= output_size {
         reader.refill();
-        if reader.bits_remaining() < tl5 as usize
-            || 64u32.saturating_sub(reader.bits_consumed) < tl5
+        if reader.bits_remaining() < round_bits as usize
+            || 64u32.saturating_sub(reader.bits_consumed) < round_bits
         {
             break;
         }
 
-        for _ in 0..5 {
+        for _ in 0..N {
             let bits =
                 ((reader.container << reader.bits_consumed) >> (64 - table_log as u32)) as usize;
             let entry = primitives::huf_table_lookup(table, bits);
@@ -293,8 +331,8 @@ pub(super) fn decode_stream_tail(
         }
     }
 
-    // Either fewer than five symbols are left and the refill leaves at least
-    // 57 bits in the container, or fewer than `5 * table_log` bits remain and
+    // Either fewer than `N` symbols are left and the refill leaves at least
+    // 57 bits in the container, or fewer than `N * table_log` bits remain and
     // the refill reaches the start of the stream (`ptr == 0`), so the
     // container holds every remaining bit. Past the start, the shift reads
     // zeros. A symbol longer than the bits left pushes the count past 64,

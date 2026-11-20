@@ -1,6 +1,12 @@
+//! zstd dictionaries: parsing, and FastCOVER training with the
+//! `dict_builder` feature.
+
 #![forbid(unsafe_code)]
 
+/// Empty: zrip trains with FastCOVER only. Kept so code that names the
+/// module still builds.
 #[cfg(feature = "dict_builder")]
+#[doc(hidden)]
 pub mod cover;
 #[cfg(feature = "dict_builder")]
 pub mod fastcover;
@@ -20,12 +26,13 @@ use crate::fse::{
 use crate::huffman::HuffmanDecodeEntry;
 use crate::huffman::weights::{build_huffman_decode_table, parse_huffman_weights};
 
+/// Magic number at the start of a zstd dictionary.
 pub const DICT_MAGIC: u32 = 0xEC30_A437;
 
 /// A pre-trained zstd dictionary for improved compression of small data.
 ///
 /// Load from raw bytes with [`Dictionary::from_bytes`], or train with
-/// [`train_dict_fastcover`] (requires `dict_builder` feature).
+/// `train_dict_fastcover` (requires `dict_builder` feature).
 #[cfg(feature = "alloc")]
 #[derive(Clone)]
 pub struct Dictionary {
@@ -57,6 +64,8 @@ impl Dictionary {
         }
         let mut pos = 8;
 
+        // Entropy tables in format order: Huffman, then the OF, ML, LL FSE
+        // tables.
         let huf_table = parse_dict_huffman(&data[pos..])?;
         pos += huf_table.1;
         let huf_decode = if huf_table.0.is_some() {
@@ -77,6 +86,7 @@ impl Dictionary {
             parse_dict_fse_checked(&data[pos..], LL_MAX_SYMBOL, LL_MAX_ACCURACY_LOG)?;
         pos += ll_consumed;
 
+        // Three repeat offsets, then the content.
         if pos + 12 > data.len() {
             return Err(DecompressError::InvalidDictionary);
         }

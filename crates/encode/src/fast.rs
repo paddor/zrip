@@ -1,3 +1,5 @@
+//! Fast match finder (levels -7 to 2): one hash table, after C zstd's
+//! `ZSTD_compressBlock_fast`.
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
@@ -46,6 +48,7 @@ macro_rules! count_match {
     };
 }
 
+/// Searches all of `src` as one block with a fresh table.
 pub(crate) fn compress_fast(
     src: &[u8],
     params: &LevelParams,
@@ -65,6 +68,13 @@ pub(crate) fn compress_fast(
     sequences
 }
 
+/// Finds matches in `src[block_start..block_end]` and writes them to
+/// `sequences`. `hash_table` has 2^`hash_log` entries and holds positions
+/// in `src`; bytes before `block_start` are the window. Rep offsets must be
+/// nonzero.
+///
+/// Common (`min_match`, `hash_log`) pairs run copies with both constant, so
+/// hash shifts are constants and table indexes need no bounds checks.
 pub(crate) fn compress_fast_block(
     src: &[u8],
     block_start: usize,
@@ -738,6 +748,8 @@ fn fast_block_generic<const HASH_LOG: u32, const MLS: usize, const DICT: bool>(
     } else {
         search_strength
     };
+    // Cursors stop where `MLS` bytes still fit the block and an 8-byte read
+    // fits `src`.
     let ilimit = (block_end - MLS).min(src.len() - 8);
     let max_distance = 1usize << params.window_log;
 
@@ -748,6 +760,7 @@ fn fast_block_generic<const HASH_LOG: u32, const MLS: usize, const DICT: bool>(
 
     primitives::assert_rep_valid(rep1 as u32, rep2 as u32);
 
+    // `HASH_LOG` 0 means the log is not a constant: take it from `params`.
     let hash_log = if HASH_LOG != 0 {
         HASH_LOG
     } else {
@@ -798,6 +811,9 @@ fn fast_block_generic<const HASH_LOG: u32, const MLS: usize, const DICT: bool>(
                 ip0 += mlen;
                 anchor = ip0;
                 if ip0 <= ilimit {
+                    // Complementary insertions, as in C zstd: two bytes
+                    // past where the search stood and two before the match
+                    // end.
                     insert_hash_mls::<HASH_LOG, MLS>(src, fill_pos + 2, hash_log, hash_table);
                     insert_hash_mls::<HASH_LOG, MLS>(src, ip0 - 2, hash_log, hash_table);
                     rep2_match_loop::<HASH_LOG, MLS>(
@@ -875,6 +891,9 @@ fn fast_block_generic<const HASH_LOG: u32, const MLS: usize, const DICT: bool>(
             if let Some(match_idx) =
                 find_match::<MLS, DICT>(src, ip0, match_idx, v0, max_distance, dict)
             {
+                // As in C zstd, store ip1 only while the step is short
+                // enough that ip1 falls inside a 4-byte match, behind where
+                // the search resumes.
                 if step_size + ((ip0 - anchor) >> search_strength) <= 4 {
                     hash_store!(hash_table, h1, ip1 as u32);
                 }
@@ -997,9 +1016,17 @@ pub(crate) fn count_back(src: &[u8], a: usize, b: usize, max: usize) -> usize {
             }
             return back;
         }
+        // `rd64` reads native order. The byte below `pa` is the top byte on
+        // little-endian targets and the bottom byte on big-endian ones, so
+        // counting zeros from that end counts equal bytes backward.
         let diff = rd64!(src, pa - 8) ^ rd64!(src, pb - 8);
         if diff != 0 {
-            return (back + (diff.leading_zeros() / 8) as usize).min(max);
+            let equal_bits = if cfg!(target_endian = "little") {
+                diff.leading_zeros()
+            } else {
+                diff.trailing_zeros()
+            };
+            return (back + (equal_bits / 8) as usize).min(max);
         }
         back += 8;
     }
@@ -1100,6 +1127,8 @@ fn prefill<const MLS: usize>(
 ) {
     // Positions whose eight-byte read stays inside the buffer.
     let end = prefix_len.min(combined.len().saturating_sub(7));
+    // About one position per table entry, so the cost follows the table
+    // size, then every position of the last 64 bytes.
     let step = (prefix_len / hash_table.len()).max(1);
     let mut i = 0;
     while i < end {
@@ -1119,6 +1148,8 @@ fn prefill<const MLS: usize>(
     }
 }
 
+/// Searches `src` after `prefix` with fresh tables, as
+/// [`compress_fast_with_prefix_reuse`] does.
 pub(crate) fn compress_fast_with_prefix(
     src: &[u8],
     params: &LevelParams,
@@ -1193,12 +1224,15 @@ fn hash4_const<const HASH_LOG: u32>(value: u32, hash_log: u32) -> usize {
     ((value.wrapping_mul(PRIME32_1)) >> (32 - hl)) as usize
 }
 
+// `hash5_const` to `hash7_const` hash the first 5 to 7 bytes of `value` on
+// little-endian targets: the shift drops the rest before the multiply.
 #[inline(always)]
 fn hash5_const<const HASH_LOG: u32>(value: u64, hash_log: u32) -> usize {
     let hl = if HASH_LOG != 0 { HASH_LOG } else { hash_log };
     (((value << 24).wrapping_mul(PRIME64_1)) >> (64 - hl)) as usize
 }
 
+/// C zstd's `prime6bytes`.
 const PRIME6: u64 = 227_718_039_650_203;
 
 #[inline(always)]
@@ -1207,6 +1241,7 @@ fn hash6_const<const HASH_LOG: u32>(value: u64, hash_log: u32) -> usize {
     (((value << 16).wrapping_mul(PRIME6)) >> (64 - hl)) as usize
 }
 
+/// C zstd's `prime7bytes`.
 const PRIME7: u64 = 58_295_818_150_454_627;
 
 #[inline(always)]
@@ -1221,7 +1256,7 @@ fn hash8_const<const HASH_LOG: u32>(value: u64, hash_log: u32) -> usize {
     (value.wrapping_mul(PRIME64_1) >> (64 - hl)) as usize
 }
 
-/// Hash of the eight bytes `v` read at a position.
+/// Hash of the first `MLS` of the eight bytes `v` read at a position.
 #[inline(always)]
 fn hash_val<const HASH_LOG: u32, const MLS: usize>(v: u64, hash_log: u32) -> usize {
     if MLS >= 8 {

@@ -1,3 +1,7 @@
+//! zstd encoder of [zrip](https://crates.io/crates/zrip): levels -7 to 4,
+//! the Fast and DFast match finders, the block encoder, and the one-shot,
+//! context, streaming and push APIs. Use `zrip` unless you need only the
+//! compressor.
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "nightly", feature(optimize_attribute))]
 #![forbid(unsafe_code)]
@@ -120,6 +124,7 @@ fn write_frame_header_inner(
     let fcs_size = content_size.map_or(0, |size| {
         frame_content_size_field_size(size, single_segment)
     });
+    // Flag 0 means a 1-byte field in single-segment frames, else none.
     let fcs_flag: u8 = match fcs_size {
         0 => 0,
         1 => 0,
@@ -135,6 +140,9 @@ fn write_frame_header_inner(
         Some(_) => 3,
     };
 
+    // Frame_Header_Descriptor: content size flag in bits 6-7,
+    // Single_Segment in bit 5, Content_Checksum in bit 2, dictionary ID
+    // flag in bits 0-1.
     let descriptor = if single_segment { 0x20 } else { 0 }
         | if content_checksum { 0x04 } else { 0 }
         | (fcs_flag << 6)
@@ -159,6 +167,7 @@ fn write_frame_header_inner(
         0 => {}
         1 => output.push(content_size as u8)?,
         2 => {
+            // The 2-byte field stores the size less 256.
             let v = (content_size - 256) as u16;
             output.extend_from_slice(&v.to_le_bytes())?;
         }
@@ -183,6 +192,8 @@ fn frame_window_size(content_size: usize, window_log: u32) -> usize {
     }
 }
 
+/// Bytes of the Frame_Content_Size field: 1 only in single-segment frames,
+/// 2 for 256 to 65791 bytes, else 4 or 8.
 fn frame_content_size_field_size(content_size: usize, single_segment: bool) -> usize {
     if single_segment && content_size <= 255 {
         1
@@ -195,6 +206,8 @@ fn frame_content_size_field_size(content_size: usize, single_segment: bool) -> u
     }
 }
 
+/// Window_Descriptor of a 2^`window_log`-byte window: exponent
+/// `window_log - 10`, mantissa 0.
 fn window_descriptor_for_log(window_log: u32) -> u8 {
     let window_log = window_log.clamp(strategy::WINDOW_LOG_MIN, strategy::WINDOW_LOG_MAX);
     ((window_log - 10) as u8) << 3
@@ -252,6 +265,8 @@ fn block_looks_incompressible(data: &[u8]) -> bool {
     true
 }
 
+/// Clamps the table and window logs to their valid ranges, then shrinks
+/// them to cover no more than `src_len` bytes.
 pub(crate) fn clamp_params_to_src_size(params: &mut strategy::LevelParams, src_len: usize) {
     params.hash_log = params
         .hash_log
@@ -270,6 +285,8 @@ pub(crate) fn clamp_params_to_src_size(params: &mut strategy::LevelParams, src_l
     }
 }
 
+/// [`compress`] with explicit `params` instead of a level. The table and
+/// window logs are clamped to their valid ranges and to the input size.
 pub fn compress_with_params(
     input: &[u8],
     params: &strategy::LevelParams,
@@ -279,12 +296,17 @@ pub fn compress_with_params(
     compress_inner(input, &params)
 }
 
+/// Compresses `input` into one frame at `level` (-7..=4; -8 runs as -7,
+/// 0 as 1). The frame records the content size and a checksum. Other
+/// levels fail with `CompressError::InvalidLevel`.
 pub fn compress(input: &[u8], level: i32) -> Result<Vec<u8>, CompressError> {
     let params = strategy::level_params_for_size(level, input.len())
         .ok_or(CompressError::InvalidLevel(level))?;
     compress_inner(input, &params)
 }
 
+/// [`compress`] with [`strategy::Options`]: a larger window or long
+/// distance matching. The window shrinks to the input.
 pub fn compress_opts(
     input: &[u8],
     level: i32,
@@ -322,6 +344,7 @@ fn compress_inner(input: &[u8], params: &strategy::LevelParams) -> Result<Vec<u8
     Ok(output)
 }
 
+/// Writes one frame for `input` at `params`, without a dictionary.
 pub(crate) fn compress_frame(
     input: &[u8],
     params: &strategy::LevelParams,
@@ -332,6 +355,7 @@ pub(crate) fn compress_frame(
     if input.is_empty() {
         block_encoder::encode_raw_block(&[], true, output)?;
     } else {
+        // The format's initial repeat offsets.
         let mut rep_offsets = [1u32, 4, 8];
         let mut offset = 0;
         let mut sequences = Vec::with_capacity(input.len().min(MAX_BLOCK_SIZE) / 8);
@@ -340,6 +364,7 @@ pub(crate) fn compress_frame(
         #[cfg(feature = "ldm")]
         let mut ldm_state = params.ldm_params.as_ref().map(ldm::LdmState::new);
         let window_size = frame_window_size(input.len(), params.window_log);
+        // Blocks may not exceed the window.
         let block_size = MAX_BLOCK_SIZE.min(window_size);
         let mut positions = PositionBase::new(params.window_log);
 
@@ -369,6 +394,7 @@ pub(crate) fn compress_frame(
                     } else {
                         #[cfg(feature = "ldm")]
                         let used_ldm = if let Some(ref mut ldm) = ldm_state {
+                            // Fast has no long table.
                             let mut empty = Vec::new();
                             ldm.compress_block(
                                 src,
@@ -497,12 +523,14 @@ pub(crate) fn compress_frame(
         }
     }
 
+    // Content_Checksum: the low 32 bits of XXH64 with seed 0.
     let hash = xxh64(input, 0);
     let checksum = (hash & 0xFFFF_FFFF) as u32;
     output.extend_from_slice(&checksum.to_le_bytes())?;
     Ok(())
 }
 
+/// [`compress`] with `dict`. Decoders need the same dictionary.
 pub fn compress_with_dict(
     input: &[u8],
     level: i32,
@@ -533,6 +561,8 @@ pub(crate) fn compress_with_dict_to(
         let mut rep_offsets = *dict.rep_offsets();
         let mut workspace = block_encoder::BlockEncodeWorkspace::new();
 
+        // Largest codes: 35 for literal lengths, 31 for offsets, 52 for
+        // match lengths.
         workspace.prev_ll = dict
             .ll_table()
             .map(|(dt, al)| block_encoder::FseEncodeTable::from_decode_table(dt, al, 35));
@@ -693,6 +723,10 @@ pub(crate) fn compress_with_dict_to(
     Ok(())
 }
 
+/// [`compress`] into `output`. Returns the frame size. Fails with
+/// `CompressError::OutputTooSmall` if the frame does not fit; `output` then
+/// holds a partial frame. `zrip::compress_bound(input.len())` bytes are
+/// always enough.
 pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usize, CompressError> {
     let params = strategy::level_params_for_size(level, input.len())
         .ok_or(CompressError::InvalidLevel(level))?;

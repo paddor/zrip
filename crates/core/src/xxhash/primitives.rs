@@ -1,3 +1,5 @@
+//! Little-endian loads and the XXH64 stripe loop.
+
 #[inline(always)]
 pub(crate) fn read_u32_le(data: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(*data[offset..].first_chunk::<4>().unwrap())
@@ -8,6 +10,8 @@ pub(crate) fn read_u64_le(data: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(*data[offset..].first_chunk::<8>().unwrap())
 }
 
+/// Runs the four lane accumulators over every whole 32-byte stripe of
+/// `data`, which holds at least one. The caller hashes the tail.
 #[inline(always)]
 pub(super) fn bulk_rounds(data: &[u8], v1: &mut u64, v2: &mut u64, v3: &mut u64, v4: &mut u64) {
     debug_assert!(data.len() >= 32);

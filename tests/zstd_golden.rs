@@ -274,14 +274,24 @@ fn golden_compression() {
 }
 
 /// The dictionary's Huffman weights sum to 2048, so the implied last
-/// weight makes `Max_Number_of_Bits` 12. The format allows at most 11 and
-/// calls such a description corrupted; C zstd takes up to 12.
+/// weight makes `Max_Number_of_Bits` 12. RFC 8878 allows 11; C zstd's
+/// decoder takes up to 12, and so does zrip's. zrip's encoder builds its
+/// own table instead of the dictionary's.
 #[test]
-fn golden_dictionary_over_11_bits_is_rejected() {
-    assert_eq!(
-        Dictionary::from_bytes(HTTP_DICT_MISSING_SYMBOLS).err(),
-        Some(zrip::DecompressError::BadHuffmanWeights)
-    );
+fn golden_dictionary_over_11_bits() {
+    let dict = Dictionary::from_bytes(HTTP_DICT_MISSING_SYMBOLS).unwrap();
     let mut c = zstd::bulk::Compressor::with_dictionary(3, HTTP_DICT_MISSING_SYMBOLS).unwrap();
-    assert!(c.compress(HTTP).is_ok(), "C zstd takes the dictionary");
+    let frame = c.compress(HTTP).unwrap();
+    assert_eq!(zrip::decompress_with_dict(&frame, &dict).unwrap(), HTTP);
+
+    let mut d = zstd::bulk::Decompressor::with_dictionary(HTTP_DICT_MISSING_SYMBOLS).unwrap();
+    for level in [-7, 1, 3] {
+        let frame = zrip::compress_with_dict(HTTP, level, &dict).unwrap();
+        assert_eq!(d.decompress(&frame, HTTP.len()).unwrap(), HTTP, "L{level}");
+        assert_eq!(
+            zrip::decompress_with_dict(&frame, &dict).unwrap(),
+            HTTP,
+            "L{level}"
+        );
+    }
 }

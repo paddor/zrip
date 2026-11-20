@@ -83,7 +83,9 @@
 //! - **`alloc`**: `no_std` with heap allocation (`Vec`, etc.).
 //! - **`frame`** (default): frame header parsing/writing; implies `std`.
 //! - **`ldm`** (default): long distance matching for large-window compression.
-//! - **`dict_builder`**: COVER/FastCOVER dictionary training.
+//! - **`dict_builder`**: FastCOVER dictionary training.
+//! - **`simd`** (default): runtime SIMD dispatch (AVX2+BMI2, NEON, SIMD128).
+//! - **`paranoid`**: keeps any future `unsafe` out; no effect today.
 //! - **`nightly`**: `#[optimize]` attributes for hot paths.
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -106,6 +108,8 @@ pub use zrip_encode::strategy::{
     DEFAULT_LEVEL, LdmParams, LevelParams, MAX_LEVEL, MIN_LEVEL, Options,
 };
 
+/// Output limit of the calls that take none, such as [`decompress`]: no
+/// limit.
 pub const DEFAULT_DECOMPRESS_LIMIT: usize = usize::MAX;
 pub use zrip_core::SAFE_DECOMPRESS_LIMIT;
 
@@ -114,11 +118,16 @@ pub use zrip_decode as decode;
 #[doc(hidden)]
 pub use zrip_encode as encode;
 
+/// Decompresses every frame in `input`, skipping skippable frames.
+///
+/// The output size is not limited. For untrusted input use
+/// [`decompress_with_limit`] with [`SAFE_DECOMPRESS_LIMIT`].
 #[cfg(feature = "alloc")]
 pub fn decompress(input: &[u8]) -> Result<alloc::vec::Vec<u8>, DecompressError> {
     zrip_decode::decompress(input)
 }
 
+/// [`decompress`] for frames compressed with `dict`.
 #[cfg(feature = "alloc")]
 pub fn decompress_with_dict(
     input: &[u8],
@@ -127,6 +136,8 @@ pub fn decompress_with_dict(
     zrip_decode::decompress_with_dict(input, Some(dict))
 }
 
+/// [`decompress_with_dict`] with the output capped at `max_output_size`
+/// bytes. Larger output fails with [`DecompressError::OutputTooSmall`].
 #[cfg(feature = "alloc")]
 pub fn decompress_with_dict_and_limit(
     input: &[u8],
@@ -136,6 +147,8 @@ pub fn decompress_with_dict_and_limit(
     zrip_decode::decompress_with_dict_and_limit(input, Some(dict), max_output_size)
 }
 
+/// [`decompress`] with the output capped at `max_output_size` bytes. Larger
+/// output fails with [`DecompressError::OutputTooSmall`].
 #[cfg(feature = "alloc")]
 pub fn decompress_with_limit(
     input: &[u8],
@@ -144,6 +157,8 @@ pub fn decompress_with_limit(
     zrip_decode::decompress_with_limit(input, max_output_size)
 }
 
+/// [`decompress`], appending to `output`. Returns the number of bytes
+/// appended. Reusing `output` saves the allocation.
 #[cfg(feature = "alloc")]
 pub fn decompress_into(
     input: &[u8],
@@ -152,11 +167,18 @@ pub fn decompress_into(
     zrip_decode::decompress_into(input, output)
 }
 
+/// Compresses `input` into one frame at `level` (see [`MIN_LEVEL`] and
+/// [`MAX_LEVEL`]; 0 means [`DEFAULT_LEVEL`]).
+///
+/// The frame carries the content size and a checksum.
+/// [`CompressContext`] reuses its tables across calls.
 #[cfg(feature = "alloc")]
 pub fn compress(input: &[u8], level: i32) -> Result<alloc::vec::Vec<u8>, CompressError> {
     zrip_encode::compress(input, level)
 }
 
+/// [`compress`] with explicit match finder parameters instead of a level.
+/// Parameters larger than the input needs are reduced to fit it.
 #[cfg(feature = "alloc")]
 pub fn compress_with_params(
     input: &[u8],
@@ -165,6 +187,8 @@ pub fn compress_with_params(
     zrip_encode::compress_with_params(input, params)
 }
 
+/// [`compress`] with [`Options`], such as a larger window and long distance
+/// matching.
 #[cfg(feature = "alloc")]
 pub fn compress_opts(
     input: &[u8],
@@ -174,6 +198,7 @@ pub fn compress_opts(
     zrip_encode::compress_opts(input, level, opts)
 }
 
+/// [`compress`] with `dict`. Decoders need the same dictionary.
 #[cfg(feature = "alloc")]
 pub fn compress_with_dict(
     input: &[u8],
@@ -183,6 +208,9 @@ pub fn compress_with_dict(
     zrip_encode::compress_with_dict(input, level, dict)
 }
 
+/// [`compress`] into `output`. Returns the frame size. Fails with
+/// [`CompressError::OutputTooSmall`] if the frame does not fit;
+/// [`compress_bound`] is always enough.
 #[cfg(feature = "alloc")]
 pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usize, CompressError> {
     zrip_encode::compress_into(input, output, level)

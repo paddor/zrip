@@ -1,4 +1,4 @@
-//! Zstd frame format constants.
+//! Zstd frame format: constants, header parsing, and frame size scanning.
 
 #![forbid(unsafe_code)]
 
@@ -41,6 +41,8 @@ pub fn find_frame_compressed_size(input: &[u8]) -> Result<usize, DecompressError
         return Err(DecompressError::InputExhausted);
     }
     let magic = u32::from_le_bytes([input[0], input[1], input[2], input[3]]);
+    // Skippable frame: magic `0x184D2A50` to `0x184D2A5F`, a 4-byte size,
+    // then that many bytes.
     if (magic & 0xFFFF_FFF0) == 0x184D_2A50 {
         if input.len() < 8 {
             return Err(DecompressError::InputExhausted);
@@ -61,6 +63,8 @@ pub fn find_frame_compressed_size(input: &[u8]) -> Result<usize, DecompressError
     // reads as truncated input rather than a bad header.
     let descriptor = *input.get(4).ok_or(DecompressError::InputExhausted)?;
     let single_segment = descriptor & 0x20 != 0;
+    // Magic and descriptor, then the window byte, dict ID, and content size
+    // fields the descriptor selects.
     let header_size = 5
         + usize::from(!single_segment)
         + [0, 1, 2, 4][usize::from(descriptor & 0x03)]
@@ -81,6 +85,7 @@ pub fn find_frame_compressed_size(input: &[u8]) -> Result<usize, DecompressError
         if size > MAX_BLOCK_SIZE {
             return Err(DecompressError::BlockTooLarge);
         }
+        // 3-byte block header, then the body: one byte for RLE.
         let body = match block.block_type {
             crate::block::BlockType::Rle => 1,
             _ => size,

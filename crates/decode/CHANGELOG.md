@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- Removed the unused `BlockDecodeWorkspace::fse_symbol_next`.
+
+- Decoding matches C zstd 1.5.7: one-shot decoding holds only compressed
+  blocks to `Block_Maximum_Size`, and their output may pass it by 32 bytes,
+  or by any amount when the literals stay outside the output, as there.
+  Literals over the block maximum fail. Streaming decoders reject windows
+  over 128 MiB also for single-segment frames, hold block output to the
+  block maximum, read a compressed block of size 0 as empty, skip the
+  content size check after an empty last block, and no longer fail a
+  content size over the output limit up front.
+- A block's sequences that pass its room fail with `BlockTooLarge` instead
+  of `CorruptSequences`.
+- `skip_skippable_frame` no longer overflows on 32-bit targets for sizes
+  near `u32::MAX`.
+
 ## [0.8.16] - 2026-11-20
 
 - `PushDecoder::decode_uninit` writes into an uninitialized buffer.
