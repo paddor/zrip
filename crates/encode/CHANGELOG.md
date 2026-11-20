@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-11-20
+
 - `strategy::MIN_LEVEL` and `strategy::MAX_LEVEL` name the lowest and
   highest compression levels.
 - `PushEncoder::encode_uninit` writes into an uninitialized buffer.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-11-20
+
 - `finalize_dictionary` writes a Huffman table with a code for every byte,
   weighted by literal counts from the samples, instead of a placeholder that
   coded no literals, as C zstd does.

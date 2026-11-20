@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.16] - 2026-11-20
+
 - `PushDecoder::decode_uninit` writes into an uninitialized buffer.
 - `PushDecoder::at_frame_end` tells whether a frame ended and no later
   input was read.
