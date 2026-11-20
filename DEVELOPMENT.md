@@ -399,8 +399,8 @@ cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- tiny-matrix
 
 ### Dictionary sweep
 
-`--sweep` runs zrip, C zstd, structured-zstd and rusty_zstd, each with and
-without a dictionary, on 64 consecutive slices of 64 B to 1 MiB from every
+`--sweep` runs zrip, C zstd, structured-zstd, mzstd and rusty_zstd, each with
+and without a dictionary, on 64 consecutive slices of 64 B to 1 MiB from every
 Silesia file, at levels 1 and 3. Each file gets one 16 KiB dictionary, trained
 by C zstd on 1 KiB samples past the first MiB, so the slices up to 16 KiB are
 not in its training set. Codecs reuse their compressor and decoder, except
