@@ -9,6 +9,8 @@
 - `PushEncoder::encode_uninit` and `PushDecoder::decode_uninit` write into
   uninitialized buffers, so callers such as async I/O adapters need not
   zero them first.
+- `PushDecoder::at_frame_end` tells whether a frame ended and no later
+  input was read, for callers that missed the one `Status::Finished`.
 
 ### Changed
 

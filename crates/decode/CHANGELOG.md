@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 - `PushDecoder::decode_uninit` writes into an uninitialized buffer.
+- `PushDecoder::at_frame_end` tells whether a frame ended and no later
+  input was read.
 - A compressed block without a sequence count, or with bytes after a zero
   count, fails with `CorruptSequences`, and a block over
   `Block_Maximum_Size` (the window, at most 128 KiB, compressed size

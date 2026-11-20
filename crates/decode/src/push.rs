@@ -95,6 +95,8 @@ pub struct PushDecoder {
     output_end: usize,
     /// A frame ended; report it once its output is delivered.
     frame_done: bool,
+    /// A frame ended, its output was delivered, and no later input was read.
+    at_frame_end: bool,
     error: Option<DecompressError>,
 }
 
@@ -196,6 +198,7 @@ impl PushDecoder {
             output_pos: 0,
             output_end: 0,
             frame_done: false,
+            at_frame_end: false,
             error: None,
         }
     }
@@ -277,6 +280,17 @@ impl PushDecoder {
         }
     }
 
+    /// Whether the decoder stands at the end of a frame: one ended, all of
+    /// its output was delivered, and no input after it was read yet.
+    ///
+    /// [`Status::Finished`] is reported once, so that a loop calling until
+    /// [`Status::NeedsInput`] ends. This stays true until the next frame's
+    /// input arrives or [`reset`](Self::reset), for callers that learn of
+    /// the frame end later, such as after draining output in a flush.
+    pub fn at_frame_end(&self) -> bool {
+        self.at_frame_end
+    }
+
     /// Whether decoded output is still waiting to be delivered.
     pub fn has_pending_output(&self) -> bool {
         self.output_pos < self.output_end
@@ -290,6 +304,7 @@ impl PushDecoder {
         self.output_pos = 0;
         self.output_end = 0;
         self.frame_done = false;
+        self.at_frame_end = false;
         self.error = None;
     }
 
@@ -312,14 +327,21 @@ impl PushDecoder {
             }
             if self.frame_done {
                 self.frame_done = false;
+                self.at_frame_end = true;
                 if stop_at_frame_end {
                     return Ok((consumed, Status::Finished));
                 }
             }
-            match self.step(input, &mut consumed) {
+            let before = consumed;
+            let stepped = self.step(input, &mut consumed);
+            if consumed > before {
+                self.at_frame_end = false;
+            }
+            match stepped {
                 Ok(true) => {}
                 Ok(false) => return Ok((consumed, Status::NeedsInput)),
                 Err(e) => {
+                    self.at_frame_end = false;
                     self.unit = Unit::Failed;
                     self.frame.discard_block();
                     self.output_pos = 0;

@@ -554,6 +554,51 @@ fn uninit_buffers_match_initialized_ones() {
     }
 }
 
+#[test]
+fn at_frame_end_holds_until_the_next_frame() {
+    let a = zrip::compress(&mixed(200_000, 5), 1).unwrap();
+    let b = zrip::compress(b"second", 1).unwrap();
+    let both = [&a[..], &b[..]].concat();
+    let mut dec = PushDecoder::new();
+    assert!(!dec.at_frame_end());
+
+    // Output still pending after all of `a` was read: not at the end yet.
+    let mut buf = [0u8; 4096];
+    let mut input = &both[..];
+    loop {
+        let p = dec.decode(input, &mut buf).unwrap();
+        input = &input[p.consumed..];
+        if p.status == Status::Finished {
+            break;
+        }
+        assert!(!dec.at_frame_end());
+    }
+    assert!(dec.at_frame_end());
+
+    // The one `Finished` was seen; empty calls keep the frame end.
+    assert_eq!(
+        dec.decode(&[], &mut buf).unwrap().status,
+        Status::NeedsInput
+    );
+    assert!(dec.at_frame_end());
+
+    // The next frame's first bytes end it.
+    let p = dec.decode(&input[..2], &mut buf).unwrap();
+    assert_eq!(p.consumed, 2);
+    assert!(!dec.at_frame_end());
+    let p = dec.decode(&input[2..], &mut buf).unwrap();
+    assert_eq!(p.status, Status::Finished);
+    assert!(dec.at_frame_end());
+    dec.reset();
+    assert!(!dec.at_frame_end());
+
+    let mut out = Vec::new();
+    dec.decode_to_vec(&both, &mut out).unwrap();
+    assert!(dec.at_frame_end());
+    dec.decode_to_vec(&b[..3], &mut out).unwrap();
+    assert!(!dec.at_frame_end());
+}
+
 /// Skewed literals with few repeats: about 5 bits per byte.
 fn skewed(range: core::ops::Range<u32>) -> Vec<u8> {
     range
