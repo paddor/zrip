@@ -93,6 +93,11 @@ enum Data {
     Points,
     /// Slices spread over every Silesia file, when the corpus is present.
     Silesia,
+    /// Slices of Silesia's English text, `dickens` and `webster`: large
+    /// literal sections with short codes, which take the two-symbol Huffman
+    /// decoder. In `Silesia`, gains on the other files can hide a slowdown
+    /// there.
+    SilesiaText,
 }
 
 #[derive(Clone, Copy)]
@@ -177,7 +182,7 @@ const fn case(
 /// messages to 4 MiB streams.
 #[rustfmt::skip]
 fn cases() -> Vec<Case> {
-    use Data::{Binary, Points, Silesia, Text};
+    use Data::{Binary, Points, Silesia, SilesiaText, Text};
     use Op::*;
     vec![
         case("compress_l1", "64b", Compress, 1, Text, 64),
@@ -260,6 +265,8 @@ fn cases() -> Vec<Case> {
         case("silesia_l4", "256k_ctx", Context, 4, Silesia, 256 * KIB),
         case("silesia_decode", "16k", DecompressContext, 3, Silesia, 16 * KIB),
         case("silesia_decode", "256k", DecompressContext, 1, Silesia, 256 * KIB),
+        case("silesia_text_decode", "128k_l-5", DecompressContext, -5, SilesiaText, 128 * KIB),
+        case("silesia_text_decode", "128k_l1", DecompressContext, 1, SilesiaText, 128 * KIB),
     ]
 }
 
@@ -386,7 +393,7 @@ fn points(len: usize, seed: u64) -> Vec<u8> {
 }
 
 fn inputs(case: &Case, corpus: &[Vec<u8>]) -> Vec<Vec<u8>> {
-    if let Data::Silesia = case.data {
+    if let Data::Silesia | Data::SilesiaText = case.data {
         // The same share of every file, at evenly spaced offsets.
         let per_file = (CASE_BYTES / corpus.len() / case.len).max(1);
         return corpus
@@ -404,7 +411,7 @@ fn inputs(case: &Case, corpus: &[Vec<u8>]) -> Vec<Vec<u8>> {
             Data::Text => text(case.len, seed),
             Data::Binary => binary(case.len, seed),
             Data::Points => points(case.len, seed),
-            Data::Silesia => unreachable!(),
+            Data::Silesia | Data::SilesiaText => unreachable!(),
         })
         .collect()
 }
@@ -428,7 +435,18 @@ fn corpus_paths() -> Vec<PathBuf> {
 }
 
 fn corpus() -> Vec<Vec<u8>> {
-    corpus_paths()
+    read_all(&corpus_paths())
+}
+
+/// The English text files of the corpus.
+fn corpus_text() -> Vec<Vec<u8>> {
+    let mut paths = corpus_paths();
+    paths.retain(|p| p.file_name().is_some_and(|n| n == "dickens" || n == "webster"));
+    read_all(&paths)
+}
+
+fn read_all(paths: &[PathBuf]) -> Vec<Vec<u8>> {
+    paths
         .iter()
         .map(|p| std::fs::read(p).unwrap_or_else(|e| panic!("cannot read {}: {e}", p.display())))
         .collect()
@@ -942,6 +960,7 @@ fn worker(name: &str, settings: &Settings) {
     pin();
     let corpus = match case.data {
         Data::Silesia => corpus(),
+        Data::SilesiaText => corpus_text(),
         _ => Vec::new(),
     };
     let dict = matches!(case.op, Op::DictContext | Op::DecompressDict).then(dictionary);
@@ -1011,7 +1030,7 @@ fn main() {
     let have_corpus = !corpus_paths().is_empty();
     let selected: Vec<&Case> = all
         .iter()
-        .filter(|c| !matches!(c.data, Data::Silesia) || have_corpus)
+        .filter(|c| !matches!(c.data, Data::Silesia | Data::SilesiaText) || have_corpus)
         .filter(|c| {
             options.cases.is_empty()
                 || options
