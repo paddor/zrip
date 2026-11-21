@@ -171,11 +171,11 @@ Level 3
 </text>
 <rect x="190" y="880" width="12" height="12" opacity="1" fill="#60A5FA" stroke="none"/>
 <text x="208" y="886" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-C zstd 1.5.7 (libzstd wasm)
+libzstd v1.5.7 (C, wasm, <tspan fill="#F85149">unsafe</tspan>)
 </text>
 <rect x="190" y="900" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
 <text x="208" y="906" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-zrip (safe Rust)
+zrip (safe)
 </text>
 <rect x="460" y="880" width="12" height="12" opacity="1" fill="#F59E0B" stroke="none"/>
 <text x="478" y="886" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
