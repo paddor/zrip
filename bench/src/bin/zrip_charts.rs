@@ -14,6 +14,8 @@ const GRID: RGBColor = RGBColor(0x21, 0x26, 0x2d);
 const AXIS: RGBColor = RGBColor(0x30, 0x36, 0x3d);
 const TEXT: RGBColor = RGBColor(0xe6, 0xed, 0xf3);
 const MUTED: RGBColor = RGBColor(0x7d, 0x85, 0x90);
+/// Fill of the word "unsafe" in labels.
+const UNSAFE: &str = "#F85149";
 
 const FONT_BUMP: u32 = 1;
 const HEADER_SUBTITLE_OFFSET: i32 = 18;
@@ -226,8 +228,13 @@ impl Config {
             cfg.hw_label =
                 Some("wasmtime (wasm32-wasip1), Linux VM on Intel Core i7-8700B @ 3.20GHz".into());
             cfg.codecs = vec![
-                codec("C zstd", "C zstd 1.5.7 (libzstd wasm)", 0x60a5fa, 0x4680c4),
-                codec("zrip", "zrip (safe Rust)", 0xf87171, 0xc45050),
+                codec(
+                    "C zstd",
+                    "libzstd v1.5.7 (C, wasm, unsafe)",
+                    0x60a5fa,
+                    0x4680c4,
+                ),
+                codec("zrip", "zrip (safe)", 0xf87171, 0xc45050),
                 codec(
                     "structured-zstd",
                     "structured-zstd 0.4.2",
@@ -253,8 +260,8 @@ impl Config {
             target: std::env::consts::ARCH.into(),
             hw_label: detect_hardware(),
             codecs: vec![
-                codec("C zstd", "libzstd v1.5.7 (C)", 0x60a5fa, 0x4680c4),
-                codec("zrip", "zrip (safe Rust)", 0xf87171, 0xc45050),
+                codec("C zstd", "libzstd v1.5.7 (C, unsafe)", 0x60a5fa, 0x4680c4),
+                codec("zrip", "zrip (safe)", 0xf87171, 0xc45050),
                 codec(
                     "structured-zstd",
                     "structured-zstd v0.4.2 (unsafe)",
@@ -262,19 +269,14 @@ impl Config {
                     0xc47d08,
                 ),
                 codec("ruzstd", "ruzstd v0.8.3 (safe)", 0x4ade80, 0x3aaf60),
-                codec("mzstd", "mzstd v0.2.14 (safe)", 0x2dd4bf, 0x22a896),
+                codec("mzstd", "mzstd v0.2.15 (safe)", 0x2dd4bf, 0x22a896),
                 codec(
                     "rusty_zstd",
                     "rusty_zstd v0.5.0 (unsafe)",
                     0xfde047,
                     0xcab238,
                 ),
-                codec(
-                    "lz4rip",
-                    "lz4rip v0.12.1 (safe Rust, LZ4)",
-                    0xc084fc,
-                    0x9966cc,
-                ),
+                codec("lz4rip", "lz4rip v0.12.3 (LZ4, safe)", 0xc084fc, 0x9966cc),
             ],
             scatter_codecs: vec![
                 "C zstd",
@@ -837,6 +839,12 @@ fn finish_svg(path: &Path, width: u32, height: u32) -> Result<(), Box<dyn Error>
         "xmlns=\"http://www.w3.org/2000/svg\"",
         "xmlns=\"http://www.w3.org/2000/svg\" font-family=\"system-ui, -apple-system, sans-serif\"",
         1,
+    );
+    // Labels are plain text lines of `<text>` elements, so a `<tspan>` colors
+    // the word without moving it.
+    svg = svg.replace(
+        "unsafe",
+        &format!("<tspan fill=\"{UNSAFE}\">unsafe</tspan>"),
     );
     std::fs::write(path, svg)?;
     Ok(())
