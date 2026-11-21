@@ -17,9 +17,16 @@ use crate::hint::unlikely;
 /// covers the sequence tables (accuracy log <= 9) and Huffman weights.
 const SPREAD_MAX: usize = 1 << 9;
 
+// Inlined into the decoder's x86-64-v3 dispatch in builds without AVX2, so
+// it runs with BMI2 and LZCNT there. Native builds are faster with it out of
+// line.
 /// Parses an FSE table description into `distribution`: `max_symbol + 1`
 /// probabilities, -1 for "less than one", zero-padded. Returns the
 /// accuracy log and leaves `reader` on the next byte boundary.
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
 pub fn parse_fse_table_description_into(
     reader: &mut BitReader,
     max_symbol: u8,
@@ -278,6 +285,10 @@ pub fn build_decode_table(
 /// Builds the decode table for `distribution` into `table`, resized to
 /// `1 << accuracy_log` cells. The probabilities, -1 counting as 1, must
 /// sum to the table size, as parsed ones do.
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
 pub fn build_decode_table_into(
     distribution: &[i16],
     accuracy_log: u8,

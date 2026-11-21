@@ -14,6 +14,7 @@ use crate::huffman::{
 /// `output_size.div_ceil(4)`-byte segment per stream, the last shorter.
 /// Fast loops run while every stream has room; `decode_stream_tail`
 /// finishes each.
+#[inline(always)]
 pub(super) fn decode_4_streams_core(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -300,15 +301,13 @@ pub(super) fn decode_4_streams_core(
         o_idx
     }
 
-    let o1 = finish_fast(table, tl, &mut r1, out1, done[0]);
-    let o2 = finish_fast(table, tl, &mut r2, out2, done[1]);
-    let o3 = finish_fast(table, tl, &mut r3, out3, done[2]);
-    let o4 = finish_fast(table, tl, &mut r4, out4, done[3]);
-
-    super::decode::decode_stream_tail(table, table_log, &mut r1, &mut out1[o1..])?;
-    super::decode::decode_stream_tail(table, table_log, &mut r2, &mut out2[o2..])?;
-    super::decode::decode_stream_tail(table, table_log, &mut r3, &mut out3[o3..])?;
-    super::decode::decode_stream_tail(table, table_log, &mut r4, &mut out4[o4..])?;
+    // One loop, so the inlined tail code exists once.
+    let readers = [&mut r1, &mut r2, &mut r3, &mut r4];
+    let outs = [out1, out2, out3, out4];
+    for ((r, out), d) in readers.into_iter().zip(outs).zip(done) {
+        let o = finish_fast(table, tl, r, out, d);
+        super::decode::decode_stream_tail(table, table_log, r, &mut out[o..])?;
+    }
 
     Ok(())
 }

@@ -32,9 +32,16 @@ pub fn parse_huffman_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompress
     }
 }
 
+// Inlined into the decoder's x86-64-v3 dispatch in builds without AVX2, so
+// it runs with BMI2 and LZCNT there. Native builds are faster with it out of
+// line.
 /// [`parse_huffman_weights`] into reused buffers: `weights` gets the
 /// weights, the `fse_*` vectors are scratch. Returns the bytes used.
 #[cfg(feature = "alloc")]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
 pub fn parse_huffman_weights_into(
     data: &[u8],
     weights: &mut Vec<u8>,
@@ -77,6 +84,10 @@ fn parse_direct_weights(data: &[u8]) -> Result<(Vec<u8>, usize), DecompressError
 }
 
 #[cfg(feature = "alloc")]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
 fn parse_direct_weights_into(data: &[u8], weights: &mut Vec<u8>) -> Result<usize, DecompressError> {
     let num_symbols = (data[0] as usize) - 127;
     let num_bytes = num_symbols.div_ceil(2);
@@ -173,6 +184,10 @@ fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompr
 }
 
 #[cfg(feature = "alloc")]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
 fn parse_fse_compressed_weights_into(
     data: &[u8],
     weights: &mut Vec<u8>,
@@ -389,6 +404,10 @@ pub fn build_huffman_decode_table(
 /// Builds the decode table for `weights` into `table` and returns the table
 /// log.
 #[cfg(feature = "alloc")]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
 pub fn build_huffman_decode_table_into(
     weights: &[u8],
     table: &mut Vec<crate::huffman::HuffmanDecodeEntry>,

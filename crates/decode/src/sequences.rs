@@ -318,7 +318,28 @@ static OF_PREDEFINED: std::sync::LazyLock<SeqTable> = std::sync::LazyLock::new(|
 
 /// Parses the compression modes byte and the table descriptions after it,
 /// updating `prev`. Returns the bytes consumed.
+///
+/// Kept out of line and compiled for x86-64-v3 when the CPU has it, as
+/// [`decode_literals_ws`](crate::literals::decode_literals_ws) is.
+#[cfg_attr(
+    all(
+        feature = "std",
+        feature = "simd",
+        target_arch = "x86_64",
+        not(target_feature = "avx2")
+    ),
+    inline(never)
+)]
 pub(crate) fn parse_sequence_tables_ws(
+    data: &[u8],
+    prev: &mut SequenceDecodeTables,
+    ws: &mut BlockDecodeWorkspace,
+) -> Result<usize, DecompressError> {
+    simd_body!(parse_sequence_tables_ws_impl(data, prev, ws))
+}
+
+#[inline(always)]
+fn parse_sequence_tables_ws_impl(
     data: &[u8],
     prev: &mut SequenceDecodeTables,
     ws: &mut BlockDecodeWorkspace,

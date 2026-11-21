@@ -142,7 +142,30 @@ impl LiteralsAt {
 ///
 /// More than `block_size_max` literals, the frame's `Block_Maximum_Size`,
 /// fail, as in C zstd.
+///
+/// Compiled for x86-64-v3 when the CPU has it, and then kept out of line, so
+/// the
+/// table builds and decode loops use BMI2 and LZCNT in builds for the
+/// baseline target, as C zstd's do.
+#[cfg_attr(
+    all(
+        feature = "std",
+        feature = "simd",
+        target_arch = "x86_64",
+        not(target_feature = "avx2")
+    ),
+    inline(never)
+)]
 pub(crate) fn decode_literals_ws(
+    data: &[u8],
+    ws: &mut BlockDecodeWorkspace,
+    block_size_max: usize,
+) -> Result<(usize, LiteralsAt), DecompressError> {
+    simd_body!(decode_literals_ws_impl(data, ws, block_size_max))
+}
+
+#[inline(always)]
+fn decode_literals_ws_impl(
     data: &[u8],
     ws: &mut BlockDecodeWorkspace,
     block_size_max: usize,
@@ -262,39 +285,7 @@ pub(crate) fn decode_literals_ws(
 
             let compressed_stream = &stream_data[huf_consumed..];
 
-            if num_streams == 1 {
-                decode_single_stream_vec(
-                    &ws.huf_table,
-                    ws.huf_table_log,
-                    compressed_stream,
-                    regen_size,
-                    &mut ws.literal_buf,
-                )?;
-            } else if ws.huf_table_log <= FAST_TABLE_LOG
-                && prefers_pairs(regen_size, compressed_stream.len())
-            {
-                // Two symbols per lookup; the pair table is built lazily.
-                if !ws.huf_pairs_valid {
-                    build_pair_table(&ws.huf_table, ws.huf_table_log, &mut ws.huf_pairs)?;
-                    ws.huf_pairs_valid = true;
-                }
-                decode_4_streams_pairs_into(
-                    &ws.huf_table,
-                    ws.huf_table_log,
-                    &ws.huf_pairs,
-                    compressed_stream,
-                    regen_size,
-                    &mut ws.literal_buf,
-                )?;
-            } else {
-                decode_4_streams_into(
-                    &ws.huf_table,
-                    ws.huf_table_log,
-                    compressed_stream,
-                    regen_size,
-                    &mut ws.literal_buf,
-                )?;
-            }
+            decode_huffman_streams(ws, num_streams, compressed_stream, regen_size)?;
 
             ws.literal_buf.resize(regen_size + LITERAL_OVERREAD, 0);
             (
@@ -305,6 +296,51 @@ pub(crate) fn decode_literals_ws(
     };
 
     Ok((consumed, at))
+}
+
+/// Decodes a section's Huffman streams into `ws.literal_buf` with the table
+/// in `ws`.
+#[inline(always)]
+fn decode_huffman_streams(
+    ws: &mut BlockDecodeWorkspace,
+    num_streams: usize,
+    compressed_stream: &[u8],
+    regen_size: usize,
+) -> Result<(), DecompressError> {
+    if num_streams == 1 {
+        decode_single_stream_vec(
+            &ws.huf_table,
+            ws.huf_table_log,
+            compressed_stream,
+            regen_size,
+            &mut ws.literal_buf,
+        )?;
+    } else if ws.huf_table_log <= FAST_TABLE_LOG
+        && prefers_pairs(regen_size, compressed_stream.len())
+    {
+        // Two symbols per lookup; the pair table is built lazily.
+        if !ws.huf_pairs_valid {
+            build_pair_table(&ws.huf_table, ws.huf_table_log, &mut ws.huf_pairs)?;
+            ws.huf_pairs_valid = true;
+        }
+        decode_4_streams_pairs_into(
+            &ws.huf_table,
+            ws.huf_table_log,
+            &ws.huf_pairs,
+            compressed_stream,
+            regen_size,
+            &mut ws.literal_buf,
+        )?;
+    } else {
+        decode_4_streams_into(
+            &ws.huf_table,
+            ws.huf_table_log,
+            compressed_stream,
+            regen_size,
+            &mut ws.literal_buf,
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

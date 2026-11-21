@@ -228,6 +228,15 @@ impl SeqTable {
     }
 
     /// Builds the table from a literal length distribution.
+    #[cfg_attr(
+        all(
+            feature = "std",
+            feature = "simd",
+            target_arch = "x86_64",
+            not(target_feature = "avx2")
+        ),
+        inline(always)
+    )]
     pub(crate) fn build_ll(
         &mut self,
         distribution: &[i16],
@@ -237,6 +246,15 @@ impl SeqTable {
     }
 
     /// Builds the table from a match length distribution.
+    #[cfg_attr(
+        all(
+            feature = "std",
+            feature = "simd",
+            target_arch = "x86_64",
+            not(target_feature = "avx2")
+        ),
+        inline(always)
+    )]
     pub(crate) fn build_ml(
         &mut self,
         distribution: &[i16],
@@ -246,6 +264,15 @@ impl SeqTable {
     }
 
     /// Builds the table from an offset code distribution.
+    #[cfg_attr(
+        all(
+            feature = "std",
+            feature = "simd",
+            target_arch = "x86_64",
+            not(target_feature = "avx2")
+        ),
+        inline(always)
+    )]
     pub(crate) fn build_of(
         &mut self,
         distribution: &[i16],
