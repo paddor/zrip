@@ -50,6 +50,7 @@ pub(super) fn decode_4_streams_core(
         return Err(DecompressError::BadHuffmanStream);
     }
     let remaining = output_size - seg * 3;
+    let output = &mut output[..output_size];
 
     let mut r1 = ReverseBitReader::new(&data[s1_start..s2_start])
         .map_err(|_| DecompressError::BadHuffmanStream)?;
@@ -60,42 +61,6 @@ pub(super) fn decode_4_streams_core(
     let mut r4 =
         ReverseBitReader::new(&data[s4_start..]).map_err(|_| DecompressError::BadHuffmanStream)?;
 
-    let seg1_end = seg;
-    let seg2_end = seg;
-    let seg3_end = seg;
-    let seg4_end = remaining;
-
-    let (out1, rest) = output.split_at_mut(seg);
-    let (out2, rest) = rest.split_at_mut(seg);
-    let (out3, out4) = rest.split_at_mut(seg);
-    let out4 = &mut out4[..remaining];
-
-    let mut c1 = r1.container;
-    let mut bc1 = r1.bits_consumed;
-    let mut p1_idx = r1.ptr;
-
-    let mut c2 = r2.container;
-    let mut bc2 = r2.bits_consumed;
-    let mut p2_idx = r2.ptr;
-
-    let mut c3 = r3.container;
-    let mut bc3 = r3.bits_consumed;
-    let mut p3_idx = r3.ptr;
-
-    let mut c4 = r4.container;
-    let mut bc4 = r4.bits_consumed;
-    let mut p4_idx = r4.ptr;
-
-    let fast1_limit = r1.limit_ptr;
-    let fast2_limit = r2.limit_ptr;
-    let fast3_limit = r3.limit_ptr;
-    let fast4_limit = r4.limit_ptr;
-
-    let mut o1_idx: usize = 0;
-    let mut o2_idx: usize = 0;
-    let mut o3_idx: usize = 0;
-    let mut o4_idx: usize = 0;
-
     let tl = table_log as u32;
     if !(1..=u32::from(MAX_TABLE_LOG)).contains(&tl) {
         return Err(DecompressError::BadHuffmanStream);
@@ -104,14 +69,193 @@ pub(super) fn decode_4_streams_core(
     // tables, which C zstd accepts and its encoder does not write, decode
     // every stream with the checked tail.
     if tl > u32::from(FAST_TABLE_LOG) {
+        let (out1, rest) = output.split_at_mut(seg);
+        let (out2, rest) = rest.split_at_mut(seg);
+        let (out3, out4) = rest.split_at_mut(seg);
         super::decode::decode_stream_tail(table, table_log, &mut r1, out1)?;
         super::decode::decode_stream_tail(table, table_log, &mut r2, out2)?;
         super::decode::decode_stream_tail(table, table_log, &mut r3, out3)?;
         return super::decode::decode_stream_tail(table, table_log, &mut r4, out4);
     }
-    // `shift >= 53` bounds every fast-round index below the 2048-entry table,
-    // so the lookups need neither a mask nor a bounds check.
+    // `shift >= 53` keeps every fast-round index below the 2048-entry table.
+    // The bounds checks stay: they are off the lookup chain, where a mask
+    // would add a cycle per symbol.
     let shift = 64 - tl;
+
+    // The table for the fast rounds, at its fixed size.
+    let fixed: &[HuffmanDecodeEntry; DECODE_TABLE_SIZE] = table
+        .first_chunk()
+        .ok_or(DecompressError::BadHuffmanStream)?;
+
+    // Output decoded so far in each segment.
+    let mut done = [0usize; 4];
+
+    // The fast rounds use C zstd's layout and bounds. Each stream is a
+    // left-aligned container `b` with a sentinel bit: a load sets bit 0, and
+    // each symbol shifts the container left by its length, so the next code
+    // is always the top `tl` bits and `trailing_zeros` is the number of bits
+    // consumed since the load. A round reads at most 62 bits after a load, so
+    // the sentinel never reaches the top 11 bits.
+    //
+    // Positions `a` are absolute in `data`, and a reload may read bytes of
+    // the stream before, as C zstd's loop does: a stream's container is then
+    // partly outside it, but its unread bits are not, unless the data is
+    // corrupt. A round moves a stream back at most 7 bytes. So rounds stay
+    // inside `data` while stream 1, the lowest, is 7 bytes per round from
+    // the start, and every stream is at or above the one before it.
+    // `rebase` checks afterwards that no stream read bits below its start.
+    if r1.data.len() >= 8 && r2.data.len() >= 8 && r3.data.len() >= 8 && r4.data.len() >= 8 {
+        // Every stream has at least 8 bytes, so each container is a full
+        // load with at most 8 bits consumed.
+        let mut a1 = s1_start + r1.ptr;
+        let mut a2 = s2_start + r2.ptr;
+        let mut a3 = s3_start + r3.ptr;
+        let mut a4 = s4_start + r4.ptr;
+        let mut b1 = (r1.container | 1) << r1.bits_consumed;
+        let mut b2 = (r2.container | 1) << r2.bits_consumed;
+        let mut b3 = (r3.container | 1) << r3.bits_consumed;
+        let mut b4 = (r4.container | 1) << r4.bits_consumed;
+
+        macro_rules! reload {
+            ($b:expr, $a:expr) => {{
+                let consumed = $b.trailing_zeros();
+                $a -= (consumed >> 3) as usize;
+                $b = (bitstream_primitives::read_u64_le_unaligned(data, $a) | 1) << (consumed & 7);
+            }};
+        }
+
+        // Rounds every stream can run: by its output room, and by stream 1's
+        // distance from the start of `data`. Zero once the streams are out of
+        // order, which only corrupt data does.
+        let rounds_for = |done: &[usize; 4], room: usize, a: [usize; 4]| -> usize {
+            if !(a[0] <= a[1] && a[1] <= a[2] && a[2] <= a[3]) {
+                return 0;
+            }
+            let ends = [seg, seg, seg, remaining];
+            let mut by_output = usize::MAX;
+            for k in 0..4 {
+                by_output = by_output.min(ends[k].saturating_sub(done[k]) / room);
+            }
+            by_output.min(a[0] / 7)
+        };
+
+        // Two-symbol rounds: four lookups per stream (at most 44 bits after a
+        // load that leaves at most seven consumed), each storing both bytes of
+        // its row and advancing by its count. A round may touch the
+        // `PAIR_WINDOW` bytes after the stream's output; they stay inside its
+        // segment, where the next round or the end overwrites them.
+        const PAIR_SHIFT: u32 = 64 - PAIR_TABLE_LOG as u32;
+        const PAIR_WINDOW: usize = 10;
+        if let Some(pairs) = pairs {
+            // One lookup: store both bytes of the row at the stream's offset
+            // in its window and advance by the row's count.
+            macro_rules! pair {
+                ($b:expr, $w:expr, $o:expr) => {{
+                    let row = pairs[($b >> PAIR_SHIFT) as usize];
+                    $b <<= (row >> 16) & 0xFF;
+                    let at = $o & 7;
+                    $w[at..at + 2].copy_from_slice(&(row as u16).to_le_bytes());
+                    $o += (row >> 24) as usize;
+                }};
+            }
+            loop {
+                let rounds = rounds_for(&done, PAIR_WINDOW, [a1, a2, a3, a4]);
+                if rounds == 0 {
+                    break;
+                }
+                let (out1, rest) = output.split_at_mut(seg);
+                let (out2, rest) = rest.split_at_mut(seg);
+                let (out3, out4) = rest.split_at_mut(seg);
+                for _ in 0..rounds {
+                    reload!(b1, a1);
+                    reload!(b2, a2);
+                    reload!(b3, a3);
+                    reload!(b4, a4);
+                    let w1: &mut [u8; PAIR_WINDOW] = (&mut out1[done[0]..done[0] + PAIR_WINDOW])
+                        .try_into()
+                        .unwrap();
+                    let w2: &mut [u8; PAIR_WINDOW] = (&mut out2[done[1]..done[1] + PAIR_WINDOW])
+                        .try_into()
+                        .unwrap();
+                    let w3: &mut [u8; PAIR_WINDOW] = (&mut out3[done[2]..done[2] + PAIR_WINDOW])
+                        .try_into()
+                        .unwrap();
+                    let w4: &mut [u8; PAIR_WINDOW] = (&mut out4[done[3]..done[3] + PAIR_WINDOW])
+                        .try_into()
+                        .unwrap();
+                    let (mut o1, mut o2, mut o3, mut o4) = (0usize, 0usize, 0usize, 0usize);
+                    // Lookup by lookup across the streams, so the chains
+                    // interleave.
+                    for _ in 0..4 {
+                        pair!(b1, w1, o1);
+                        pair!(b2, w2, o2);
+                        pair!(b3, w3, o3);
+                        pair!(b4, w4, o4);
+                    }
+                    done[0] += o1;
+                    done[1] += o2;
+                    done[2] += o3;
+                    done[3] += o4;
+                }
+            }
+        }
+
+        // Five-symbol rounds. All four streams advance together, so each
+        // takes the same number of fixed-size chunks of its segment.
+        loop {
+            let rounds = rounds_for(&done, 5, [a1, a2, a3, a4]);
+            if rounds == 0 {
+                break;
+            }
+            let (out1, rest) = output.split_at_mut(seg);
+            let (out2, rest) = rest.split_at_mut(seg);
+            let (out3, out4) = rest.split_at_mut(seg);
+            let n = rounds * 5;
+            let w1 = out1[done[0]..done[0] + n].as_chunks_mut::<5>().0;
+            let w2 = out2[done[1]..done[1] + n].as_chunks_mut::<5>().0;
+            let w3 = out3[done[2]..done[2] + n].as_chunks_mut::<5>().0;
+            let w4 = out4[done[3]..done[3] + n].as_chunks_mut::<5>().0;
+            for (((c1, c2), c3), c4) in w1
+                .iter_mut()
+                .zip(w2.iter_mut())
+                .zip(w3.iter_mut())
+                .zip(w4.iter_mut())
+            {
+                reload!(b1, a1);
+                reload!(b2, a2);
+                reload!(b3, a3);
+                reload!(b4, a4);
+                // Symbol by symbol across the streams, so the four lookup
+                // chains interleave and each symbol is stored at once.
+                for i in 0..5 {
+                    let e1 = fixed[(b1 >> shift) as usize];
+                    c1[i] = e1.symbol;
+                    b1 <<= e1.num_bits;
+                    let e2 = fixed[(b2 >> shift) as usize];
+                    c2[i] = e2.symbol;
+                    b2 <<= e2.num_bits;
+                    let e3 = fixed[(b3 >> shift) as usize];
+                    c3[i] = e3.symbol;
+                    b3 <<= e3.num_bits;
+                    let e4 = fixed[(b4 >> shift) as usize];
+                    c4[i] = e4.symbol;
+                    b4 <<= e4.num_bits;
+                }
+            }
+            for d in &mut done {
+                *d += n;
+            }
+        }
+
+        rebase(&mut r1, b1, a1, s1_start)?;
+        rebase(&mut r2, b2, a2, s2_start)?;
+        rebase(&mut r3, b3, a3, s3_start)?;
+        rebase(&mut r4, b4, a4, s4_start)?;
+    }
+
+    let (out1, rest) = output.split_at_mut(seg);
+    let (out2, rest) = rest.split_at_mut(seg);
+    let (out3, out4) = rest.split_at_mut(seg);
 
     /// Whether a refill can load eight bytes inside the stream.
     #[inline(always)]
@@ -122,269 +266,73 @@ pub(super) fn decode_4_streams_core(
             .is_some_and(|end| end <= data_len)
     }
 
-    macro_rules! refill {
-        ($c:expr, $bc:expr, $p_idx:expr, $data:expr) => {{
-            let byte_shift = ($bc >> 3) as usize;
-            $p_idx -= byte_shift;
-            $bc -= (byte_shift as u32) * 8;
-            $c = bitstream_primitives::read_u64_le_unaligned($data, $p_idx);
-        }};
-    }
-
-    macro_rules! decode_one {
-        ($c:expr, $bc:expr, $output:expr, $o_idx:expr) => {{
-            let idx = (($c << ($bc & 63)) >> (64 - tl)) as usize;
-            let e = huffman_primitives::huf_table_lookup(table, idx);
-            debug_assert!(e.num_bits > 0, "Huffman table entry with 0 bits");
-            huffman_primitives::huf_output_write($output, $o_idx, e.symbol);
-            $bc += e.num_bits as u32;
-            $o_idx += 1;
-        }};
-    }
-
-    // A fixed-size table needs no bounds checks for the fast-round indices,
-    // which `shift` keeps below its size.
-    let fixed: &[HuffmanDecodeEntry; DECODE_TABLE_SIZE] = table
-        .first_chunk()
-        .ok_or(DecompressError::BadHuffmanStream)?;
-
-    // The fast rounds use C zstd's layout: each stream is a left-aligned
-    // container `$b` with a sentinel bit. A load sets bit 0, and each symbol
-    // shifts the container left by its length, so the next code is always
-    // the top `tl` bits and `trailing_zeros` is the number of bits consumed
-    // since the load. A symbol then depends on the previous one only through
-    // shift, lookup, shift; no separate bit count sits in that chain. A round
-    // reads at most 62 bits after a load, so the sentinel never reaches the
-    // top 11 bits and bit 0's own value is never read.
-    macro_rules! reload {
-        ($b:expr, $p_idx:expr, $data:expr) => {{
-            let consumed = $b.trailing_zeros();
-            $p_idx -= (consumed >> 3) as usize;
-            $b = (bitstream_primitives::read_u64_le_unaligned($data, $p_idx) | 1) << (consumed & 7);
-        }};
-    }
-
-    macro_rules! decode_five {
-        ($b:expr, $output:expr, $o_idx:expr) => {{
-            let mut syms = [0u8; 5];
-            for s in &mut syms {
-                let e = fixed[($b >> shift) as usize];
-                *s = e.symbol;
-                $b <<= e.num_bits;
-            }
-            $output[$o_idx..$o_idx + 5].copy_from_slice(&syms);
-            $o_idx += 5;
-        }};
-    }
-
-    // Back to the reader's layout: the container as loaded at `$p_idx`, and
-    // the bits consumed since that load.
-    macro_rules! unload {
-        ($b:expr, $c:expr, $bc:expr, $p_idx:expr, $data:expr) => {{
-            $bc = $b.trailing_zeros();
-            $c = bitstream_primitives::read_u64_le_unaligned($data, $p_idx);
-        }};
-    }
-
-    // Rounds a stream can run without further checks. A round refills (the
-    // pointer moves back at most 7 bytes: fewer than 64 bits were consumed)
-    // and decodes five symbols (at most 55 bits with table_log <= 11).
+    // Each stream on its own with checked lookups, five symbols per refill,
+    // until it is too close to its start or end; the tail does the rest.
     #[inline(always)]
-    fn safe_rounds(o_idx: usize, end: usize, p_idx: usize, limit: usize) -> usize {
-        let by_output = end.saturating_sub(o_idx) / 5;
-        let by_input = p_idx.saturating_sub(limit) / 7;
-        by_output.min(by_input)
-    }
-
-    // Two-symbol rounds: four lookups per stream (at most 44 bits after a
-    // load that leaves at most seven consumed), gathered in one word and
-    // stored as eight bytes. The store's bytes past the decoded symbols stay
-    // inside the stream's own segment, where the next round or the end
-    // overwrites them, so a round needs eight bytes of room.
-    #[inline(always)]
-    fn pair_rounds(o_idx: usize, end: usize, p_idx: usize, limit: usize) -> usize {
-        let by_output = end.saturating_sub(o_idx) / PAIR_WINDOW;
-        let by_input = p_idx.saturating_sub(limit) / 7;
-        by_output.min(by_input)
-    }
-    const PAIR_SHIFT: u32 = 64 - PAIR_TABLE_LOG as u32;
-    /// Output bytes a round may touch: four lookups of two bytes, each at
-    /// most two bytes after the last, masked to stay in the window.
-    const PAIR_WINDOW: usize = 10;
-    macro_rules! decode_pairs {
-        ($pairs:expr, $b:expr, $output:expr, $o_idx:expr) => {{
-            // One bounds check per round: each lookup stores both bytes of
-            // its row at most six bytes in and advances by its count.
-            let window: &mut [u8; PAIR_WINDOW] = (&mut $output[$o_idx..$o_idx + PAIR_WINDOW])
-                .try_into()
-                .unwrap();
-            let mut o = 0usize;
-            for _ in 0..4 {
-                let row = $pairs[($b >> PAIR_SHIFT) as usize];
-                $b <<= (row >> 16) & 0xFF;
-                let at = o & 7;
-                window[at..at + 2].copy_from_slice(&(row as u16).to_le_bytes());
-                o += (row >> 24) as usize;
-            }
-            $o_idx += o;
-        }};
-    }
-    if let Some(pairs) = pairs {
-        let mut rounds = pair_rounds(o1_idx, seg1_end, p1_idx, fast1_limit)
-            .min(pair_rounds(o2_idx, seg2_end, p2_idx, fast2_limit))
-            .min(pair_rounds(o3_idx, seg3_end, p3_idx, fast3_limit))
-            .min(pair_rounds(o4_idx, seg4_end, p4_idx, fast4_limit));
-        if rounds > 0 {
-            let mut b1 = (c1 | 1) << bc1;
-            let mut b2 = (c2 | 1) << bc2;
-            let mut b3 = (c3 | 1) << bc3;
-            let mut b4 = (c4 | 1) << bc4;
-            loop {
-                for _ in 0..rounds {
-                    reload!(b1, p1_idx, r1.data);
-                    decode_pairs!(pairs, b1, out1, o1_idx);
-                    reload!(b2, p2_idx, r2.data);
-                    decode_pairs!(pairs, b2, out2, o2_idx);
-                    reload!(b3, p3_idx, r3.data);
-                    decode_pairs!(pairs, b3, out3, o3_idx);
-                    reload!(b4, p4_idx, r4.data);
-                    decode_pairs!(pairs, b4, out4, o4_idx);
-                }
-                rounds = pair_rounds(o1_idx, seg1_end, p1_idx, fast1_limit)
-                    .min(pair_rounds(o2_idx, seg2_end, p2_idx, fast2_limit))
-                    .min(pair_rounds(o3_idx, seg3_end, p3_idx, fast3_limit))
-                    .min(pair_rounds(o4_idx, seg4_end, p4_idx, fast4_limit));
-                if rounds == 0 {
-                    break;
-                }
-            }
-            unload!(b1, c1, bc1, p1_idx, r1.data);
-            unload!(b2, c2, bc2, p2_idx, r2.data);
-            unload!(b3, c3, bc3, p3_idx, r3.data);
-            unload!(b4, c4, bc4, p4_idx, r4.data);
-        }
-    }
-
-    let mut rounds = safe_rounds(o1_idx, seg1_end, p1_idx, fast1_limit)
-        .min(safe_rounds(o2_idx, seg2_end, p2_idx, fast2_limit))
-        .min(safe_rounds(o3_idx, seg3_end, p3_idx, fast3_limit))
-        .min(safe_rounds(o4_idx, seg4_end, p4_idx, fast4_limit));
-    if rounds > 0 {
-        // Every stream has at least 8 bytes here, so each container is a full
-        // load with at most 8 bits consumed.
-        let mut b1 = (c1 | 1) << bc1;
-        let mut b2 = (c2 | 1) << bc2;
-        let mut b3 = (c3 | 1) << bc3;
-        let mut b4 = (c4 | 1) << bc4;
-        loop {
-            for _ in 0..rounds {
-                reload!(b1, p1_idx, r1.data);
-                reload!(b2, p2_idx, r2.data);
-                reload!(b3, p3_idx, r3.data);
-                reload!(b4, p4_idx, r4.data);
-                decode_five!(b1, out1, o1_idx);
-                decode_five!(b2, out2, o2_idx);
-                decode_five!(b3, out3, o3_idx);
-                decode_five!(b4, out4, o4_idx);
-            }
-            rounds = safe_rounds(o1_idx, seg1_end, p1_idx, fast1_limit)
-                .min(safe_rounds(o2_idx, seg2_end, p2_idx, fast2_limit))
-                .min(safe_rounds(o3_idx, seg3_end, p3_idx, fast3_limit))
-                .min(safe_rounds(o4_idx, seg4_end, p4_idx, fast4_limit));
-            if rounds == 0 {
+    fn finish_fast(
+        table: &[HuffmanDecodeEntry],
+        tl: u32,
+        r: &mut ReverseBitReader,
+        output: &mut [u8],
+        mut o_idx: usize,
+    ) -> usize {
+        let (mut c, mut bc, mut p_idx) = (r.container, r.bits_consumed, r.ptr);
+        while o_idx + 5 <= output.len() && p_idx >= r.limit_ptr {
+            if !can_refill_fast(bc, p_idx, r.data.len()) {
                 break;
             }
-        }
-        unload!(b1, c1, bc1, p1_idx, r1.data);
-        unload!(b2, c2, bc2, p2_idx, r2.data);
-        unload!(b3, c3, bc3, p3_idx, r3.data);
-        unload!(b4, c4, bc4, p4_idx, r4.data);
-    }
-
-    macro_rules! finish_fast {
-        (
-            $c:expr,
-            $bc:expr,
-            $p_idx:expr,
-            $data:expr,
-            $fast_limit:expr,
-            $output:expr,
-            $o_idx:expr,
-            $end:expr
-        ) => {{
-            while $o_idx + 5 <= $end && $p_idx >= $fast_limit {
-                if !can_refill_fast($bc, $p_idx, $data.len()) {
-                    break;
-                }
-                refill!($c, $bc, $p_idx, $data);
-
-                decode_one!($c, $bc, $output, $o_idx);
-                decode_one!($c, $bc, $output, $o_idx);
-                decode_one!($c, $bc, $output, $o_idx);
-                decode_one!($c, $bc, $output, $o_idx);
-                decode_one!($c, $bc, $output, $o_idx);
+            let byte_shift = (bc >> 3) as usize;
+            p_idx -= byte_shift;
+            bc -= (byte_shift as u32) * 8;
+            c = bitstream_primitives::read_u64_le_unaligned(r.data, p_idx);
+            for _ in 0..5 {
+                let idx = ((c << (bc & 63)) >> (64 - tl)) as usize;
+                let e = huffman_primitives::huf_table_lookup(table, idx);
+                debug_assert!(e.num_bits > 0, "Huffman table entry with 0 bits");
+                huffman_primitives::huf_output_write(output, o_idx, e.symbol);
+                bc += e.num_bits as u32;
+                o_idx += 1;
             }
-        }};
+        }
+        r.container = c;
+        r.bits_consumed = bc;
+        r.ptr = p_idx;
+        o_idx
     }
 
-    finish_fast!(
-        c1,
-        bc1,
-        p1_idx,
-        r1.data,
-        fast1_limit,
-        out1,
-        o1_idx,
-        seg1_end
-    );
-    finish_fast!(
-        c2,
-        bc2,
-        p2_idx,
-        r2.data,
-        fast2_limit,
-        out2,
-        o2_idx,
-        seg2_end
-    );
-    finish_fast!(
-        c3,
-        bc3,
-        p3_idx,
-        r3.data,
-        fast3_limit,
-        out3,
-        o3_idx,
-        seg3_end
-    );
-    finish_fast!(
-        c4,
-        bc4,
-        p4_idx,
-        r4.data,
-        fast4_limit,
-        out4,
-        o4_idx,
-        seg4_end
-    );
+    let o1 = finish_fast(table, tl, &mut r1, out1, done[0]);
+    let o2 = finish_fast(table, tl, &mut r2, out2, done[1]);
+    let o3 = finish_fast(table, tl, &mut r3, out3, done[2]);
+    let o4 = finish_fast(table, tl, &mut r4, out4, done[3]);
 
-    r1.container = c1;
-    r1.bits_consumed = bc1;
-    r1.ptr = p1_idx;
-    r2.container = c2;
-    r2.bits_consumed = bc2;
-    r2.ptr = p2_idx;
-    r3.container = c3;
-    r3.bits_consumed = bc3;
-    r3.ptr = p3_idx;
-    r4.container = c4;
-    r4.bits_consumed = bc4;
-    r4.ptr = p4_idx;
+    super::decode::decode_stream_tail(table, table_log, &mut r1, &mut out1[o1..])?;
+    super::decode::decode_stream_tail(table, table_log, &mut r2, &mut out2[o2..])?;
+    super::decode::decode_stream_tail(table, table_log, &mut r3, &mut out3[o3..])?;
+    super::decode::decode_stream_tail(table, table_log, &mut r4, &mut out4[o4..])?;
 
-    super::decode::decode_stream_tail(table, table_log, &mut r1, &mut out1[o1_idx..seg1_end])?;
-    super::decode::decode_stream_tail(table, table_log, &mut r2, &mut out2[o2_idx..seg2_end])?;
-    super::decode::decode_stream_tail(table, table_log, &mut r3, &mut out3[o3_idx..seg3_end])?;
-    super::decode::decode_stream_tail(table, table_log, &mut r4, &mut out4[o4_idx..seg4_end])?;
+    Ok(())
+}
 
+/// Puts a stream's fast-round state back into its reader: the container
+/// `b` as loaded at absolute position `a` in the section, for the stream
+/// that starts at `start`. A container that reaches below the stream's
+/// start moves up to it; the bits below the start must still be unread.
+#[inline(always)]
+fn rebase(r: &mut ReverseBitReader, b: u64, a: usize, start: usize) -> Result<(), DecompressError> {
+    let consumed = b.trailing_zeros();
+    if a >= start {
+        r.ptr = a - start;
+        r.bits_consumed = consumed;
+    } else {
+        let below = (start - a) * 8;
+        if consumed as usize + below > 64 {
+            return Err(DecompressError::BadHuffmanStream);
+        }
+        r.ptr = 0;
+        r.bits_consumed = consumed + below as u32;
+    }
+    // `a + 8` stays within the stream: positions only move down from its
+    // last eight bytes.
+    r.container = bitstream_primitives::read_u64_le_unaligned(r.data, r.ptr);
     Ok(())
 }
