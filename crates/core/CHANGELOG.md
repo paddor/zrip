@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-21
+
 - `fse::table_builder::build_decode_rows` spreads a distribution as C zstd
   does and hands each cell's row to a callback, so callers with their own
   row type build their table in one pass. `build_decode_table_into` uses

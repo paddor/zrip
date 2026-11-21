@@ -28,7 +28,7 @@ nightly = ["zrip-core/nightly", "zrip-encode/nightly", "zrip-decode/nightly"]
 paranoid = ["zrip-core/paranoid", "zrip-encode/paranoid", "zrip-decode/paranoid"]
 
 [dependencies]
-zrip-core = { version = "0.13.1", path = "crates/core", default-features = false }
+zrip-core = { version = "0.14.0", path = "crates/core", default-features = false }
 zrip-encode = { version = "0.10.1", path = "crates/encode", default-features = false }
 zrip-decode = { version = "0.8.18", path = "crates/decode", default-features = false }
 

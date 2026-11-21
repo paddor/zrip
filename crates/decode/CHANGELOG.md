@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.18] - 2026-11-21
+
 - `decode_literals_ws` and `parse_sequence_tables_ws` dispatch to
   x86-64-v3 in builds without AVX2, as the sequence executor does, so they
   run with BMI2 and LZCNT.

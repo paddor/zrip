@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-21
+
+- Depends on zrip-core 0.14.
+
 ## [0.10.0] - 2026-11-20
 
 - Removed the unused `strategy::max_hash_log`.
