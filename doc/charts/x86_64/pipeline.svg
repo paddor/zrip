@@ -29,8 +29,8 @@ seconds / GB
 <rect x="71" y="279" width="16" height="23" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="71" y="257" width="16" height="22" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="71" y="251" width="16" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="87" y="276" width="16" height="26" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="87" y="254" width="16" height="22" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="87" y="277" width="16" height="25" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="87" y="254" width="16" height="23" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="87" y="247" width="16" height="7" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="103" y="279" width="17" height="23" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="103" y="257" width="17" height="22" opacity="1" fill="#C47D08" stroke="none"/>
@@ -55,7 +55,7 @@ dickens
 <rect x="200" y="259" width="16" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="216" y="285" width="17" height="17" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="216" y="263" width="17" height="22" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="216" y="256" width="17" height="7" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="216" y="257" width="17" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="233" y="286" width="16" height="16" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="233" y="265" width="16" height="21" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="233" y="258" width="16" height="7" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -127,7 +127,7 @@ nci
 <rect x="588" y="246" width="16" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="604" y="287" width="16" height="15" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="604" y="252" width="16" height="35" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="604" y="245" width="16" height="7" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="604" y="246" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="620" y="284" width="16" height="18" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="620" y="252" width="16" height="32" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="620" y="245" width="16" height="7" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -192,7 +192,7 @@ osdb
 <rect x="71" y="567" width="16" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="87" y="587" width="16" height="25" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="87" y="569" width="16" height="18" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="87" y="562" width="16" height="7" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="87" y="563" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="103" y="589" width="17" height="23" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="103" y="571" width="17" height="18" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="103" y="564" width="17" height="7" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -240,7 +240,7 @@ samba
 <rect x="329" y="540" width="17" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="346" y="600" width="16" height="12" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="346" y="551" width="16" height="49" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="346" y="543" width="16" height="8" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="346" y="545" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="362" y="593" width="16" height="19" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="362" y="547" width="16" height="46" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="362" y="540" width="16" height="7" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -288,7 +288,7 @@ webster
 <rect x="588" y="555" width="16" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="604" y="604" width="16" height="8" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="604" y="561" width="16" height="43" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="604" y="554" width="16" height="7" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="604" y="556" width="16" height="5" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="620" y="603" width="16" height="9" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="620" y="560" width="16" height="43" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="620" y="555" width="16" height="5" opacity="1" fill="#F59E0B" stroke="none"/>
