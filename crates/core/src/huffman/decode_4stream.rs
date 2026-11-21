@@ -148,15 +148,25 @@ pub(super) fn decode_4_streams_core(
         const PAIR_SHIFT: u32 = 64 - PAIR_TABLE_LOG as u32;
         const PAIR_WINDOW: usize = 10;
         if let Some(pairs) = pairs {
-            // One lookup: store both bytes of the row at the stream's offset
-            // in its window and advance by the row's count.
-            macro_rules! pair {
-                ($b:expr, $w:expr, $o:expr) => {{
-                    let row = pairs[($b >> PAIR_SHIFT) as usize];
-                    $b <<= (row >> 16) & 0xFF;
-                    let at = $o & 7;
-                    $w[at..at + 2].copy_from_slice(&(row as u16).to_le_bytes());
-                    $o += (row >> 24) as usize;
+            // One stream's round: reload, then four lookups, each storing
+            // both bytes of its row at the stream's offset in its window and
+            // advancing by the row's count. Stream by stream, so one window
+            // and offset are live at a time: interleaved, the four streams
+            // decode at half the speed in native builds.
+            macro_rules! pair_round {
+                ($b:expr, $a:expr, $out:expr, $d:expr) => {{
+                    reload!($b, $a);
+                    let w: &mut [u8; PAIR_WINDOW] =
+                        (&mut $out[$d..$d + PAIR_WINDOW]).try_into().unwrap();
+                    let mut o = 0usize;
+                    for _ in 0..4 {
+                        let row = pairs[($b >> PAIR_SHIFT) as usize];
+                        $b <<= (row >> 16) & 0xFF;
+                        let at = o & 7;
+                        w[at..at + 2].copy_from_slice(&(row as u16).to_le_bytes());
+                        o += (row >> 24) as usize;
+                    }
+                    $d += o;
                 }};
             }
             loop {
@@ -167,37 +177,14 @@ pub(super) fn decode_4_streams_core(
                 let (out1, rest) = output.split_at_mut(seg);
                 let (out2, rest) = rest.split_at_mut(seg);
                 let (out3, out4) = rest.split_at_mut(seg);
+                let [mut d1, mut d2, mut d3, mut d4] = done;
                 for _ in 0..rounds {
-                    reload!(b1, a1);
-                    reload!(b2, a2);
-                    reload!(b3, a3);
-                    reload!(b4, a4);
-                    let w1: &mut [u8; PAIR_WINDOW] = (&mut out1[done[0]..done[0] + PAIR_WINDOW])
-                        .try_into()
-                        .unwrap();
-                    let w2: &mut [u8; PAIR_WINDOW] = (&mut out2[done[1]..done[1] + PAIR_WINDOW])
-                        .try_into()
-                        .unwrap();
-                    let w3: &mut [u8; PAIR_WINDOW] = (&mut out3[done[2]..done[2] + PAIR_WINDOW])
-                        .try_into()
-                        .unwrap();
-                    let w4: &mut [u8; PAIR_WINDOW] = (&mut out4[done[3]..done[3] + PAIR_WINDOW])
-                        .try_into()
-                        .unwrap();
-                    let (mut o1, mut o2, mut o3, mut o4) = (0usize, 0usize, 0usize, 0usize);
-                    // Lookup by lookup across the streams, so the chains
-                    // interleave.
-                    for _ in 0..4 {
-                        pair!(b1, w1, o1);
-                        pair!(b2, w2, o2);
-                        pair!(b3, w3, o3);
-                        pair!(b4, w4, o4);
-                    }
-                    done[0] += o1;
-                    done[1] += o2;
-                    done[2] += o3;
-                    done[3] += o4;
+                    pair_round!(b1, a1, out1, d1);
+                    pair_round!(b2, a2, out2, d2);
+                    pair_round!(b3, a3, out3, d3);
+                    pair_round!(b4, a4, out4, d4);
                 }
+                done = [d1, d2, d3, d4];
             }
         }
 

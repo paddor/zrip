@@ -127,7 +127,17 @@ pub fn decode_4_streams_into(
 /// [`decode_4_streams_into`] with a two-symbol table from
 /// [`build_pair_table`] for the same tree: the fast loop decodes up to two
 /// symbols per lookup. Streams still end on the single-symbol table.
-#[inline(always)]
+// Out of line in builds that do not dispatch: pairs take sections of at
+// least `PAIR_MIN_LITERALS`, where a call costs nothing, and their fast loop
+// runs 7% slower inlined into the literals decoder.
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
+#[cfg_attr(
+    not(all(target_arch = "x86_64", not(target_feature = "avx2"))),
+    inline(never)
+)]
 pub fn decode_4_streams_pairs_into(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
