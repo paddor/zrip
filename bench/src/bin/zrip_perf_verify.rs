@@ -441,7 +441,10 @@ fn corpus() -> Vec<Vec<u8>> {
 /// The English text files of the corpus.
 fn corpus_text() -> Vec<Vec<u8>> {
     let mut paths = corpus_paths();
-    paths.retain(|p| p.file_name().is_some_and(|n| n == "dickens" || n == "webster"));
+    paths.retain(|p| {
+        p.file_name()
+            .is_some_and(|n| n == "dickens" || n == "webster")
+    });
     read_all(&paths)
 }
 
