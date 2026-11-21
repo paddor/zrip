@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.24] - 2026-11-21
+
 ### Changed
 
 - Huffman literals decode faster. The 4-stream loop runs in C zstd's
