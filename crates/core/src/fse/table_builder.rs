@@ -20,9 +20,11 @@ const SPREAD_MAX: usize = 1 << 9;
 // Inlined into the decoder's x86-64-v3 dispatch in builds without AVX2, so
 // it runs with BMI2 and LZCNT there. Native builds are faster with it out of
 // line.
-/// Parses an FSE table description into `distribution`: `max_symbol + 1`
-/// probabilities, -1 for "less than one", zero-padded. Returns the
-/// accuracy log and leaves `reader` on the next byte boundary.
+/// Parses an FSE table description into `distribution`: the probabilities
+/// of symbols 0 up to `max_symbol`, -1 for "less than one". It ends at the
+/// last symbol the description gives, which is nonzero, so its length is
+/// C zstd's `maxSymbolValue + 1`. Returns the accuracy log and leaves
+/// `reader` on the next byte boundary.
 #[cfg_attr(
     all(target_arch = "x86_64", not(target_feature = "avx2")),
     inline(always)
@@ -127,10 +129,12 @@ pub fn parse_fse_table_description_into(
         return Err(DecompressError::BadFseTable);
     }
 
+    // The loop ends on the count that brings `remaining` to 1, so `n` is
+    // one past a nonzero probability.
     reader.seek(bit);
     reader.align_to_byte();
     distribution.clear();
-    distribution.extend_from_slice(&out[..max_len]);
+    distribution.extend_from_slice(&out[..n]);
     Ok(accuracy_log)
 }
 
@@ -638,9 +642,6 @@ mod tests {
             return Err(DecompressError::BadFseTable);
         }
         reader.align_to_byte();
-        while distribution.len() <= max_symbol as usize {
-            distribution.push(0);
-        }
         Ok((distribution, accuracy_log))
     }
 

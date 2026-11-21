@@ -248,8 +248,14 @@ fn compressed_frame(size: usize, body: &[u8]) -> Vec<u8> {
 
 /// A Huffman literals section for `lits` with code lengths `bits` (symbol
 /// `s` has `bits[s]` bits), in one or four streams, followed by an empty
-/// sequences section. Weights use the direct representation.
-fn huffman_block_body(lits: &[u8], bits: &[u8], four: bool) -> Vec<u8> {
+/// sequences section. `tree` writes the tree description from the explicit
+/// weights.
+fn huffman_block_body(
+    lits: &[u8],
+    bits: &[u8],
+    four: bool,
+    tree: impl Fn(&[u8]) -> Vec<u8>,
+) -> Vec<u8> {
     let table_log = *bits.iter().max().unwrap();
     let weights: Vec<u8> = bits.iter().map(|&b| table_log + 1 - b).collect();
     // Code of each symbol: weights from 1 up take the decode table from its
@@ -266,11 +272,7 @@ fn huffman_block_body(lits: &[u8], bits: &[u8], four: bool) -> Vec<u8> {
     }
     assert_eq!(next, 1 << table_log, "code lengths must fill the table");
 
-    let explicit = &weights[..weights.len() - 1];
-    let mut tree = vec![127 + explicit.len() as u8];
-    for pair in explicit.chunks(2) {
-        tree.push(pair[0] << 4 | pair.get(1).copied().unwrap_or(0));
-    }
+    let tree = tree(&weights[..weights.len() - 1]);
 
     let encode = |part: &[u8]| {
         let mut w = BitWriter::new();
@@ -310,6 +312,48 @@ fn huffman_block_body(lits: &[u8], bits: &[u8], four: bool) -> Vec<u8> {
     body
 }
 
+/// The direct tree description of the explicit weights `weights`.
+fn direct_tree(weights: &[u8]) -> Vec<u8> {
+    let mut tree = vec![127 + weights.len() as u8];
+    for pair in weights.chunks(2) {
+        tree.push(pair[0] << 4 | pair.get(1).copied().unwrap_or(0));
+    }
+    tree
+}
+
+/// The FSE-compressed tree description of the explicit weights `weights`,
+/// at least two, with the table `dist` at accuracy log `log`. The weights
+/// are encoded as zrip and C zstd encode them, with two alternating states.
+fn fse_tree(weights: &[u8], dist: &[i16], log: u8) -> Vec<u8> {
+    use zrip_core::fse::encode::{FseEncodeState, FseEncodeTable};
+    use zrip_core::fse::table_builder::serialize_fse_table_description;
+
+    let table = FseEncodeTable::from_distribution(dist, log);
+    let mut w = BitWriter::new();
+    let n = weights.len();
+    let mut i = n - 2;
+    let mut s1 = FseEncodeState::init(&table, weights[n - 2 + n % 2]);
+    let mut s2 = FseEncodeState::init(&table, weights[n - 1 - n % 2]);
+    if n % 2 == 1 {
+        i -= 1;
+        s1.encode_symbol(&mut w, weights[i]);
+    }
+    while i > 0 {
+        s2.encode_symbol(&mut w, weights[i - 1]);
+        s1.encode_symbol(&mut w, weights[i - 2]);
+        i -= 2;
+    }
+    s2.flush(&mut w, log);
+    s1.flush(&mut w, log);
+    w.close_reverse_stream();
+
+    let mut body = serialize_fse_table_description(dist, log);
+    body.extend(w.into_bytes());
+    let mut tree = vec![body.len() as u8];
+    tree.extend(body);
+    tree
+}
+
 #[test]
 fn huffman_literal_sizes_agree() {
     let mut failures = Failures::default();
@@ -319,12 +363,63 @@ fn huffman_literal_sizes_agree() {
         for n in 1..=40usize {
             let lits: Vec<u8> = (0..n).map(|i| ((i * 7) % bits.len()) as u8).collect();
             for four in [false, true] {
-                let f = compressed_frame(n, &huffman_block_body(&lits, &bits, four));
+                let f = compressed_frame(n, &huffman_block_body(&lits, &bits, four, direct_tree));
                 let what = format!("{} symbols, {n} literals, four streams {four}", bits.len());
                 if std::env::var_os("ZRIP_DIFF_LOG").is_some() {
                     eprintln!("CRAFT {what}: C accepts {}", check::c_accepts(&f));
                 }
                 failures.check(&f, None, &what);
+            }
+        }
+    }
+}
+
+#[test]
+fn huffman_weight_tables_agree() {
+    let mut failures = Failures::default();
+    // Weights 3, 2, 1 and 1. The weight table also gives symbol `last`, which
+    // the weights never use. C zstd takes up to 92 symbols at accuracy log 5
+    // and 12 at log 6.
+    let bits = [1u8, 2, 3, 3];
+    let lits: Vec<u8> = (0..64).map(|i| [0u8, 0, 1, 2, 0, 3][i % 6]).collect();
+    for (log, counts, most, lasts) in [
+        (
+            5u8,
+            [10i16, 10, 11],
+            92,
+            &[4usize, 12, 13, 45, 91, 92, 255][..],
+        ),
+        (6, [21, 21, 21], 12, &[4, 11, 12, 13, 40][..]),
+    ] {
+        for &last in lasts {
+            let mut dist = vec![0i16; last + 1];
+            dist[1..4].copy_from_slice(&counts);
+            dist[last] = 1;
+            // Past 12, also with `last` decoded as the second weight, which
+            // fails.
+            for decoded in [false, true] {
+                if decoded && last <= 12 {
+                    continue;
+                }
+                let accepts = last < most && !decoded;
+                let tree = |w: &[u8]| {
+                    if decoded {
+                        fse_tree(&[w[0], last as u8, w[1], w[2]], &dist, log)
+                    } else {
+                        fse_tree(w, &dist, log)
+                    }
+                };
+                for four in [false, true] {
+                    let body = huffman_block_body(&lits, &bits, four, tree);
+                    let f = compressed_frame(lits.len(), &body);
+                    let what = format!("log {log}, last {last}, decoded {decoded}, four {four}");
+                    assert_eq!(check::c_accepts(&f), accepts, "C on {what}");
+                    if accepts {
+                        let out = zstd::bulk::decompress(&f, lits.len()).unwrap();
+                        assert_eq!(out, lits, "C on {what}");
+                    }
+                    failures.check(&f, None, &what);
+                }
             }
         }
     }
