@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Huffman literals decode faster. The 4-stream loop runs in C zstd's
+  bounds, so small sections no longer finish in the checked tail, and the
+  four streams' lookups interleave: the literal sections of 2 KiB to 32 KiB
+  frames take 3.0 to 3.6 cycles per symbol instead of 3.8 to 4.8. Sequence
+  tables are built in one pass. Level 1 and 2 frames of 512 B to 8 KiB now
+  decode faster than with C zstd.
+- Builds without CPU flags, as dependent crates build, decode literals and
+  sequence tables with BMI2 and LZCNT when the CPU has them, as C zstd
+  does. Such a build decodes C zstd's frames of 128 B to 32 KiB at 0.86x
+  to 0.98x of C zstd's speed instead of 0.71x to 0.80x.
+
+### Fixed
+
+- Frames whose Huffman weight table gives symbols past 12, which C zstd
+  accepts as long as none is decoded, failed to decode. Weight tables of
+  accuracy log 6 that give symbol 12, which C zstd rejects, decoded.
+
 ## [0.8.23] - 2026-11-20
 
 ### Changed

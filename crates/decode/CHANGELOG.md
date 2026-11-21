@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- `decode_literals_ws` and `parse_sequence_tables_ws` dispatch to
+  x86-64-v3 in builds without AVX2, as the sequence executor does, so they
+  run with BMI2 and LZCNT.
+- Sequence FSE tables are built in one pass with
+  `zrip_core::fse::table_builder::build_decode_rows`.
+
 ## [0.8.17] - 2026-11-20
 
 - Removed the unused `BlockDecodeWorkspace::fse_symbol_next`.

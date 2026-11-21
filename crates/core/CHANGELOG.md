@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+- `fse::table_builder::build_decode_rows` spreads a distribution as C zstd
+  does and hands each cell's row to a callback, so callers with their own
+  row type build their table in one pass. `build_decode_table_into` uses
+  it.
+- `parse_fse_table_description` and `parse_fse_table_description_into` end
+  the distribution at its last symbol instead of padding it with zeros to
+  `max_symbol + 1`, so its length is C zstd's `maxSymbolValue + 1`.
+- Huffman weight tables take symbols up to 255 within C zstd's workspace
+  bound: 92 symbols at accuracy log 5, 12 at log 6. Decoded weights above
+  12 fail.
+- The 4-stream Huffman decoder runs its fast rounds in C zstd's bounds and
+  interleaves the four streams' lookups.
+
 ## [0.13.0] - 2026-11-20
 
 - Removed unused items: `hash::hash4` to `hash8`, `hash::PRIME32_2`, the
