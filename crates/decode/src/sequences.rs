@@ -11,7 +11,7 @@ use crate::seq_table::SeqTable;
 use zrip_core::bitstream::reader::BitReader;
 use zrip_core::error::DecompressError;
 use zrip_core::fse::table_builder::{
-    build_decode_table_from_default, build_decode_table_into, parse_fse_table_description_into,
+    build_decode_table_from_default, parse_fse_table_description_into,
 };
 use zrip_core::fse::{
     FseSeqDecodeEntry, LL_BASELINE_TABLE, LL_BITS_TABLE, LL_DEFAULT_ACCURACY, LL_DEFAULT_DIST,
@@ -404,8 +404,7 @@ pub(crate) fn parse_sequence_tables_ws(
             if acc > LL_MAX_ACCURACY_LOG {
                 return Err(DecompressError::BadFseTable);
             }
-            build_decode_table_into(&ws.fse_dist, acc, &mut ws.fse_build_buf)?;
-            prev.ll_table.fill_ll(&ws.fse_build_buf);
+            prev.ll_table.build_ll(&ws.fse_dist, acc)?;
             prev.ll_accuracy = acc;
             prev.ll_kind = SequenceTableKind::Other;
             prev.ll_set = true;
@@ -458,8 +457,7 @@ pub(crate) fn parse_sequence_tables_ws(
             if acc > OF_MAX_ACCURACY_LOG {
                 return Err(DecompressError::BadFseTable);
             }
-            build_decode_table_into(&ws.fse_dist, acc, &mut ws.fse_build_buf)?;
-            prev.of_table.fill_of(&ws.fse_build_buf);
+            prev.of_table.build_of(&ws.fse_dist, acc)?;
             prev.of_accuracy = acc;
             prev.of_kind = SequenceTableKind::Other;
             prev.of_set = true;
@@ -511,8 +509,7 @@ pub(crate) fn parse_sequence_tables_ws(
             if acc > ML_MAX_ACCURACY_LOG {
                 return Err(DecompressError::BadFseTable);
             }
-            build_decode_table_into(&ws.fse_dist, acc, &mut ws.fse_build_buf)?;
-            prev.ml_table.fill_ml(&ws.fse_build_buf);
+            prev.ml_table.build_ml(&ws.fse_dist, acc)?;
             prev.ml_accuracy = acc;
             prev.ml_kind = SequenceTableKind::Other;
             prev.ml_set = true;

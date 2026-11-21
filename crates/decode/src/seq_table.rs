@@ -1,6 +1,8 @@
 //! Sequence decoding tables: FSE rows merged with each code's baseline and
 //! extra-bit count, so one load yields both the next state and the value.
 
+use zrip_core::error::DecompressError;
+use zrip_core::fse::table_builder::build_decode_rows;
 use zrip_core::fse::{
     FSE_SEQ_TABLE_CAPACITY, FseDecodeEntry, FseSeqDecodeEntry, LL_BASELINE_TABLE, LL_BITS_TABLE,
     ML_BASELINE_TABLE, ML_BITS_TABLE,
@@ -199,19 +201,57 @@ impl SeqTable {
         self.initialized = n;
     }
 
-    /// Rewrites the table from literal length FSE rows.
-    pub(crate) fn fill_ll(&mut self, fse: &[FseDecodeEntry]) {
-        self.fill(fse, ll_extra);
+    /// Builds the table from a parsed distribution in one pass, with
+    /// `extra` mapping each symbol to its extra bits and baseline. Leaves the
+    /// table as it was on an error.
+    #[inline(always)]
+    fn build(
+        &mut self,
+        distribution: &[i16],
+        accuracy_log: u8,
+        extra: impl Fn(u8) -> (u8, u32),
+    ) -> Result<(), DecompressError> {
+        let mut cells = [0u8; FSE_SEQ_TABLE_CAPACITY];
+        let data = &mut self.data;
+        build_decode_rows(
+            distribution,
+            accuracy_log,
+            &mut cells,
+            |cell, symbol, base_line, num_bits| {
+                let (extra_bits, baseline_value) = extra(symbol);
+                data[cell & (FSE_SEQ_TABLE_CAPACITY - 1)] =
+                    SeqEntry::new(base_line, num_bits, extra_bits, baseline_value);
+            },
+        )?;
+        self.initialized = 1 << accuracy_log;
+        Ok(())
     }
 
-    /// Rewrites the table from match length FSE rows.
-    pub(crate) fn fill_ml(&mut self, fse: &[FseDecodeEntry]) {
-        self.fill(fse, ml_extra);
+    /// Builds the table from a literal length distribution.
+    pub(crate) fn build_ll(
+        &mut self,
+        distribution: &[i16],
+        accuracy_log: u8,
+    ) -> Result<(), DecompressError> {
+        self.build(distribution, accuracy_log, ll_extra)
     }
 
-    /// Rewrites the table from offset code FSE rows.
-    pub(crate) fn fill_of(&mut self, fse: &[FseDecodeEntry]) {
-        self.fill(fse, of_extra);
+    /// Builds the table from a match length distribution.
+    pub(crate) fn build_ml(
+        &mut self,
+        distribution: &[i16],
+        accuracy_log: u8,
+    ) -> Result<(), DecompressError> {
+        self.build(distribution, accuracy_log, ml_extra)
+    }
+
+    /// Builds the table from an offset code distribution.
+    pub(crate) fn build_of(
+        &mut self,
+        distribution: &[i16],
+        accuracy_log: u8,
+    ) -> Result<(), DecompressError> {
+        self.build(distribution, accuracy_log, of_extra)
     }
 
     fn promote(fse: &[FseDecodeEntry], extra: impl Fn(u8) -> (u8, u32)) -> Self {
