@@ -17,9 +17,18 @@ use crate::hint::unlikely;
 /// covers the sequence tables (accuracy log <= 9) and Huffman weights.
 const SPREAD_MAX: usize = 1 << 9;
 
-/// Parses an FSE table description into `distribution`: `max_symbol + 1`
-/// probabilities, -1 for "less than one", zero-padded. Returns the
-/// accuracy log and leaves `reader` on the next byte boundary.
+// Inlined into the decoder's x86-64-v3 dispatch in builds without AVX2, so
+// it runs with BMI2 and LZCNT there. Native builds are faster with it out of
+// line.
+/// Parses an FSE table description into `distribution`: the probabilities
+/// of symbols 0 up to `max_symbol`, -1 for "less than one". It ends at the
+/// last symbol the description gives, which is nonzero, so its length is
+/// C zstd's `maxSymbolValue + 1`. Returns the accuracy log and leaves
+/// `reader` on the next byte boundary.
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
 pub fn parse_fse_table_description_into(
     reader: &mut BitReader,
     max_symbol: u8,
@@ -120,10 +129,12 @@ pub fn parse_fse_table_description_into(
         return Err(DecompressError::BadFseTable);
     }
 
+    // The loop ends on the count that brings `remaining` to 1, so `n` is
+    // one past a nonzero probability.
     reader.seek(bit);
     reader.align_to_byte();
     distribution.clear();
-    distribution.extend_from_slice(&out[..max_len]);
+    distribution.extend_from_slice(&out[..n]);
     Ok(accuracy_log)
 }
 
@@ -278,6 +289,10 @@ pub fn build_decode_table(
 /// Builds the decode table for `distribution` into `table`, resized to
 /// `1 << accuracy_log` cells. The probabilities, -1 counting as 1, must
 /// sum to the table size, as parsed ones do.
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
 pub fn build_decode_table_into(
     distribution: &[i16],
     accuracy_log: u8,
@@ -295,15 +310,51 @@ pub fn build_decode_table_into(
             },
         );
     }
+    let table = &mut table[..table_size];
+    let mask = table_size - 1;
+    let mut emit = |cell: usize, symbol: u8, base_line: u16, num_bits: u8| {
+        table[cell & mask] = FseDecodeEntry {
+            base_line,
+            num_bits,
+            symbol,
+        };
+    };
+    // Scratch sized to the table: Huffman weights use at most 64 cells and
+    // sequences at most 512.
+    match accuracy_log {
+        0..=6 => build_decode_rows(distribution, accuracy_log, &mut [0u8; 1 << 6], &mut emit),
+        7..=9 => build_decode_rows(distribution, accuracy_log, &mut [0u8; 1 << 9], &mut emit),
+        _ => build_decode_rows(
+            distribution,
+            accuracy_log,
+            &mut [0u8; 1 << MAX_TABLE_LOG],
+            &mut emit,
+        ),
+    }
+}
 
-    if distribution.len() > 256 {
+/// Spreads `distribution` over the first `1 << accuracy_log` of `cells` as
+/// C zstd does, then hands each cell's row to `emit(cell, symbol,
+/// base_line, num_bits)`, in cell order. The probabilities, -1 counting as
+/// 1, must sum to the table size, as parsed ones do. On an error `emit` is
+/// never called. Callers with their own row type, such as the sequence
+/// tables, build it in this one pass instead of from a decode table.
+#[inline(always)]
+pub fn build_decode_rows(
+    distribution: &[i16],
+    accuracy_log: u8,
+    cells: &mut [u8],
+    mut emit: impl FnMut(usize, u8, u16, u8),
+) -> Result<(), DecompressError> {
+    let table_size = 1usize << accuracy_log;
+    if distribution.len() > 256 || cells.len() < table_size {
         return Err(DecompressError::BadFseTable);
     }
-    // `table` has exactly `table_size` entries, so indices masked with
+    // `cells` has exactly `table_size` entries, so indices masked with
     // `len - 1` need no bounds checks. Symbols are `u8`, so `next` indexed by
     // symbol needs none either.
-    let table = &mut table[..table_size];
-    let mask = table.len() - 1;
+    let cells = &mut cells[..table_size];
+    let mask = cells.len() - 1;
     // C zstd's spread step. It is odd, so the walk visits every cell once.
     let step = (table_size >> 1) + (table_size >> 3) + 3;
     let mut next = [0u16; 256];
@@ -320,7 +371,7 @@ pub fn build_decode_table_into(
             if unlikely(high_threshold == 0) {
                 return Err(DecompressError::BadFseTable);
             }
-            table[high_threshold & mask].symbol = s as u8;
+            cells[high_threshold & mask] = s as u8;
             high_threshold -= 1;
         }
     }
@@ -350,22 +401,22 @@ pub fn build_decode_table_into(
             pos += n;
         }
         for &[a, b] in spread[..table_size].as_chunks::<2>().0 {
-            table[position & mask].symbol = a;
-            table[(position + step) & mask].symbol = b;
+            cells[position & mask] = a;
+            cells[(position + step) & mask] = b;
             position = (position + 2 * step) & mask;
         }
     } else if high_threshold == mask {
         for (s, &prob) in distribution.iter().enumerate() {
             let sym = s as u8;
             for _ in 0..prob.max(0) {
-                table[position].symbol = sym;
+                cells[position & mask] = sym;
                 position = (position + step) & mask;
             }
         }
     } else {
         for (s, &prob) in distribution.iter().enumerate() {
             for _ in 0..prob.max(0) {
-                table[position].symbol = s as u8;
+                cells[position & mask] = s as u8;
                 position = (position + step) & mask;
                 while position > high_threshold {
                     position = (position + step) & mask;
@@ -383,15 +434,14 @@ pub fn build_decode_table_into(
     // The k-th cell of a symbol with probability p gets state number p + k.
     // It reads `nb` bits so `(p + k) << nb` lands in
     // `table_size..2 * table_size`; `base_line` removes the offset.
-    for entry in table.iter_mut() {
-        let s = entry.symbol as usize;
+    for (cell, &symbol) in cells.iter().enumerate() {
+        let s = symbol as usize;
         let next_state = next[s] as u32;
         next[s] += 1;
 
         let nb = accuracy_log as u32 - high_bit(next_state);
         let new_state = (next_state << nb) - table_size as u32;
-        entry.num_bits = nb as u8;
-        entry.base_line = new_state as u16;
+        emit(cell, symbol, new_state as u16, nb as u8);
     }
 
     Ok(())
@@ -592,9 +642,6 @@ mod tests {
             return Err(DecompressError::BadFseTable);
         }
         reader.align_to_byte();
-        while distribution.len() <= max_symbol as usize {
-            distribution.push(0);
-        }
         Ok((distribution, accuracy_log))
     }
 

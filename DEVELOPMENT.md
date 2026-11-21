@@ -235,7 +235,7 @@ matching decoders (one-shot, contexts, `decompress_into`, `FrameDecoder`,
 logs, sensor records, training metric points, and slices of every Silesia
 file. It fails when a case falls below its floor. Each case runs in a fresh
 worker process pinned to one CPU and reports the best of 7 rounds; a pass
-over the 80 cases takes about 35 s per build.
+over the 82 cases takes about 35 s per build.
 
 ```bash
 cargo run --release --manifest-path bench/Cargo.toml --bin zrip_perf_verify -- \

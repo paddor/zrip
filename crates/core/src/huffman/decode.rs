@@ -66,6 +66,7 @@ pub fn decode_single_stream(
 
 /// Decodes one reverse stream into all of `output`. The stream must end
 /// exactly after the last symbol.
+#[inline(always)]
 pub fn decode_single_stream_into(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -79,6 +80,7 @@ pub fn decode_single_stream_into(
 
 /// [`decode_single_stream_into`] with `output` resized to `output_size`.
 /// Clears `output` on error.
+#[inline(always)]
 pub fn decode_single_stream_vec(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -111,6 +113,7 @@ pub fn decode_4_streams(
 
 /// [`decode_4_streams`] with `output` resized to `output_size`. Clears
 /// `output` on error.
+#[inline(always)]
 pub fn decode_4_streams_into(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -124,6 +127,17 @@ pub fn decode_4_streams_into(
 /// [`decode_4_streams_into`] with a two-symbol table from
 /// [`build_pair_table`] for the same tree: the fast loop decodes up to two
 /// symbols per lookup. Streams still end on the single-symbol table.
+// Out of line in builds that do not dispatch: pairs take sections of at
+// least `PAIR_MIN_LITERALS`, where a call costs nothing, and their fast loop
+// runs 7% slower inlined into the literals decoder.
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
+#[cfg_attr(
+    not(all(target_arch = "x86_64", not(target_feature = "avx2"))),
+    inline(never)
+)]
 pub fn decode_4_streams_pairs_into(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -236,6 +250,7 @@ pub fn build_pair_table(
     Ok(())
 }
 
+#[inline(always)]
 fn decode_4_streams_with(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -267,6 +282,7 @@ fn validate_decode_table(
     Ok(())
 }
 
+#[inline(always)]
 fn decode_4_streams_core_safe(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -285,6 +301,7 @@ fn prepare_output(output: &mut Vec<u8>, output_size: usize) {
 
 /// Decodes the rest of `reader`'s stream into `output` and checks that
 /// the stream ends exactly there.
+#[inline(always)]
 pub(super) fn decode_stream_tail(
     table: &[HuffmanDecodeEntry],
     table_log: u8,

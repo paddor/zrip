@@ -32,9 +32,16 @@ pub fn parse_huffman_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompress
     }
 }
 
+// Inlined into the decoder's x86-64-v3 dispatch in builds without AVX2, so
+// it runs with BMI2 and LZCNT there. Native builds are faster with it out of
+// line.
 /// [`parse_huffman_weights`] into reused buffers: `weights` gets the
 /// weights, the `fse_*` vectors are scratch. Returns the bytes used.
 #[cfg(feature = "alloc")]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
 pub fn parse_huffman_weights_into(
     data: &[u8],
     weights: &mut Vec<u8>,
@@ -77,6 +84,10 @@ fn parse_direct_weights(data: &[u8]) -> Result<(Vec<u8>, usize), DecompressError
 }
 
 #[cfg(feature = "alloc")]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
 fn parse_direct_weights_into(data: &[u8], weights: &mut Vec<u8>) -> Result<usize, DecompressError> {
     let num_symbols = (data[0] as usize) - 127;
     let num_bytes = num_symbols.div_ceil(2);
@@ -99,6 +110,29 @@ fn parse_direct_weights_into(data: &[u8], weights: &mut Vec<u8>) -> Result<usize
     Ok(1 + num_bytes)
 }
 
+/// Whether C zstd takes an FSE table for Huffman weights with `symbols`
+/// symbols at `accuracy_log`. Its description may give any symbol up to
+/// 255, and `FSE_decompress_wksp` fails a table only when it does not fit
+/// the workspace from `HUF_readStats`, sized for accuracy log 6 and 12
+/// symbols. That leaves 92 symbols at accuracy log 5 and 12 at 6.
+#[inline(always)]
+const fn c_takes_weight_table(accuracy_log: u8, symbols: usize) -> bool {
+    // `FSE_DECOMPRESS_WKSP_SIZE_U32(table_log, symbols - 1)`.
+    const fn words(table_log: u8, symbols: usize) -> usize {
+        let cells = 1usize << table_log;
+        (1 + cells) + 1 + (2 * symbols + cells + 8).div_ceil(4) + 256 / 2 + 1
+    }
+    accuracy_log <= 6 && words(accuracy_log, symbols) <= words(6, 12)
+}
+
+/// Whether a weight table of `symbols` symbols decoded a weight above 12.
+/// Only tables past symbol 12 have such symbols, and C zstd fails them only
+/// once decoded (`HUF_readStats`).
+#[inline(always)]
+fn above_12(symbols: usize, weights: &[u8]) -> bool {
+    symbols > 13 && weights.iter().any(|&w| w > 12)
+}
+
 fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), DecompressError> {
     let compressed_size = data[0] as usize;
     if compressed_size == 0 || data.len() < 1 + compressed_size {
@@ -107,11 +141,10 @@ fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompr
 
     let compressed = &data[1..=compressed_size];
 
-    // Weights go up to 12; RFC 8878 caps the accuracy log at 6.
     let mut bit_reader = BitReader::new(compressed);
     let (distribution, accuracy_log) =
-        crate::fse::table_builder::parse_fse_table_description(&mut bit_reader, 12)?;
-    if accuracy_log > 6 {
+        crate::fse::table_builder::parse_fse_table_description(&mut bit_reader, 255)?;
+    if !c_takes_weight_table(accuracy_log, distribution.len()) {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
@@ -165,7 +198,7 @@ fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompr
 
     // The final step pushes up to two weights past the in-loop check. At
     // most 255 weights are explicit; the last one is implied.
-    if weights.len() > 255 {
+    if weights.len() > 255 || above_12(distribution.len(), &weights) {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
@@ -173,6 +206,10 @@ fn parse_fse_compressed_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Decompr
 }
 
 #[cfg(feature = "alloc")]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
 fn parse_fse_compressed_weights_into(
     data: &[u8],
     weights: &mut Vec<u8>,
@@ -189,8 +226,8 @@ fn parse_fse_compressed_weights_into(
     let compressed = &data[1..=compressed_size];
 
     let mut bit_reader = BitReader::new(compressed);
-    let accuracy_log = parse_fse_table_description_into(&mut bit_reader, 12, fse_dist)?;
-    if accuracy_log > 6 {
+    let accuracy_log = parse_fse_table_description_into(&mut bit_reader, 255, fse_dist)?;
+    if !c_takes_weight_table(accuracy_log, fse_dist.len()) {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
@@ -283,7 +320,7 @@ fn parse_fse_compressed_weights_into(
 
     // The final step pushes up to two weights past the in-loop check. At
     // most 255 weights are explicit; the last one is implied.
-    if n > 255 {
+    if n > 255 || above_12(fse_dist.len(), &out[..n]) {
         return Err(DecompressError::BadHuffmanWeights);
     }
 
@@ -389,6 +426,10 @@ pub fn build_huffman_decode_table(
 /// Builds the decode table for `weights` into `table` and returns the table
 /// log.
 #[cfg(feature = "alloc")]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
 pub fn build_huffman_decode_table_into(
     weights: &[u8],
     table: &mut Vec<crate::huffman::HuffmanDecodeEntry>,
@@ -545,6 +586,15 @@ fn high_bit(val: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn weight_table_sizes_match_c() {
+        for (log, most) in [(5, 92), (6, 12)] {
+            assert!(c_takes_weight_table(log, most));
+            assert!(!c_takes_weight_table(log, most + 1));
+        }
+        assert!(!c_takes_weight_table(7, 2));
+    }
 
     #[test]
     fn parse_direct_2_symbols() {

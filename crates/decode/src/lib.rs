@@ -8,6 +8,44 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+/// Evaluates `$body` compiled for x86-64-v3 (AVX2, BMI1/2, LZCNT) when the CPU
+/// supports it, and compiled for the build target otherwise.
+///
+/// Use it as a whole function body around a call to an `#[inline(always)]`
+/// implementation, so the implementation is duplicated into both contexts.
+/// `fearless_simd` selects the level at runtime and provides the safe
+/// target-feature entry point.
+#[cfg(all(
+    feature = "std",
+    feature = "simd",
+    target_arch = "x86_64",
+    not(target_feature = "avx2")
+))]
+macro_rules! simd_body {
+    ($body:expr) => {
+        match fearless_simd::Level::new().as_avx2() {
+            Some(avx2) => fearless_simd::Simd::vectorize(
+                avx2,
+                #[inline(always)]
+                || $body,
+            ),
+            None => $body,
+        }
+    };
+}
+
+#[cfg(not(all(
+    feature = "std",
+    feature = "simd",
+    target_arch = "x86_64",
+    not(target_feature = "avx2")
+)))]
+macro_rules! simd_body {
+    ($body:expr) => {
+        $body
+    };
+}
+
 #[cfg(feature = "alloc")]
 pub mod context;
 pub(crate) mod exec;
@@ -662,24 +700,25 @@ pub(crate) fn decode_sequences_dispatch(
     // Without history, both paths drop the dictionary checks.
     if num_sequences == 1 {
         let literals = literals.as_slice();
-        if scope.history.is_empty() {
-            return decode_execute_single_sequence::<false>(
+        return simd_body!(if scope.history.is_empty() {
+            decode_execute_single_sequence::<false>(
                 seq_data,
                 seq_tables,
                 rep_offsets,
                 literals,
                 output,
                 scope,
-            );
-        }
-        return decode_execute_single_sequence::<true>(
-            seq_data,
-            seq_tables,
-            rep_offsets,
-            literals,
-            output,
-            scope,
-        );
+            )
+        } else {
+            decode_execute_single_sequence::<true>(
+                seq_data,
+                seq_tables,
+                rep_offsets,
+                literals,
+                output,
+                scope,
+            )
+        });
     }
 
     #[cfg(all(feature = "std", feature = "simd"))]
