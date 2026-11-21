@@ -58,7 +58,7 @@ zrip (safe)
 </text>
 <rect x="385" y="359" width="12" height="12" opacity="1" fill="#F59E0B" stroke="none"/>
 <text x="403" y="365" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-structured-zstd 0.4.2
+structured-zstd v0.4.2 (<tspan fill="#F85149">unsafe</tspan>)
 </text>
 <text x="140" y="423" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.064516129032258" opacity="1" fill="#E6EDF3">
 bright = compress + decompress

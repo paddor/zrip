@@ -237,7 +237,7 @@ impl Config {
                 codec("zrip", "zrip (safe)", 0xf87171, 0xc45050),
                 codec(
                     "structured-zstd",
-                    "structured-zstd 0.4.2",
+                    "structured-zstd v0.4.2 (unsafe)",
                     0xf59e0b,
                     0xc47d08,
                 ),
