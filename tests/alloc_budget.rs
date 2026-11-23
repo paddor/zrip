@@ -429,3 +429,39 @@ fn decoders_take_what_the_frame_needs() {
     }
     report.finish();
 }
+
+#[test]
+fn stream_decoders_reserve_at_most_8_mib_for_a_declared_content_size() {
+    // A 128 MiB window and content size: the header alone, and with a
+    // 16-byte raw block.
+    let mut header = vec![0x28, 0xb5, 0x2f, 0xfd, 0xc0, 0x88];
+    header.extend_from_slice(&(128u64 << 20).to_le_bytes());
+    let mut one_block = header.clone();
+    one_block.extend_from_slice(&[0x80, 0x00, 0x00]);
+    one_block.extend_from_slice(&[7; 16]);
+    let report = Report::new(4, 96 * 1024);
+    // Without a limit, the header reserves 8 MiB. With a 64 KiB limit, it
+    // reserves that, and the block up to 128 KiB, the most it may write.
+    let limits = [
+        ("no limit", usize::MAX, 8 << 20),
+        ("64 KiB limit", 64 << 10, 128 << 10),
+    ];
+    for (limited, limit, reserve) in limits {
+        for (what, frame) in [("header", &header), ("one block", &one_block)] {
+            let at = format!("{what}, {limited}");
+            report.check(&format!("frame decoder, {at}"), reserve, 0, || {
+                let mut out = Vec::new();
+                FrameDecoder::with_limit(frame.as_slice(), limit)
+                    .read_to_end(&mut out)
+                    .unwrap_err();
+            });
+            report.check(&format!("push decoder, {at}"), reserve, 0, || {
+                let mut out = Vec::new();
+                let mut dec = PushDecoder::with_limit(limit);
+                dec.decode_to_vec(frame, &mut out).unwrap();
+                dec.finish().unwrap_err();
+            });
+        }
+    }
+    report.finish();
+}

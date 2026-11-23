@@ -34,6 +34,10 @@ pub(crate) const BLOCK_HEADER_SIZE: usize = 3;
 pub(crate) const CHECKSUM_SIZE: usize = 4;
 /// Skippable frame magic plus its 4-byte length.
 pub(crate) const SKIPPABLE_HEADER_SIZE: usize = 8;
+/// The most history a frame header reserves for its content size. A header
+/// alone, which may declare any size, reserves no more; a frame's output up
+/// to here then backs the rest (`start_block`).
+const HEADER_RESERVE: usize = 8 << 20;
 
 /// Returns true if `magic` starts a skippable frame:
 /// `0x184D2A50..=0x184D2A5F`.
@@ -209,10 +213,15 @@ impl FrameState {
         self.block_start = self.history.len();
 
         // A known content size bounds the history, so reserve it once
-        // instead of growing block by block.
+        // instead of growing block by block: up to `HEADER_RESERVE`, and
+        // no more than the stream may still output.
         if let Some(fcs) = self.frame_content_size {
-            let fcs = usize::try_from(fcs).unwrap_or(usize::MAX);
-            let room = fcs.min(self.most_history() - self.history.len()) + WILDCOPY_OVERLENGTH;
+            let left = (self.max_output as u64).saturating_sub(self.bytes_output);
+            let fcs = usize::try_from(fcs.min(left)).unwrap_or(usize::MAX);
+            let room = fcs
+                .min(HEADER_RESERVE)
+                .min(self.most_history() - self.history.len())
+                + WILDCOPY_OVERLENGTH;
             self.history.reserve_exact(room);
         }
         Ok(())
@@ -265,8 +274,13 @@ impl FrameState {
     /// The history keeps up to two windows and then drops the older one, so
     /// the `memmove` happens once per window of output, not once per block.
     /// Dictionary content stays reachable until the frame has produced a full
-    /// window. Capacity grows like `Vec` but stops at the most the history can
-    /// hold. Plain doubling would reserve four windows.
+    /// window. Capacity grows like `Vec`, with the output, but stops at the
+    /// most the history can hold. Plain doubling would reserve four windows.
+    ///
+    /// A known content size bounds the history too. Past what its header
+    /// reserved (`HEADER_RESERVE`), a frame grows once to the rest of it,
+    /// within the output limit: one copy of the history, not one per
+    /// doubling.
     pub(crate) fn start_block(&mut self) {
         let window = self.window_size;
         if self.frame_bytes >= window as u64 && self.history.len() > 2 * window {
@@ -277,10 +291,27 @@ impl FrameState {
         self.block_start = self.history.len();
         let needed = self.block_start + self.max_block() + WILDCOPY_OVERLENGTH;
         if needed > self.history.capacity() {
-            let target = (2 * self.history.capacity())
-                .min(self.most_history())
-                .max(needed);
-            self.history.reserve_exact(target - self.history.len());
+            let doubled = 2 * self.history.capacity();
+            let target = match self.frame_content_size {
+                Some(fcs) => {
+                    let left = (self.max_output as u64).saturating_sub(self.bytes_output);
+                    let rest = fcs.saturating_sub(self.frame_bytes).min(left);
+                    let rest = usize::try_from(rest).unwrap_or(usize::MAX);
+                    let most = self.most_history().min(
+                        self.block_start
+                            .saturating_add(rest)
+                            .saturating_add(WILDCOPY_OVERLENGTH),
+                    );
+                    if self.history.capacity() >= HEADER_RESERVE {
+                        most
+                    } else {
+                        doubled.min(most)
+                    }
+                }
+                None => doubled.min(self.most_history()),
+            };
+            self.history
+                .reserve_exact(target.max(needed) - self.history.len());
         }
     }
 
