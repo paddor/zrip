@@ -126,6 +126,8 @@ impl Default for PushDecoder {
 trait Sink {
     /// Writes up to `data.len()` bytes and returns how many fit.
     fn put(&mut self, data: &[u8]) -> usize;
+    /// No byte more fits.
+    fn full(&self) -> bool;
 }
 
 struct SliceSink<'a> {
@@ -139,6 +141,10 @@ impl Sink for SliceSink<'_> {
         self.buf[self.pos..self.pos + n].copy_from_slice(&data[..n]);
         self.pos += n;
         n
+    }
+
+    fn full(&self) -> bool {
+        self.pos == self.buf.len()
     }
 }
 
@@ -157,12 +163,20 @@ impl Sink for UninitSink<'_> {
         self.pos += n;
         n
     }
+
+    fn full(&self) -> bool {
+        self.pos == self.buf.len()
+    }
 }
 
 impl Sink for Vec<u8> {
     fn put(&mut self, data: &[u8]) -> usize {
         self.extend_from_slice(data);
         data.len()
+    }
+
+    fn full(&self) -> bool {
+        false
     }
 }
 
@@ -214,8 +228,8 @@ impl PushDecoder {
     /// 128 MiB. Larger windows fail with [`DecompressError::WindowTooLarge`].
     /// The decoder keeps up to two windows of history, so this caps its
     /// memory. A frame header with a content size reserves that much
-    /// history up front, within the cap; otherwise history grows with
-    /// output.
+    /// history up front, up to 8 MiB and within the cap and the output
+    /// limit; the rest grows with output.
     #[must_use]
     pub fn max_window(mut self, bytes: u64) -> Self {
         self.frame.set_max_window(bytes);
@@ -343,6 +357,11 @@ impl PushDecoder {
                 if stop_at_frame_end {
                     return Ok((consumed, Status::Finished));
                 }
+            }
+            // A full buffer stops before the next block header: a corrupt one
+            // fails only a call that has room for the block.
+            if matches!(self.unit, Unit::BlockHeader) && sink.full() {
+                return Ok((consumed, Status::NeedsOutput));
             }
             let before = consumed;
             let stepped = self.step(input, &mut consumed);

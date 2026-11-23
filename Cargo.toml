@@ -12,7 +12,8 @@ license = "MIT"
 repository = "https://github.com/paddor/zrip"
 categories = ["compression"]
 keywords = ["zstd", "zstandard", "compression", "decompression"]
-include = ["src/**/*", "README.md", "LICENSE", "CHANGELOG.md", "DESIGN.md", "SAFETY.md", "SECURITY.md", "!jsr/**"]
+# Anchored: a bare `LICENSE` would match `npm/LICENSE` and `jsr/LICENSE` too.
+include = ["/src/**/*", "/README.md", "/LICENSE", "/CHANGELOG.md", "/DESIGN.md", "/SAFETY.md", "/SECURITY.md"]
 
 [features]
 default = ["std", "frame", "ldm", "simd"]

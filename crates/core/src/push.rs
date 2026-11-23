@@ -5,8 +5,8 @@
 pub enum Status {
     /// All input was consumed and all output delivered; pass more input.
     NeedsInput,
-    /// The output buffer is full and more output is pending; call again with
-    /// more room.
+    /// The output buffer is full and more output may follow; call again
+    /// with more room.
     NeedsOutput,
     /// A frame ended and all of its output was delivered.
     Finished,

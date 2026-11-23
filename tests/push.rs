@@ -698,3 +698,57 @@ fn treeless_literals_after_a_raw_block_decode() {
         assert_eq!(zrip::decompress(&frame).unwrap(), all, "level {level}");
     }
 }
+
+#[test]
+fn full_buffer_stops_before_the_next_block() {
+    // A 64-byte RLE block, then a block header of the reserved type.
+    let frame = [
+        0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00, 0x02, 0x02, 0x00, b'a', 0x0f, 0x00, 0x00,
+    ];
+    let mut dec = PushDecoder::new();
+    let mut buf = [0u8; 64];
+    let p = dec.decode(&frame, &mut buf).unwrap();
+    let full = Progress {
+        consumed: 10,
+        produced: 64,
+        status: Status::NeedsOutput,
+    };
+    assert_eq!(p, full);
+    assert_eq!(buf, [b'a'; 64]);
+    assert!(dec.decode(&frame[10..], &mut buf).is_err());
+
+    dec.reset();
+    let mut buf = [core::mem::MaybeUninit::uninit(); 64];
+    assert_eq!(dec.decode_uninit(&frame, &mut buf).unwrap(), full);
+
+    // A buffer with room for more reaches the corrupt header.
+    dec.reset();
+    assert!(dec.decode(&frame, &mut [0u8; 65]).is_err());
+}
+
+#[test]
+fn frames_past_the_header_reserve_decode() {
+    // 20 MiB with its content size, past the 8 MiB a header reserves: a
+    // single-segment zrip frame, and a C zstd frame with an 8 MiB window.
+    let data = mixed(20 << 20, 11);
+    let mut c = zstd::stream::Encoder::new(Vec::new(), 1).unwrap();
+    c.set_pledged_src_size(Some(data.len() as u64)).unwrap();
+    c.window_log(23).unwrap();
+    std::io::Write::write_all(&mut c, &data).unwrap();
+    let frames = [zrip::compress(&data, 1).unwrap(), c.finish().unwrap()];
+    for frame in &frames {
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(&mut zrip::FrameDecoder::new(frame.as_slice()), &mut out)
+            .unwrap();
+        assert_eq!(out, data);
+        for limit in [usize::MAX, data.len()] {
+            let mut dec = PushDecoder::with_limit(limit);
+            out.clear();
+            for part in frame.chunks(100_000) {
+                dec.decode_to_vec(part, &mut out).unwrap();
+            }
+            dec.finish().unwrap();
+            assert_eq!(out, data, "limit {limit}");
+        }
+    }
+}
