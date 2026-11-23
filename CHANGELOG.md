@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- A step that `AdaptiveLevel` reverts again at the same level waits twice
+  as long before its next try: 32, 64, 128, then 256 windows.
+
 ## [0.8.24] - 2026-11-21
 
 ### Changed

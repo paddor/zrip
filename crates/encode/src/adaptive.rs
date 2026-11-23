@@ -6,7 +6,8 @@
 //! with free output asks for compression speed. The level walks one step at
 //! a time toward the goal, crossing small dips, and reverts a step that
 //! clearly hurts. Neither ratio nor speed is monotonic in the level for every
-//! input, so a finished walk settles on the best recently measured level.
+//! input, so a finished walk settles on the best recently measured level. A
+//! step that keeps failing is retried less often.
 //!
 //! Speed is input bytes per second spent compressing. End-to-end throughput
 //! varies too much between short windows to rank levels.
@@ -37,6 +38,9 @@ pub const MIN_WINDOW_BYTES: u64 = 256 * 1024;
 const LADDER: usize = 11;
 /// Windows a limit holds and a measurement stays fresh.
 const RETRY_WINDOWS: u64 = 32;
+/// A limit set again at the same level holds twice as long, up to
+/// `RETRY_WINDOWS << MAX_BACKOFF` windows.
+const MAX_BACKOFF: u32 = 3;
 /// A step toward ratio may lose up to 2% of it to cross a dip.
 const RATIO_STEP: (u128, u128) = (102, 100);
 /// Ratios within 0.5% tie; the lower level wins.
@@ -169,6 +173,8 @@ impl Sample {
 struct Limit {
     index: usize,
     until: u64,
+    /// Doublings of the hold: times in a row the limit was set at `index`.
+    backoff: u32,
 }
 
 /// Hill climb over the distinct zrip levels of one range.
@@ -284,15 +290,21 @@ impl AdaptiveLevel {
         limit.filter(|limit| self.window < limit.until)
     }
 
+    /// Limits the walk toward `goal` to `index`. A limit set again at the
+    /// same index, as when the same step keeps failing, holds twice as long.
     fn set_limit(&mut self, goal: Goal, index: usize) {
-        let limit = Some(Limit {
+        let slot = match goal {
+            Goal::Ratio => &mut self.ceiling,
+            Goal::Speed => &mut self.floor,
+        };
+        let backoff = slot
+            .filter(|limit| limit.index == index)
+            .map_or(0, |limit| (limit.backoff + 1).min(MAX_BACKOFF));
+        *slot = Some(Limit {
             index,
-            until: self.window + RETRY_WINDOWS,
+            until: self.window + (RETRY_WINDOWS << backoff),
+            backoff,
         });
-        match goal {
-            Goal::Ratio => self.ceiling = limit,
-            Goal::Speed => self.floor = limit,
-        }
     }
 
     /// The next index toward `goal`, unless at the end of the ladder or past
@@ -561,6 +573,31 @@ mod tests {
         assert_eq!(&levels[..2], &[1, -1]);
         assert!(settled(&levels[2..windows - 1], -1), "{levels:?}");
         assert_eq!(levels.last(), Some(&1));
+    }
+
+    #[test]
+    fn a_step_that_keeps_failing_is_retried_less_often() {
+        let sender = Sender {
+            output: Some(1),
+            ..Sender::cpu()
+        };
+        let mut adaptive = AdaptiveLevel::new(-2..=1, -1);
+        let levels = sender.run(&mut adaptive, 760);
+        let probes: Vec<_> = (0..levels.len()).filter(|i| levels[*i] == 1).collect();
+        // Holds of 32, 64, 128, then 256 windows.
+        assert_eq!(probes, [0, 33, 98, 227, 484, 741]);
+    }
+
+    #[test]
+    fn a_limit_at_another_level_holds_for_the_base_time() {
+        let mut adaptive = AdaptiveLevel::new(-7..=4, -1);
+        let hold = |adaptive: &AdaptiveLevel| adaptive.ceiling.unwrap().until - adaptive.window;
+        adaptive.set_limit(Goal::Ratio, 6);
+        assert_eq!(hold(&adaptive), RETRY_WINDOWS);
+        adaptive.set_limit(Goal::Ratio, 6);
+        assert_eq!(hold(&adaptive), 2 * RETRY_WINDOWS);
+        adaptive.set_limit(Goal::Ratio, 5);
+        assert_eq!(hold(&adaptive), RETRY_WINDOWS);
     }
 
     #[test]
