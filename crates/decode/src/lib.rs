@@ -65,7 +65,10 @@ use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use crate::exec::{SequenceOutputScope, decode_execute_sequences, decode_execute_single_sequence};
+use crate::exec::{
+    SequenceOutputScope, decode_execute_sequences, decode_execute_sequences_room,
+    decode_execute_single_sequence,
+};
 use crate::fast_vec::{Literals, WILDCOPY_OVERLENGTH};
 use crate::literals::{LiteralsAt, decode_literals_ws};
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
@@ -435,10 +438,9 @@ fn decompress_frame_with_header(
 
         let block_size = block_header.block_size as usize;
 
-        // `Block_Maximum_Size`: the window, at most 128 KiB. As C zstd's
-        // one-shot decoder, only compressed blocks are held to it, and their
-        // compressed size, too. Raw and RLE blocks only have to fit the output.
-        if block_header.block_type == BlockType::Compressed && block_size > block_size_max {
+        // `Block_Maximum_Size`: the window, at most 128 KiB. It bounds every
+        // block: the compressed size, and the output of raw and RLE blocks.
+        if block_size > block_size_max {
             return Err(DecompressError::BlockTooLarge);
         }
 
@@ -504,6 +506,10 @@ fn decompress_frame_with_header(
                 })?;
                 offset += block_size;
             }
+        }
+        // As in C zstd, `Block_Maximum_Size` bounds every block's output.
+        if output.len() - block_output_start > block_size_max {
+            return Err(DecompressError::BlockTooLarge);
         }
         if let Some(ref mut hasher) = hasher {
             hasher.update(&output[block_output_start..]);
@@ -590,9 +596,10 @@ const ONE_SHOT_BLOCK_SLACK: usize = 32;
 /// `OutputTooSmall` past `max_output` bytes since `output_start`.
 ///
 /// As in C zstd's one-shot decoder, the literals may not exceed
-/// `block_size_max`, the frame's `Block_Maximum_Size`. The output may
-/// exceed it by [`ONE_SHOT_BLOCK_SLACK`] bytes, or by any amount when the
-/// literals stay outside the output buffer.
+/// `block_size_max`, the frame's `Block_Maximum_Size`. While decoding, the
+/// output may pass it by [`ONE_SHOT_BLOCK_SLACK`] bytes, or by any amount
+/// when the literals stay outside the output buffer; the frame loop then
+/// rejects the block.
 #[allow(clippy::too_many_arguments)]
 fn decode_compressed_block(
     data: &[u8],
@@ -769,6 +776,95 @@ pub(crate) fn decode_sequences_dispatch(
             rep_offsets,
             literals,
             output,
+            scope,
+        )
+    }
+}
+
+/// [`decode_sequences_dispatch`] into a streaming history: the block starts
+/// at `*len` in `output`, the room past its output stays for the next
+/// block, and `*len` is set to where the output ends
+/// ([`decode_execute_sequences_room`]). Runs once per block.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn decode_sequences_dispatch_room(
+    seq_data: &[u8],
+    num_sequences: u32,
+    seq_tables: &mut SequenceDecodeTables,
+    rep_offsets: &mut [u32; 3],
+    literals: Literals<'_>,
+    output: &mut Vec<u8>,
+    len: &mut usize,
+    scope: SequenceOutputScope<'_>,
+) -> Result<(), DecompressError> {
+    // A lone sequence appends to the output, so it takes the one-shot path
+    // only when no room follows the output.
+    if num_sequences == 1 && *len == output.len() {
+        let result = decode_sequences_dispatch(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            literals,
+            output,
+            scope,
+        );
+        *len = output.len();
+        return result;
+    }
+
+    #[cfg(all(feature = "std", feature = "simd"))]
+    {
+        let level = fearless_simd::Level::new();
+        return fearless_simd::dispatch!(level, _simd => {
+            if scope.history.is_empty() {
+                decode_execute_sequences_room::<false>(
+                    seq_data,
+                    num_sequences,
+                    seq_tables,
+                    rep_offsets,
+                    literals,
+                    output,
+                    len,
+                    scope,
+                )
+            } else {
+                decode_execute_sequences_room::<true>(
+                    seq_data,
+                    num_sequences,
+                    seq_tables,
+                    rep_offsets,
+                    literals,
+                    output,
+                    len,
+                    scope,
+                )
+            }
+        });
+    }
+
+    // Scalar build: no `std` or no `simd`.
+    #[allow(unreachable_code)]
+    if scope.history.is_empty() {
+        decode_execute_sequences_room::<false>(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            literals,
+            output,
+            len,
+            scope,
+        )
+    } else {
+        decode_execute_sequences_room::<true>(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            literals,
+            output,
+            len,
             scope,
         )
     }

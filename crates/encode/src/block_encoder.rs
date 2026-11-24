@@ -46,6 +46,17 @@ macro_rules! add_extra_bits_macro {
     };
 }
 
+/// Bytes [`write_seq_count`] writes for `num_seq`.
+fn seq_count_len(num_seq: usize) -> usize {
+    if num_seq < 128 {
+        1
+    } else if num_seq < 0x7F00 {
+        2
+    } else {
+        3
+    }
+}
+
 /// Writes the Number_of_Sequences field, 1 to 3 bytes.
 #[inline]
 fn write_seq_count(output: &mut Vec<u8>, num_seq: u32) {
@@ -1512,6 +1523,8 @@ struct TableEnc {
     header: Vec<u8>,
     /// The normalized distribution.
     dist: Vec<i16>,
+    /// Accuracy log of `dist`.
+    log: u8,
 }
 
 impl TableEnc {
@@ -1521,6 +1534,53 @@ impl TableEnc {
             enc_table: FseEncodeTable::default(),
             header: Vec::new(),
             dist: Vec::new(),
+            log: 0,
+        }
+    }
+
+    /// Bytes of the table's description: one for RLE.
+    fn description_len(&self) -> usize {
+        match self.mode {
+            TableMode::Compressed => self.header.len(),
+            TableMode::Rle(_) => 1,
+        }
+    }
+
+    /// Bits of the final state the table adds to the stream.
+    fn state_bits(&self) -> usize {
+        match self.mode {
+            TableMode::Compressed => usize::from(self.log),
+            TableMode::Rle(_) => 0,
+        }
+    }
+
+    /// Bits the codes with counts `freqs` take under the normalized
+    /// distribution, 8.8 fixed point: log2(table size / count) each, as FSE
+    /// codes them. RLE codes take none.
+    fn coded_bits_fp8(&self, freqs: &[u32]) -> u64 {
+        if let TableMode::Rle(_) = self.mode {
+            return 0;
+        }
+        let table = u32::from(self.log) * 256;
+        self.dist
+            .iter()
+            .zip(freqs)
+            .filter(|&(_, &f)| f > 0)
+            // -1 marks a code of count 1.
+            .map(|(&d, &f)| u64::from(f) * u64::from(table - log2_fp8(d.max(1) as u32)))
+            .sum()
+    }
+
+    /// Builds the encoding table for the description. Returns false if the
+    /// distribution does not fill a table.
+    fn build(&mut self) -> bool {
+        match self.mode {
+            TableMode::Compressed => {
+                let max_sym = self.dist.len() - 1;
+                self.enc_table
+                    .build_from_distribution_into(&self.dist, self.log, max_sym)
+            }
+            TableMode::Rle(_) => true,
         }
     }
 }
@@ -1651,10 +1711,11 @@ fn serialize_fse_table_description_into(distribution: &[i16], accuracy_log: u8, 
     *out = writer.into_bytes();
 }
 
-/// Builds `out` for `n` codes up to `max_sym`: RLE for a single distinct
-/// code, else an FSE table of at most `max_log`. Returns false if no valid
-/// table fits.
-fn build_table_enc(
+/// Describes `out` for `n` codes up to `max_sym`: RLE for a single distinct
+/// code, else a normalized distribution of at most `max_log` and its
+/// serialized description. [`TableEnc::build`] then builds the encoding
+/// table. Returns false if no valid table fits.
+fn describe_table(
     out: &mut TableEnc,
     freqs: &[u32],
     max_sym: usize,
@@ -1688,12 +1749,7 @@ fn build_table_enc(
         }
     }
     serialize_fse_table_description_into(dist, acc, &mut out.header);
-    if !out
-        .enc_table
-        .build_from_distribution_into(dist, acc, max_sym)
-    {
-        return false;
-    }
+    out.log = acc;
     out.mode = TableMode::Compressed;
     true
 }
@@ -1742,20 +1798,39 @@ fn encode_seq_custom_impl(
         + estimate_fse_bits(&ml_freq[..=ml_max], n)
         + estimate_fse_bits(&of_freq[..=of_max], n);
     let estimated_header = 20;
-    let estimated_bytes = estimated_bits.div_ceil(8) + estimated_header + 4;
+    let estimated_bytes = (estimated_bits + extra_bits as usize).div_ceil(8) + estimated_header + 4;
     if estimated_bytes >= pred_size {
         return false;
     }
 
     // The format's largest accuracy logs: 9 for literal and match
     // lengths, 8 for offsets.
-    if !build_table_enc(&mut tables.ll, ll_freq, ll_max, 9, n) {
+    if !describe_table(&mut tables.ll, ll_freq, ll_max, 9, n)
+        || !describe_table(&mut tables.of, of_freq, of_max, 8, n)
+        || !describe_table(&mut tables.ml, ml_freq, ml_max, 9, n)
+    {
         return false;
     }
-    if !build_table_enc(&mut tables.of, of_freq, of_max, 8, n) {
+
+    // With the descriptions' sizes and the codes' cost under the normalized
+    // tables known, a section that would not beat the predefined tables'
+    // is neither built nor written. On sequences in small blocks it often
+    // would not.
+    let code_bits = (tables.ll.coded_bits_fp8(ll_freq)
+        + tables.of.coded_bits_fp8(of_freq)
+        + tables.ml.coded_bits_fp8(ml_freq))
+    .div_ceil(256) as usize;
+    let state_bits = tables.ll.state_bits() + tables.of.state_bits() + tables.ml.state_bits();
+    let descriptions =
+        tables.ll.description_len() + tables.of.description_len() + tables.ml.description_len();
+    // Sequence count, then the modes byte; the stream ends with a marker bit.
+    let section_header = seq_count_len(n) + 1;
+    let described_bytes =
+        (code_bits + extra_bits as usize + state_bits + 8) / 8 + descriptions + section_header;
+    if described_bytes >= pred_size {
         return false;
     }
-    if !build_table_enc(&mut tables.ml, ml_freq, ml_max, 9, n) {
+    if !tables.ll.build() || !tables.of.build() || !tables.ml.build() {
         return false;
     }
 

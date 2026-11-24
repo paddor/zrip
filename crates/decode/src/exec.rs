@@ -4,7 +4,7 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use crate::fast_vec::{BlockOutput, Literals, SeqOut, open_block};
+use crate::fast_vec::{BlockOutput, Literals, SeqOut, open_block, open_block_at};
 use crate::sequences::{SequenceDecodeTables, compute_offset};
 use zrip_core::bitstream::reader_reverse::ReverseBitReader;
 use zrip_core::error::DecompressError;
@@ -177,6 +177,80 @@ pub(crate) fn decode_execute_sequences<const HAS_HISTORY: bool>(
     };
     // Drop the zeroed room past the output, also after an error.
     vec.truncate(base + op);
+    *output = vec;
+    result
+}
+
+/// [`decode_execute_sequences`] into a streaming history: the block starts
+/// at `*len` in `output`, before the room earlier blocks left
+/// ([`open_block_at`]). The room past the block's output stays for the next
+/// block, and `*len` is set to where the output ends, also after an error.
+///
+/// A copy, not a flag on [`decode_execute_sequences`], so the one-shot
+/// path's code stays as it was: the SIMD kernels' code shifts with small
+/// changes around them (see `decode_sequences_dispatch`).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn decode_execute_sequences_room<const HAS_HISTORY: bool>(
+    data: &[u8],
+    num_sequences: u32,
+    tables: &SequenceDecodeTables,
+    offsets: &mut [u32; 3],
+    literals: Literals<'_>,
+    output: &mut Vec<u8>,
+    len: &mut usize,
+    scope: SequenceOutputScope<'_>,
+) -> Result<(), DecompressError> {
+    if num_sequences == 0 {
+        return Ok(());
+    }
+    let bits = SeqBits::new(data).ok_or(DecompressError::CorruptSequences)?;
+    let state_bits = u32::from(tables.ll_accuracy)
+        + u32::from(tables.of_accuracy)
+        + u32::from(tables.ml_accuracy);
+    if bits.left < state_bits as usize {
+        return Err(DecompressError::InputExhausted);
+    }
+    // A short stream is read from a zero-padded copy.
+    let mut padded = [0u8; 8];
+    let data = if data.len() < 8 {
+        padded[..data.len()].copy_from_slice(data);
+        &padded[..]
+    } else {
+        data
+    };
+    let history = if HAS_HISTORY { scope.history } else { &[] };
+    let mut vec = core::mem::take(output);
+    let (base, op, end) = open_block_at(&mut vec, *len, scope.max_block_output, scope.output_base);
+    // As in `decode_execute_sequences`.
+    let (result, op) = if u32::try_from(end).is_ok() {
+        let mut out = SeqOut::<true>::new(&mut vec[base..end], op);
+        let result = run_sequences(
+            bits,
+            data,
+            num_sequences,
+            tables,
+            offsets,
+            literals,
+            &mut out,
+            history,
+        );
+        (result, out.op())
+    } else {
+        let mut out = SeqOut::<false>::new(&mut vec[base..end], op);
+        let result = run_sequences(
+            bits,
+            data,
+            num_sequences,
+            tables,
+            offsets,
+            literals,
+            &mut out,
+            history,
+        );
+        (result, out.op())
+    };
+    *len = base + op;
     *output = vec;
     result
 }

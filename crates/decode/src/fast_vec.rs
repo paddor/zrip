@@ -285,6 +285,29 @@ pub(crate) fn open_block(
     (frame_start, start - frame_start)
 }
 
+/// [`open_block`] for a block that starts at `start` in `vec`, before any
+/// room earlier blocks left. Also returns where the block's room ends.
+///
+/// Only bytes past `vec.len()` are zeroed. The block writes each byte of
+/// the room before it reads it, so the room needs no zeroing again: a
+/// streaming decoder that keeps it zeroes each byte of its history once,
+/// not a whole block's room for every block.
+#[inline(always)]
+pub(crate) fn open_block_at(
+    vec: &mut Vec<u8>,
+    start: usize,
+    max_block: usize,
+    frame_start: usize,
+) -> (usize, usize, usize) {
+    debug_assert!(start <= vec.len());
+    let frame_start = frame_start.min(start);
+    let end = start + max_block + WILDCOPY_OVERLENGTH;
+    if vec.len() < end {
+        vec.resize(end, 0);
+    }
+    (frame_start, start - frame_start, end)
+}
+
 impl<'a, const NARROW: bool> SeqOut<'a, NARROW> {
     /// The output in `buf`, which [`open_block`] returned, at position `op`.
     #[inline(always)]
@@ -545,6 +568,23 @@ mod tests {
 
     fn test_lengths(max_len: usize) -> Vec<usize> {
         (1..=max_len).collect()
+    }
+
+    #[test]
+    fn open_block_at_zeroes_only_new_room() {
+        let mut v = vec![7u8; 100];
+        let (base, op, end) = open_block_at(&mut v, 40, 80, 10);
+        assert_eq!((base, op, end), (10, 30, 120 + WILDCOPY_OVERLENGTH));
+        assert_eq!(v.len(), end);
+        assert!(v[..100].iter().all(|&b| b == 7));
+        assert!(v[100..].iter().all(|&b| b == 0));
+
+        // Room that already reaches past the block is kept as it is.
+        v.fill(9);
+        let (base, op, end) = open_block_at(&mut v, 4, 16, 8);
+        assert_eq!((base, op, end), (4, 0, 20 + WILDCOPY_OVERLENGTH));
+        assert_eq!(v.len(), 120 + WILDCOPY_OVERLENGTH);
+        assert!(v.iter().all(|&b| b == 9));
     }
 
     fn expected_match(seed: &[u8], offset: usize, len: usize) -> Vec<u8> {

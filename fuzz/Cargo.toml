@@ -12,7 +12,7 @@ libfuzzer-sys = "0.4"
 zrip = { path = "..", features = ["dict_builder"] }
 zrip-core = { path = "../crates/core" }
 # No legacy formats: `decode_differential` compares zrip with C zstd.
-zstd = { version = "0.13", default-features = false, features = ["arrays", "zdict_builder"] }
+zstd = { version = "0.14.5", default-features = false, features = ["arrays", "zdict_builder"] }
 
 [[bin]]
 name = "zrip_fuzz_roundtrip_frame"

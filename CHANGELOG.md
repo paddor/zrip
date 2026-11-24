@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `PushDecoder` and `FrameDecoder` no longer zero 128 KiB of output room
+  for each block: the room stays from block to block, and each byte is
+  zeroed once. Streams of small flushed blocks decode about 8x faster: a
+  210-byte message takes 0.4 us instead of 3.2 us.
+
+- Blocks whose custom sequence tables would not beat the predefined ones
+  no longer build them. The encoder now sizes the section from the
+  normalized tables and their exact descriptions before it builds the
+  encoding tables and codes the sequences. Flushed 2 KB JSON messages
+  encode 5.5% faster. Output sizes move by at most a few bytes per input, in
+  either direction.
+
+### Fixed
+
+- The decoders reject what C zstd 1.6.0 rejects. `Block_Maximum_Size`
+  bounds the output of every block, and in one-shot decoding the size of
+  raw and RLE blocks too, not only compressed ones. `FrameDecoder` and
+  `PushDecoder` reject empty compressed blocks, and frames whose last block
+  is empty but whose output does not match the declared content size. The
+  differential tests and fuzz targets now compare with C zstd 1.6.0.
+
 ## [0.8.26] - 2026-11-24
 
 ### Added
