@@ -111,6 +111,32 @@ fn streaming_encoder_empty() {
 }
 
 #[test]
+fn streaming_encoder_can_omit_content_checksum() {
+    use std::io::Write;
+
+    let text = b"enclosing format already authenticates this payload ".repeat(20);
+    let large: Vec<u8> = text.iter().cycle().take(300_000).copied().collect();
+    let on = zrip::Options::default();
+    let off = zrip::Options::default().content_checksum(false);
+    for data in [&b""[..], b"x", &text, &large] {
+        for level in [-7, 1, 3, 4] {
+            let encode = |opts: &zrip::Options| {
+                let mut writer = zrip::FrameEncoder::with_options(Vec::new(), level, opts).unwrap();
+                for chunk in data.chunks(5000) {
+                    writer.write_all(chunk).unwrap();
+                }
+                writer.finish().unwrap()
+            };
+            let (with, without) = (encode(&on), encode(&off));
+            assert_ne!(with[4] & 0x04, 0);
+            assert_eq!(without[4] & 0x04, 0, "level {level}, {} bytes", data.len());
+            assert_eq!(without.len() + 4, with.len());
+            assert_eq!(zrip::decompress(&without).unwrap(), data);
+        }
+    }
+}
+
+#[test]
 fn streaming_encoder_all_levels() {
     let original: Vec<u8> = b"ABCDEFGH".iter().cycle().take(5000).copied().collect();
     for level in [-7, -5, -3, -1, 1, 2, 3, 4] {

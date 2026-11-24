@@ -449,6 +449,52 @@ fn compress_context_can_omit_content_checksum() {
 }
 
 #[test]
+fn options_can_omit_content_checksum() {
+    use zrip::push::{EndOp, PushEncoder};
+
+    let text = b"enclosing format already authenticates this payload ".repeat(20);
+    let large: Vec<u8> = text.iter().cycle().take(300_000).copied().collect();
+    let on = zrip::Options::default();
+    let off = zrip::Options::default().content_checksum(false);
+    for data in [&b""[..], b"x", &text, &large] {
+        for level in [-7, 1, 3, 4] {
+            // One pass: the same frame, less the flag and the 4 checksum bytes.
+            let with = zrip::compress_opts(data, level, &on).unwrap();
+            let without = zrip::compress_opts(data, level, &off).unwrap();
+            assert_ne!(with[4] & 0x04, 0);
+            assert_eq!(without[4] & 0x04, 0, "level {level}, {} bytes", data.len());
+            assert_eq!(without.len() + 4, with.len());
+            assert_eq!(zrip::decompress(&without).unwrap(), data);
+
+            let mut pushed = Vec::new();
+            let mut enc = PushEncoder::with_options(level, &off).unwrap();
+            enc.encode_to_vec(data, &mut pushed, EndOp::End).unwrap();
+            assert_eq!(pushed, without);
+
+            // Streamed: no content size, so the frame is written block by block.
+            let mut streamed = Vec::new();
+            let mut enc = PushEncoder::with_options(level, &off).unwrap();
+            for chunk in data.chunks(5000) {
+                enc.encode_to_vec(chunk, &mut streamed, EndOp::Continue)
+                    .unwrap();
+            }
+            enc.encode_to_vec(&[], &mut streamed, EndOp::End).unwrap();
+            assert_eq!(streamed[4] & 0x04, 0);
+            assert_eq!(zrip::decompress(&streamed).unwrap(), data);
+            let mut with_streamed = Vec::new();
+            let mut enc = PushEncoder::with_options(level, &on).unwrap();
+            for chunk in data.chunks(5000) {
+                enc.encode_to_vec(chunk, &mut with_streamed, EndOp::Continue)
+                    .unwrap();
+            }
+            enc.encode_to_vec(&[], &mut with_streamed, EndOp::End)
+                .unwrap();
+            assert_eq!(streamed.len() + 4, with_streamed.len());
+        }
+    }
+}
+
+#[test]
 fn compress_context_compress_into_matches_compress() {
     let text = b"caller-owned output buffers for compressed frames ".repeat(40);
     let large: Vec<u8> = text.iter().cycle().take(300_000).copied().collect();

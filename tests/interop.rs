@@ -71,6 +71,26 @@ fn roundtrip_deep_huffman_tree_c_cross_validate() {
     }
 }
 
+#[test]
+fn frames_without_checksum_c_decompress() {
+    use std::io::Write;
+
+    let text = b"frames without a content checksum ".repeat(20);
+    let large: Vec<u8> = text.iter().cycle().take(300_000).copied().collect();
+    let off = zrip::Options::default().content_checksum(false);
+    for data in [&text[..], &large] {
+        for level in [-7, 1, 3, 4] {
+            let one_shot = zrip::compress_opts(data, level, &off).unwrap();
+            let mut writer = zrip::FrameEncoder::with_options(Vec::new(), level, &off).unwrap();
+            writer.write_all(data).unwrap();
+            let streamed = writer.finish().unwrap();
+            for frame in [one_shot, streamed] {
+                assert_eq!(zstd::decode_all(&frame[..]).unwrap(), data, "level {level}");
+            }
+        }
+    }
+}
+
 /// Literals that Huffman-code well but contain almost no repeats: blocks
 /// without sequences must still be compressed, not stored raw.
 #[test]

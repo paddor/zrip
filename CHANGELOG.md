@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- `Options::content_checksum(false)` leaves the content checksum out of
+  frames from `compress_opts`, `FrameEncoder::with_options` and
+  `PushEncoder::with_options`, as `CompressContext::set_content_checksum`
+  already could. Frames get 4 bytes shorter and skip the XXH64 pass. C zstd
+  writes no checksum by default.
+
+### Changed
+
+- Levels 3 and 4 search as C zstd does on inputs over 256 KiB: the step
+  grows once every 256 bytes without a match, instead of after every miss
+  (L3) or every 8 bytes (L4). A block after one that compressed to more
+  than 60% of its size still grows it after every miss, so
+  low-compressibility data stays above 100 MB/s. On Silesia, L3 output is
+  3.9% smaller, 1.6% larger than C zstd's instead of 5.7%, at 11% less
+  speed. L4 output is 0.2% smaller at the same speed.
+
 ## [0.8.25] - 2026-11-24
 
 ### Changed

@@ -103,8 +103,9 @@ pub(crate) fn write_frame_header_without_content_size(
     output: &mut impl OutputSink,
     dict_id: Option<u32>,
     window_log: u32,
+    content_checksum: bool,
 ) -> Result<(), CompressError> {
-    write_frame_header_inner(output, None, dict_id, window_log, true)
+    write_frame_header_inner(output, None, dict_id, window_log, content_checksum)
 }
 
 fn write_frame_header_inner(
@@ -293,7 +294,7 @@ pub fn compress_with_params(
 ) -> Result<Vec<u8>, CompressError> {
     let mut params = *params;
     clamp_params_to_src_size(&mut params, input.len());
-    compress_inner(input, &params)
+    compress_inner(input, &params, true)
 }
 
 /// Compresses `input` into one frame at `level` (-7..=4; -8 runs as -7,
@@ -302,18 +303,18 @@ pub fn compress_with_params(
 pub fn compress(input: &[u8], level: i32) -> Result<Vec<u8>, CompressError> {
     let params = strategy::level_params_for_size(level, input.len())
         .ok_or(CompressError::InvalidLevel(level))?;
-    compress_inner(input, &params)
+    compress_inner(input, &params, true)
 }
 
-/// [`compress`] with [`strategy::Options`]: a larger window or long
-/// distance matching. The window shrinks to the input.
+/// [`compress`] with [`strategy::Options`]: a larger window, long distance
+/// matching, or no content checksum. The window shrinks to the input.
 pub fn compress_opts(
     input: &[u8],
     level: i32,
     opts: &strategy::Options,
 ) -> Result<Vec<u8>, CompressError> {
     let params = params_with_options(level, input.len(), opts)?;
-    compress_inner(input, &params)
+    compress_inner(input, &params, opts.checksum())
 }
 
 /// Returns the parameters for a one-shot frame of `input_len` bytes.
@@ -338,19 +339,25 @@ pub(crate) fn params_with_options(
 }
 
 #[allow(clippy::unnecessary_wraps)]
-fn compress_inner(input: &[u8], params: &strategy::LevelParams) -> Result<Vec<u8>, CompressError> {
+fn compress_inner(
+    input: &[u8],
+    params: &strategy::LevelParams,
+    checksum: bool,
+) -> Result<Vec<u8>, CompressError> {
     let mut output = Vec::with_capacity(input.len() + 32);
-    compress_frame(input, params, &mut output)?;
+    compress_frame(input, params, checksum, &mut output)?;
     Ok(output)
 }
 
-/// Writes one frame for `input` at `params`, without a dictionary.
+/// Writes one frame for `input` at `params`, without a dictionary, and with
+/// a content checksum if `checksum`.
 pub(crate) fn compress_frame(
     input: &[u8],
     params: &strategy::LevelParams,
+    checksum: bool,
     output: &mut impl OutputSink,
 ) -> Result<(), CompressError> {
-    write_frame_header(output, input.len(), None, params.window_log)?;
+    write_frame_header_with_checksum(output, input.len(), None, params.window_log, checksum)?;
 
     if input.is_empty() {
         block_encoder::encode_raw_block(&[], true, output)?;
@@ -454,6 +461,7 @@ pub(crate) fn compress_frame(
                 let long_size = 1usize << params.hash_log;
                 let mut hash_short = MatchTable::zeroed(short_size);
                 let mut hash_long = MatchTable::zeroed(long_size);
+                let mut skip = strategy::DfastSkip::for_input(input.len());
                 while offset < input.len() {
                     let chunk_size = (input.len() - offset).min(block_size);
                     let block_end = offset + chunk_size;
@@ -472,9 +480,11 @@ pub(crate) fn compress_frame(
                     let src = &input[base..];
                     let (start, end) = (offset - base, block_end - base);
 
+                    let written = output.written();
                     if skip_match_search(params, input.len(), block) {
                         block_encoder::encode_raw_block(block, is_last, output)?;
                     } else {
+                        let block_params = skip.params(params);
                         #[cfg(feature = "ldm")]
                         let used_ldm = if let Some(ref mut ldm) = ldm_state {
                             ldm.compress_block(
@@ -482,7 +492,7 @@ pub(crate) fn compress_frame(
                                 start,
                                 end,
                                 window_size,
-                                params,
+                                &block_params,
                                 &rep_offsets,
                                 &mut hash_short,
                                 &mut hash_long,
@@ -500,7 +510,7 @@ pub(crate) fn compress_frame(
                                 src,
                                 start,
                                 end,
-                                params,
+                                &block_params,
                                 &rep_offsets,
                                 &mut hash_short,
                                 &mut hash_long,
@@ -517,16 +527,18 @@ pub(crate) fn compress_frame(
                             strategy::block_policy(params, input.len()),
                         )?;
                     }
+                    skip.record(chunk_size, output.written() - written);
                     offset = block_end;
                 }
             }
         }
     }
 
-    // Content_Checksum: the low 32 bits of XXH64 with seed 0.
-    let hash = xxh64(input, 0);
-    let checksum = (hash & 0xFFFF_FFFF) as u32;
-    output.extend_from_slice(&checksum.to_le_bytes())?;
+    if checksum {
+        // Content_Checksum: the low 32 bits of XXH64 with seed 0.
+        let hash = xxh64(input, 0);
+        output.extend_from_slice(&((hash & 0xFFFF_FFFF) as u32).to_le_bytes())?;
+    }
     Ok(())
 }
 
@@ -681,6 +693,7 @@ pub(crate) fn compress_with_dict_to(
                     );
                     let mut positions = PositionBase::new(params.window_log);
                     let mut offset = 0;
+                    let mut skip = strategy::DfastSkip::for_input(input.len());
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let is_last = offset + chunk_size >= input.len();
@@ -690,11 +703,12 @@ pub(crate) fn compress_with_dict_to(
                             rebase::reduce_hash_table(&mut hash_long, shift);
                         }
                         let base = positions.base();
+                        let written = output.len();
                         dfast::compress_dfast_block(
                             &combined[base..],
                             start - base,
                             end - base,
-                            &params,
+                            &skip.params(&params),
                             &rep_offsets,
                             &mut hash_short,
                             &mut hash_long,
@@ -709,6 +723,7 @@ pub(crate) fn compress_with_dict_to(
                             &mut workspace,
                             strategy::block_policy(&params, input.len()),
                         )?;
+                        skip.record(chunk_size, output.len() - written);
                         offset += chunk_size;
                     }
                 }
@@ -731,7 +746,7 @@ pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usiz
     let params = strategy::level_params_for_size(level, input.len())
         .ok_or(CompressError::InvalidLevel(level))?;
     let mut sink = SliceSink::new(output);
-    compress_frame(input, &params, &mut sink)?;
+    compress_frame(input, &params, true, &mut sink)?;
     Ok(sink.pos())
 }
 
@@ -760,6 +775,22 @@ mod tests {
         assert_eq!(strategy::src_log(3), 2);
         assert_eq!(strategy::src_log(1 << 10), 10);
         assert_eq!(strategy::src_log((1 << 10) + 1), 11);
+    }
+
+    #[test]
+    fn dfast_blocks_after_poorly_compressed_ones_search_sparsely() {
+        let params = strategy::level_params(3).unwrap();
+        let mut skip = strategy::DfastSkip::for_input(usize::MAX);
+        assert_eq!(skip.params(&params).search_strength, 8);
+        skip.record(100, 61);
+        assert_eq!(skip.params(&params).search_strength, 0);
+        skip.record(100, 60);
+        assert_eq!(skip.params(&params).search_strength, 8);
+
+        // Inputs of up to two blocks keep their search.
+        let mut skip = strategy::DfastSkip::for_input(256 * 1024);
+        skip.record(100, 100);
+        assert_eq!(skip.params(&params).search_strength, 8);
     }
 
     #[cfg(target_pointer_width = "64")]
@@ -1015,7 +1046,7 @@ mod tests {
     fn no_fcs_frame_uses_window_descriptor() {
         let mut output = Vec::new();
 
-        write_frame_header_without_content_size(&mut output, None, 19).unwrap();
+        write_frame_header_without_content_size(&mut output, None, 19, true).unwrap();
         let header = parse_frame_header(&output).unwrap();
 
         assert!(!header.single_segment);

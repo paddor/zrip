@@ -66,7 +66,8 @@ pub struct LevelParams {
     /// keeps dense literals raw.
     pub target_length: u32,
     /// The search step grows by one every 2^`search_strength` bytes
-    /// without a match. C zstd has no such parameter.
+    /// without a match. C zstd fixes it at 8. A DFast block after one that
+    /// compressed to more than 60% of its size searches as at 0.
     pub search_strength: u32,
     /// Keep literals raw and use the predefined sequence tables. Blocks over
     /// 32 KiB that are almost all literals may still take Huffman literals.
@@ -117,7 +118,7 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
 /// Returns the compression parameters for a given level, sized for `src_len`.
 ///
 /// Uses fixed parameters per level with log values clamped down for small inputs.
-/// L3 and L4 keep denser searches through 256 KiB to preserve matches on short inputs.
+/// L3 and L4 search more sparsely through 256 KiB.
 ///
 /// Level 0 is treated as "library default" and maps to level 1.
 pub fn level_params_for_size(level: i32, src_len: usize) -> Option<LevelParams> {
@@ -165,10 +166,15 @@ pub(crate) fn level_params_with_prefix(
     Some(params)
 }
 
-/// Search strength for inputs of up to two blocks at the levels that search
-/// sparsely on larger ones. Sparse initial tables cost too much ratio there.
+/// Largest input L3 and L4 search with `short_input_search_strength`, two
+/// blocks.
+const SHORT_INPUT_LIMIT: usize = 256 * 1024;
+
+/// Search strength for inputs of up to two blocks at L3 and L4. At C zstd's
+/// 8, zrip's DFast search runs at 0.7-0.8x C's speed on them; these keep
+/// about C's speed at L3 for 4-9% more output.
 fn short_input_search_strength(level: i32, input_len: usize) -> Option<u32> {
-    if input_len > 256 * 1024 {
+    if input_len > SHORT_INPUT_LIMIT {
         return None;
     }
     match level {
@@ -413,8 +419,9 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             #[cfg(feature = "ldm")]
             ldm_params: None,
         },
-        // C zstd's level 3 tables. On large inputs, grow the step after each
-        // unsuccessful probe so long literal runs do not dominate the search.
+        // C zstd's level 3 tables and search. A block after one that
+        // compressed to more than 60% of its size grows the step after every
+        // miss (see `DfastSkip`), so low-compressibility data stays fast.
         3 => LevelParams {
             strategy: Strategy::DFast,
             window_log: 21,
@@ -423,13 +430,13 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             search_log: 1,
             min_match: 5,
             target_length: 1,
-            search_strength: 0,
+            search_strength: 8,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
             ldm_params: None,
         },
-        // C zstd's level 4 tables, with a 16 MiB window and faster skip
-        // growth on large inputs.
+        // C zstd's level 4 tables and search, as at L3, with a 16 MiB window:
+        // smaller output than C's 2 MiB at the same speed.
         4 => LevelParams {
             strategy: Strategy::DFast,
             window_log: 24,
@@ -438,7 +445,7 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             search_log: 0,
             min_match: 5,
             target_length: 1,
-            search_strength: 3,
+            search_strength: 8,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
             ldm_params: None,
@@ -447,7 +454,49 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
     })
 }
 
-/// Options for large-window and LDM compression, orthogonal to level.
+/// Carries how well the last DFast block compressed into the next block's
+/// search. After a block that compressed to more than 60% of its size, the
+/// next one searches as at `search_strength` 0, growing its step after every
+/// miss: a dense search costs time on low-compressibility data and finds
+/// little. Text, code and database blocks stay under 60%. Inputs of up to
+/// two blocks keep their search, which `short_input_search_strength` sets.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DfastSkip {
+    enabled: bool,
+    sparse: bool,
+}
+
+impl DfastSkip {
+    /// For an input of `input_len` bytes, or `usize::MAX` if its size is
+    /// unknown.
+    #[inline]
+    pub(crate) fn for_input(input_len: usize) -> Self {
+        Self {
+            enabled: input_len > SHORT_INPUT_LIMIT,
+            sparse: false,
+        }
+    }
+
+    /// The parameters for the next block.
+    #[inline]
+    pub(crate) fn params(self, params: &LevelParams) -> LevelParams {
+        let mut block_params = *params;
+        if self.sparse {
+            block_params.search_strength = 0;
+        }
+        block_params
+    }
+
+    /// Records that the last block compressed `input_len` bytes to
+    /// `output_len`.
+    #[inline]
+    pub(crate) fn record(&mut self, input_len: usize, output_len: usize) {
+        self.sparse = self.enabled && output_len.saturating_mul(5) > input_len.saturating_mul(3);
+    }
+}
+
+/// Options orthogonal to level: a larger window, long distance matching,
+/// and whether frames carry a content checksum.
 ///
 /// Pass to [`compress_opts`](crate::compress_opts) or
 /// `FrameEncoder::with_options` (with `std`).
@@ -456,6 +505,7 @@ pub struct Options {
     pub(crate) window_log: Option<u32>,
     #[cfg_attr(not(feature = "ldm"), allow(dead_code))]
     pub(crate) ldm: bool,
+    pub(crate) no_content_checksum: bool,
 }
 
 impl Options {
@@ -476,6 +526,20 @@ impl Options {
     pub fn ldm(mut self, enable: bool) -> Self {
         self.ldm = enable;
         self
+    }
+
+    /// Enables or disables the content checksum, on by default: the low 32
+    /// bits of the XXH64 of the content, 4 bytes at the end of the frame,
+    /// which decoders verify. C zstd leaves it out by default.
+    #[must_use]
+    pub fn content_checksum(mut self, enabled: bool) -> Self {
+        self.no_content_checksum = !enabled;
+        self
+    }
+
+    /// Whether frames carry a content checksum.
+    pub(crate) const fn checksum(&self) -> bool {
+        !self.no_content_checksum
     }
 }
 

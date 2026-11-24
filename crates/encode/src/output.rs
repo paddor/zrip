@@ -11,6 +11,8 @@ use alloc::vec::Vec;
 pub(crate) trait OutputSink {
     fn push(&mut self, byte: u8) -> Result<(), CompressError>;
     fn extend_from_slice(&mut self, data: &[u8]) -> Result<(), CompressError>;
+    /// Bytes in the sink.
+    fn written(&self) -> usize;
 
     /// Reserves room for at least `additional` more bytes, where the sink can
     /// grow.
@@ -31,6 +33,11 @@ impl OutputSink for Vec<u8> {
     fn extend_from_slice(&mut self, data: &[u8]) -> Result<(), CompressError> {
         Vec::extend_from_slice(self, data);
         Ok(())
+    }
+
+    #[inline]
+    fn written(&self) -> usize {
+        self.len()
     }
 
     #[cfg(feature = "alloc")]
@@ -82,5 +89,10 @@ impl OutputSink for SliceSink<'_> {
         self.output[self.pos..end].copy_from_slice(data);
         self.pos = end;
         Ok(())
+    }
+
+    #[inline]
+    fn written(&self) -> usize {
+        self.pos
     }
 }

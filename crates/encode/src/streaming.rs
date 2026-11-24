@@ -19,7 +19,7 @@ enum EncoderState {
 ///
 /// Buffers input until a full block (128 KiB, or the window if smaller) is
 /// ready, then compresses and writes it to the underlying writer. Call [`finish`](Self::finish)
-/// to flush the final block, write the content checksum, and recover the
+/// to flush the final block, write the content checksum (if on), and recover the
 /// writer.
 ///
 /// After a write, flush, or finalization error, the encoder cannot be reused.
@@ -54,8 +54,8 @@ impl<W: Write> FrameEncoder<W> {
         Self::from_params(writer, params, None)
     }
 
-    /// Creates a new streaming encoder with [`Options`](strategy::Options)
-    /// for large windows and/or LDM.
+    /// Creates a new streaming encoder with [`Options`](strategy::Options):
+    /// a large window, LDM, or no content checksum.
     pub fn with_options(
         writer: W,
         level: i32,
@@ -63,7 +63,9 @@ impl<W: Write> FrameEncoder<W> {
     ) -> Result<Self, CompressError> {
         let mut params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
         strategy::apply_options(&mut params, opts);
-        Self::from_params(writer, params, None)
+        let mut encoder = Self::from_params(writer, params, None)?;
+        encoder.frame.set_content_checksum(opts.checksum());
+        Ok(encoder)
     }
 
     /// Creates a new streaming encoder with a dictionary at the given level (-7..=4; -8 runs as -7).
