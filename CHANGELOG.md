@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Blocks whose custom sequence tables would not beat the predefined ones
+  no longer build them. The encoder now sizes the section from the
+  normalized tables and their exact descriptions before it builds the
+  encoding tables and codes the sequences. Flushed 2 KB JSON messages
+  encode 5.5% faster. Output sizes move by at most a few bytes per input, in
+  either direction.
+
 ## [0.8.26] - 2026-11-24
 
 ### Added
