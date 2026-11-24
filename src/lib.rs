@@ -187,8 +187,8 @@ pub fn compress_with_params(
     zrip_encode::compress_with_params(input, params)
 }
 
-/// [`compress`] with [`Options`], such as a larger window and long distance
-/// matching.
+/// [`compress`] with [`Options`], such as a larger window, long distance
+/// matching, or no content checksum.
 #[cfg(feature = "alloc")]
 pub fn compress_opts(
     input: &[u8],

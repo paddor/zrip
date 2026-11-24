@@ -103,8 +103,9 @@ pub(crate) fn write_frame_header_without_content_size(
     output: &mut impl OutputSink,
     dict_id: Option<u32>,
     window_log: u32,
+    content_checksum: bool,
 ) -> Result<(), CompressError> {
-    write_frame_header_inner(output, None, dict_id, window_log, true)
+    write_frame_header_inner(output, None, dict_id, window_log, content_checksum)
 }
 
 fn write_frame_header_inner(
@@ -293,7 +294,7 @@ pub fn compress_with_params(
 ) -> Result<Vec<u8>, CompressError> {
     let mut params = *params;
     clamp_params_to_src_size(&mut params, input.len());
-    compress_inner(input, &params)
+    compress_inner(input, &params, true)
 }
 
 /// Compresses `input` into one frame at `level` (-7..=4; -8 runs as -7,
@@ -302,18 +303,18 @@ pub fn compress_with_params(
 pub fn compress(input: &[u8], level: i32) -> Result<Vec<u8>, CompressError> {
     let params = strategy::level_params_for_size(level, input.len())
         .ok_or(CompressError::InvalidLevel(level))?;
-    compress_inner(input, &params)
+    compress_inner(input, &params, true)
 }
 
-/// [`compress`] with [`strategy::Options`]: a larger window or long
-/// distance matching. The window shrinks to the input.
+/// [`compress`] with [`strategy::Options`]: a larger window, long distance
+/// matching, or no content checksum. The window shrinks to the input.
 pub fn compress_opts(
     input: &[u8],
     level: i32,
     opts: &strategy::Options,
 ) -> Result<Vec<u8>, CompressError> {
     let params = params_with_options(level, input.len(), opts)?;
-    compress_inner(input, &params)
+    compress_inner(input, &params, opts.checksum())
 }
 
 /// Returns the parameters for a one-shot frame of `input_len` bytes.
@@ -338,19 +339,25 @@ pub(crate) fn params_with_options(
 }
 
 #[allow(clippy::unnecessary_wraps)]
-fn compress_inner(input: &[u8], params: &strategy::LevelParams) -> Result<Vec<u8>, CompressError> {
+fn compress_inner(
+    input: &[u8],
+    params: &strategy::LevelParams,
+    checksum: bool,
+) -> Result<Vec<u8>, CompressError> {
     let mut output = Vec::with_capacity(input.len() + 32);
-    compress_frame(input, params, &mut output)?;
+    compress_frame(input, params, checksum, &mut output)?;
     Ok(output)
 }
 
-/// Writes one frame for `input` at `params`, without a dictionary.
+/// Writes one frame for `input` at `params`, without a dictionary, and with
+/// a content checksum if `checksum`.
 pub(crate) fn compress_frame(
     input: &[u8],
     params: &strategy::LevelParams,
+    checksum: bool,
     output: &mut impl OutputSink,
 ) -> Result<(), CompressError> {
-    write_frame_header(output, input.len(), None, params.window_log)?;
+    write_frame_header_with_checksum(output, input.len(), None, params.window_log, checksum)?;
 
     if input.is_empty() {
         block_encoder::encode_raw_block(&[], true, output)?;
@@ -523,10 +530,11 @@ pub(crate) fn compress_frame(
         }
     }
 
-    // Content_Checksum: the low 32 bits of XXH64 with seed 0.
-    let hash = xxh64(input, 0);
-    let checksum = (hash & 0xFFFF_FFFF) as u32;
-    output.extend_from_slice(&checksum.to_le_bytes())?;
+    if checksum {
+        // Content_Checksum: the low 32 bits of XXH64 with seed 0.
+        let hash = xxh64(input, 0);
+        output.extend_from_slice(&((hash & 0xFFFF_FFFF) as u32).to_le_bytes())?;
+    }
     Ok(())
 }
 
@@ -731,7 +739,7 @@ pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usiz
     let params = strategy::level_params_for_size(level, input.len())
         .ok_or(CompressError::InvalidLevel(level))?;
     let mut sink = SliceSink::new(output);
-    compress_frame(input, &params, &mut sink)?;
+    compress_frame(input, &params, true, &mut sink)?;
     Ok(sink.pos())
 }
 
@@ -1015,7 +1023,7 @@ mod tests {
     fn no_fcs_frame_uses_window_descriptor() {
         let mut output = Vec::new();
 
-        write_frame_header_without_content_size(&mut output, None, 19).unwrap();
+        write_frame_header_without_content_size(&mut output, None, 19, true).unwrap();
         let header = parse_frame_header(&output).unwrap();
 
         assert!(!header.single_segment);

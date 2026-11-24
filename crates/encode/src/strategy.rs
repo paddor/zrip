@@ -447,7 +447,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
     })
 }
 
-/// Options for large-window and LDM compression, orthogonal to level.
+/// Options orthogonal to level: a larger window, long distance matching,
+/// and whether frames carry a content checksum.
 ///
 /// Pass to [`compress_opts`](crate::compress_opts) or
 /// `FrameEncoder::with_options` (with `std`).
@@ -456,6 +457,7 @@ pub struct Options {
     pub(crate) window_log: Option<u32>,
     #[cfg_attr(not(feature = "ldm"), allow(dead_code))]
     pub(crate) ldm: bool,
+    pub(crate) no_content_checksum: bool,
 }
 
 impl Options {
@@ -476,6 +478,20 @@ impl Options {
     pub fn ldm(mut self, enable: bool) -> Self {
         self.ldm = enable;
         self
+    }
+
+    /// Enables or disables the content checksum, on by default: the low 32
+    /// bits of the XXH64 of the content, 4 bytes at the end of the frame,
+    /// which decoders verify. C zstd leaves it out by default.
+    #[must_use]
+    pub fn content_checksum(mut self, enabled: bool) -> Self {
+        self.no_content_checksum = !enabled;
+        self
+    }
+
+    /// Whether frames carry a content checksum.
+    pub(crate) const fn checksum(&self) -> bool {
+        !self.no_content_checksum
     }
 }
 

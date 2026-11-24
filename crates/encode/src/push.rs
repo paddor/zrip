@@ -53,7 +53,9 @@ pub enum EndOp {
 /// frame bytes into buffers of any size. No I/O, no `std`; it needs only the
 /// `alloc` feature. `FrameEncoder` is the `std::io::Write` counterpart.
 ///
-/// Frames carry a content checksum. A frame that ends before any of it was
+/// Frames carry a content checksum unless
+/// [`Options::content_checksum`](strategy::Options::content_checksum) turns
+/// it off. A frame that ends before any of it was
 /// written, such as all input passed with [`EndOp::End`], is encoded in one
 /// pass like `zrip::compress`: same bytes, content size in the header, and
 /// tables sized to the input. Longer streams have no content size. Hash
@@ -118,12 +120,14 @@ impl PushEncoder {
         Ok(Self::from_params(level, None, params, None))
     }
 
-    /// Creates an encoder with [`Options`](strategy::Options) for large
-    /// windows and/or LDM.
+    /// Creates an encoder with [`Options`](strategy::Options): a large
+    /// window, LDM, or no content checksum.
     pub fn with_options(level: i32, opts: &strategy::Options) -> Result<Self, CompressError> {
         let mut params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
         strategy::apply_options(&mut params, opts);
-        Ok(Self::from_params(level, Some(opts.clone()), params, None))
+        let mut encoder = Self::from_params(level, Some(opts.clone()), params, None);
+        encoder.frame.set_content_checksum(opts.checksum());
+        Ok(encoder)
     }
 
     /// Creates an encoder with a dictionary.

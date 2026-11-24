@@ -42,6 +42,8 @@ pub(crate) fn slot_clear_pays(window: usize, tables: usize, entries: usize) -> b
 pub(crate) struct EncodeState {
     params: LevelParams,
     rep_offsets: [u32; 3],
+    /// Frames carry a content checksum, hashed as input arrives.
+    checksum: bool,
     hasher: Xxh64State,
     workspace: BlockEncodeWorkspace,
     dict: Option<Dictionary>,
@@ -85,6 +87,7 @@ impl EncodeState {
         Self {
             params,
             rep_offsets,
+            checksum: true,
             hasher: Xxh64State::new(0),
             workspace: BlockEncodeWorkspace::new(),
             dict,
@@ -120,7 +123,7 @@ impl EncodeState {
         };
         #[cfg(feature = "ldm")]
         if params.ldm_params.is_some() {
-            return crate::compress_frame(src, params, out);
+            return crate::compress_frame(src, params, self.checksum, out);
         }
         // Whole clears follow: the tables no longer hold just the last
         // window's positions.
@@ -157,7 +160,7 @@ impl EncodeState {
             out,
             &mut self.workspace,
             &mut self.combined,
-            true,
+            self.checksum,
         )
     }
 
@@ -274,7 +277,9 @@ impl EncodeState {
                 .reserve_exact(target - self.window_buf.len());
         }
         self.window_buf.extend_from_slice(&input[..n]);
-        self.hasher.update(&input[..n]);
+        if self.checksum {
+            self.hasher.update(&input[..n]);
+        }
         n
     }
 
@@ -284,11 +289,20 @@ impl EncodeState {
             out,
             self.dict.as_ref().map(Dictionary::id),
             self.params.window_log,
+            self.checksum,
         )
     }
 
-    /// Appends the content checksum that ends the frame.
+    /// Sets whether frames carry a content checksum. Call before any input.
+    pub(crate) fn set_content_checksum(&mut self, enabled: bool) {
+        self.checksum = enabled;
+    }
+
+    /// Appends the content checksum that ends the frame, if frames carry one.
     pub(crate) fn write_checksum(&self, out: &mut Vec<u8>) {
+        if !self.checksum {
+            return;
+        }
         let checksum = (self.hasher.finish() & 0xFFFF_FFFF) as u32;
         out.extend_from_slice(&checksum.to_le_bytes());
     }

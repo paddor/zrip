@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- `Options::content_checksum(false)` leaves the content checksum out of
+  frames from `compress_opts`, `FrameEncoder::with_options` and
+  `PushEncoder::with_options`, as `CompressContext::set_content_checksum`
+  already could. Frames get 4 bytes shorter and skip the XXH64 pass. C zstd
+  writes no checksum by default.
+
 ## [0.8.25] - 2026-11-24
 
 ### Changed
