@@ -4,6 +4,11 @@
 
 ### Changed
 
+- `PushDecoder` and `FrameDecoder` no longer zero 128 KiB of output room
+  for each block: the room stays from block to block, and each byte is
+  zeroed once. Streams of small flushed blocks decode about 8x faster: a
+  210-byte message takes 0.4 us instead of 3.2 us.
+
 - Blocks whose custom sequence tables would not beat the predefined ones
   no longer build them. The encoder now sizes the section from the
   normalized tables and their exact descriptions before it builds the

@@ -752,3 +752,53 @@ fn frames_past_the_header_reserve_decode() {
         }
     }
 }
+
+#[test]
+fn blocks_decode_over_the_room_earlier_blocks_left() {
+    // A streaming decoder keeps the room past its output, which earlier
+    // blocks wrote, instead of zeroing it for each block. Large blocks fill
+    // it, then small flushed blocks, raw and RLE blocks, and the next frames
+    // decode over it, through window shifts.
+    use std::io::Write;
+    let mut messages = vec![mixed(150_000, 21)];
+    for i in 0..300u32 {
+        messages.push(mixed(20 + (i as usize * 37) % 600, i));
+    }
+    messages.push(
+        (0..70_000u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+            .collect(),
+    );
+    messages.push(vec![b'z'; 50_000]);
+    messages.push(mixed(90_000, 22));
+    messages.extend((0..50).map(|i| mixed(40, 100 + i)));
+
+    let mut c = zstd::stream::Encoder::new(Vec::new(), 3).unwrap();
+    c.window_log(16).unwrap();
+    c.include_checksum(true).unwrap();
+    for m in &messages {
+        c.write_all(m).unwrap();
+        c.flush().unwrap();
+    }
+    let mut stream = c.finish().unwrap();
+    let mut enc = PushEncoder::new(1).unwrap();
+    let mut z = Vec::new();
+    for m in &messages {
+        enc.encode_to_vec(m, &mut z, EndOp::Flush).unwrap();
+    }
+    enc.encode_to_vec(&[], &mut z, EndOp::End).unwrap();
+    stream.extend(&z);
+    stream.extend(zstd::bulk::compress(&messages[1], 3).unwrap());
+    let data = messages.concat();
+    let expected = [&data[..], &data[..], &messages[1][..]].concat();
+
+    let mut dec = PushDecoder::new();
+    for (in_chunk, out_buf) in [(1 << 20, 1 << 20), (333, 999), (7, 64)] {
+        let (out, frames) = push_decode(&mut dec, &stream, in_chunk, out_buf).unwrap();
+        assert_eq!(out, expected, "in={in_chunk} out={out_buf}");
+        assert_eq!(frames, 3);
+    }
+    let mut out = Vec::new();
+    std::io::Read::read_to_end(&mut zrip::FrameDecoder::new(stream.as_slice()), &mut out).unwrap();
+    assert_eq!(out, expected);
+}

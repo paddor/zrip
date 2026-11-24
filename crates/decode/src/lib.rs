@@ -65,7 +65,10 @@ use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use crate::exec::{SequenceOutputScope, decode_execute_sequences, decode_execute_single_sequence};
+use crate::exec::{
+    SequenceOutputScope, decode_execute_sequences, decode_execute_sequences_room,
+    decode_execute_single_sequence,
+};
 use crate::fast_vec::{Literals, WILDCOPY_OVERLENGTH};
 use crate::literals::{LiteralsAt, decode_literals_ws};
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
@@ -769,6 +772,95 @@ pub(crate) fn decode_sequences_dispatch(
             rep_offsets,
             literals,
             output,
+            scope,
+        )
+    }
+}
+
+/// [`decode_sequences_dispatch`] into a streaming history: the block starts
+/// at `*len` in `output`, the room past its output stays for the next
+/// block, and `*len` is set to where the output ends
+/// ([`decode_execute_sequences_room`]). Runs once per block.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn decode_sequences_dispatch_room(
+    seq_data: &[u8],
+    num_sequences: u32,
+    seq_tables: &mut SequenceDecodeTables,
+    rep_offsets: &mut [u32; 3],
+    literals: Literals<'_>,
+    output: &mut Vec<u8>,
+    len: &mut usize,
+    scope: SequenceOutputScope<'_>,
+) -> Result<(), DecompressError> {
+    // A lone sequence appends to the output, so it takes the one-shot path
+    // only when no room follows the output.
+    if num_sequences == 1 && *len == output.len() {
+        let result = decode_sequences_dispatch(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            literals,
+            output,
+            scope,
+        );
+        *len = output.len();
+        return result;
+    }
+
+    #[cfg(all(feature = "std", feature = "simd"))]
+    {
+        let level = fearless_simd::Level::new();
+        return fearless_simd::dispatch!(level, _simd => {
+            if scope.history.is_empty() {
+                decode_execute_sequences_room::<false>(
+                    seq_data,
+                    num_sequences,
+                    seq_tables,
+                    rep_offsets,
+                    literals,
+                    output,
+                    len,
+                    scope,
+                )
+            } else {
+                decode_execute_sequences_room::<true>(
+                    seq_data,
+                    num_sequences,
+                    seq_tables,
+                    rep_offsets,
+                    literals,
+                    output,
+                    len,
+                    scope,
+                )
+            }
+        });
+    }
+
+    // Scalar build: no `std` or no `simd`.
+    #[allow(unreachable_code)]
+    if scope.history.is_empty() {
+        decode_execute_sequences_room::<false>(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            literals,
+            output,
+            len,
+            scope,
+        )
+    } else {
+        decode_execute_sequences_room::<true>(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            literals,
+            output,
+            len,
             scope,
         )
     }

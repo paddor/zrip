@@ -130,6 +130,9 @@ enum Op {
     DecodeStream,
     /// One reused `PushDecoder`, fed 16 KiB at a time.
     DecodePush,
+    /// One reused `PushDecoder` fed a `PushFlush` stream one flushed message
+    /// at a time, as a receiver gets them.
+    DecodePushFlush,
     /// One reused `DecompressContext::with_dict`.
     DecompressDict,
 }
@@ -143,6 +146,7 @@ impl Op {
                 | Op::DecompressInto
                 | Op::DecodeStream
                 | Op::DecodePush
+                | Op::DecodePushFlush
                 | Op::DecompressDict
         )
     }
@@ -250,6 +254,7 @@ fn cases() -> Vec<Case> {
         case("dinto", "16k", DecompressInto, 3, Text, 16 * KIB),
         case("dstream", "4m", DecodeStream, 3, Text, 4 * MIB),
         case("dpush", "4m", DecodePush, 3, Text, 4 * MIB),
+        case("dpush", "256b_flush", DecodePushFlush, 3, Text, 256),
         case("dict_decode", "64b", DecompressDict, 3, Text, 64),
         case("dict_decode", "1k", DecompressDict, 3, Text, KIB),
         case("silesia_l-7", "256k_ctx", Context, -7, Silesia, 256 * KIB),
@@ -709,7 +714,34 @@ fn measure(
                 }
             })
         }
-    };
+    Op::DecodePushFlush => {
+        let mut enc = PushEncoder::new(level).unwrap();
+        let mut messages: Vec<Vec<u8>> = inputs
+            .iter()
+            .map(|i| {
+                let mut m = Vec::new();
+                enc.encode_to_vec(i, &mut m, EndOp::Flush).unwrap();
+                m
+            })
+            .collect();
+        enc.encode_to_vec(&[], messages.last_mut().unwrap(), EndOp::End)
+            .unwrap();
+        let mut dec = PushDecoder::new();
+        let mut out = Vec::new();
+        for m in &messages {
+            dec.decode_to_vec(m, &mut out).unwrap();
+        }
+        dec.finish().unwrap();
+        assert_eq!(out, inputs.concat(), "{}", case.section);
+        time(settings, || {
+            for m in &messages {
+                out.clear();
+                dec.decode_to_vec(black_box(m), &mut out).unwrap();
+                black_box(&out);
+            }
+        })
+    }
+};
     Measured {
         mb_s: bytes as f64 / ns * 1e3,
         ratio: case.op.encodes().then(|| bytes as f64 / out_bytes as f64),

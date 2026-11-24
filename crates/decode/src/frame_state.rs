@@ -11,7 +11,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::BlockDecodeWorkspace;
-use crate::decode_sequences_dispatch;
+use crate::decode_sequences_dispatch_room;
 use crate::exec::SequenceOutputScope;
 use crate::fast_vec::WILDCOPY_OVERLENGTH;
 use crate::literals::decode_literals_ws;
@@ -63,6 +63,15 @@ pub(crate) fn frame_header_size(prefix: &[u8]) -> usize {
     FRAME_PREFIX_SIZE + usize::from(!single_segment) + dict_id_size + fcs_size
 }
 
+/// Appends `data` to `history[..*len]`, over the room after it.
+fn append(history: &mut Vec<u8>, len: &mut usize, data: &[u8]) {
+    let start = *len;
+    let (over, past) = data.split_at(data.len().min(history.len() - start));
+    history[start..start + over.len()].copy_from_slice(over);
+    history.extend_from_slice(past);
+    *len += data.len();
+}
+
 /// What follows a block.
 pub(crate) enum AfterBlock {
     /// Another block header.
@@ -90,9 +99,12 @@ pub(crate) struct FrameState {
     /// Output of the current frame so far.
     frame_bytes: u64,
     dict: Option<Dictionary>,
-    /// Window history, then the current block's output from `block_start`.
-    /// Blocks decode straight into it, so their output needs no copy.
+    /// Window history, then the current block's output from `block_start`,
+    /// up to `history_len`. Blocks decode straight into it, so their output
+    /// needs no copy. Bytes past `history_len` are room earlier blocks
+    /// zeroed or wrote: kept, so a block zeroes only room no block had.
     history: Vec<u8>,
+    history_len: usize,
     block_start: usize,
     /// The current frame's window, in bytes.
     window_size: usize,
@@ -115,6 +127,7 @@ impl FrameState {
             frame_bytes: 0,
             dict,
             history: Vec::new(),
+            history_len: 0,
             block_start: 0,
             window_size: 0,
         }
@@ -134,14 +147,14 @@ impl FrameState {
         self.bytes_output = 0;
         self.frame_content_size = None;
         self.frame_bytes = 0;
-        self.history.clear();
+        self.history_len = 0;
         self.block_start = 0;
         self.window_size = 0;
     }
 
     /// The current block's output so far.
     pub(crate) fn block(&self) -> &[u8] {
-        &self.history[self.block_start..]
+        &self.history[self.block_start..self.history_len]
     }
 
     /// Starts a frame from its full header, magic included.
@@ -184,14 +197,14 @@ impl FrameState {
         // ends with an empty block skips the content size check.
 
         self.window_size = window_size;
-        self.history.clear();
+        self.history_len = 0;
         self.frame_content_size = header.frame_content_size;
         self.frame_bytes = 0;
         self.hasher = header.content_checksum.then(|| Xxh64State::new(0));
 
         if let Some(ref d) = self.dict {
             self.rep_offsets = *d.rep_offsets();
-            self.history.extend_from_slice(d.content());
+            append(&mut self.history, &mut self.history_len, d.content());
             self.seq_tables.reset_default();
             self.seq_tables.load_dict(d);
             self.ws.seq_tables_replaced();
@@ -210,7 +223,7 @@ impl FrameState {
             self.seq_tables.clear_repeat_flags();
             self.ws.reset_huffman_state();
         }
-        self.block_start = self.history.len();
+        self.block_start = self.history_len;
 
         // A known content size bounds the history, so reserve it once
         // instead of growing block by block: up to `HEADER_RESERVE`, and
@@ -220,9 +233,11 @@ impl FrameState {
             let fcs = usize::try_from(fcs.min(left)).unwrap_or(usize::MAX);
             let room = fcs
                 .min(HEADER_RESERVE)
-                .min(self.most_history() - self.history.len())
+                .min(self.most_history() - self.history_len)
                 + WILDCOPY_OVERLENGTH;
-            self.history.reserve_exact(room);
+            let target = self.history_len + room;
+            self.history
+                .reserve_exact(target.saturating_sub(self.history.len()));
         }
         Ok(())
     }
@@ -283,12 +298,12 @@ impl FrameState {
     /// doubling.
     pub(crate) fn start_block(&mut self) {
         let window = self.window_size;
-        if self.frame_bytes >= window as u64 && self.history.len() > 2 * window {
-            let start = self.history.len() - window;
-            self.history.copy_within(start.., 0);
-            self.history.truncate(window);
+        if self.frame_bytes >= window as u64 && self.history_len > 2 * window {
+            let start = self.history_len - window;
+            self.history.copy_within(start..self.history_len, 0);
+            self.history_len = window;
         }
-        self.block_start = self.history.len();
+        self.block_start = self.history_len;
         let needed = self.block_start + self.max_block() + WILDCOPY_OVERLENGTH;
         if needed > self.history.capacity() {
             let doubled = 2 * self.history.capacity();
@@ -311,32 +326,41 @@ impl FrameState {
                 None => doubled.min(self.most_history()),
             };
             self.history
-                .reserve_exact(target.max(needed) - self.history.len());
+                .reserve_exact(target.max(needed).saturating_sub(self.history.len()));
         }
     }
 
     /// Appends raw block bytes, which may arrive in pieces.
     pub(crate) fn extend_block(&mut self, data: &[u8]) {
-        self.history.extend_from_slice(data);
+        append(&mut self.history, &mut self.history_len, data);
+    }
+
+    /// Adds the next `size` bytes to the history and returns them. They
+    /// hold whatever the room held: the caller overwrites them.
+    fn grow(&mut self, size: usize) -> &mut [u8] {
+        let start = self.history_len;
+        let end = start + size;
+        if self.history.len() < end {
+            self.history.resize(end, 0);
+        }
+        self.history_len = end;
+        &mut self.history[start..end]
     }
 
     /// Makes room for a whole raw block and returns it to fill.
     #[cfg_attr(not(feature = "std"), allow(dead_code))]
     pub(crate) fn raw_block(&mut self, size: usize) -> &mut [u8] {
-        let start = self.history.len();
-        self.history.resize(start + size, 0);
-        &mut self.history[start..]
+        self.grow(size)
     }
 
     /// Appends `size` copies of `byte` as an RLE block's output.
     pub(crate) fn rle_block(&mut self, byte: u8, size: usize) {
-        let end = self.history.len() + size;
-        self.history.resize(end, byte);
+        self.grow(size).fill(byte);
     }
 
     /// Drops the current block's output, after an error.
     pub(crate) fn discard_block(&mut self) {
-        self.history.truncate(self.block_start);
+        self.history_len = self.block_start;
     }
 
     /// Decodes a compressed block body. On error, the block has no output.
@@ -371,7 +395,7 @@ impl FrameState {
                 return Err(DecompressError::CorruptSequences);
             }
             let lits = lits_at.resolve(block_data, &self.ws.literal_buf);
-            self.history.extend_from_slice(lits.as_slice());
+            append(&mut self.history, &mut self.history_len, lits.as_slice());
             return Ok(());
         }
 
@@ -387,16 +411,17 @@ impl FrameState {
             max_block_output,
             history: &[],
         };
-        decode_sequences_dispatch(
+        decode_sequences_dispatch_room(
             seq_data,
             num_sequences,
             &mut self.seq_tables,
             &mut self.rep_offsets,
             lits_at.resolve(block_data, &self.ws.literal_buf),
             &mut self.history,
+            &mut self.history_len,
             scope,
         )?;
-        if self.history.len() - self.block_start > self.block_size_max() {
+        if self.history_len - self.block_start > self.block_size_max() {
             return Err(DecompressError::BlockTooLarge);
         }
         Ok(())
@@ -421,7 +446,7 @@ impl FrameState {
     }
 
     fn account_block(&mut self, last: bool, empty: bool) -> Result<AfterBlock, DecompressError> {
-        let block = &self.history[self.block_start..];
+        let block = &self.history[self.block_start..self.history_len];
         if let Some(ref mut hasher) = self.hasher {
             hasher.update(block);
         }

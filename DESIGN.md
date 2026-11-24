@@ -170,7 +170,10 @@ decompress -> frame header -> per block:
 `DecompressContext` reuses the output buffer and the block workspace.
 `FrameDecoder<R: Read>` streams and caps the window at 128 MiB. Its history
 holds up to two windows of output and drops the older one when full, so the
-`memmove` happens once per window, not once per block.
+`memmove` happens once per window, not once per block. The room past the
+output that a block's copies may write into stays from block to block, so
+each byte of it is zeroed once, not once per block: a stream of small
+flushed blocks would otherwise zero 128 KiB for each.
 
 ### Sequence execution (`exec.rs`, `fast_vec.rs`)
 
