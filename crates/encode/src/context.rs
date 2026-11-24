@@ -690,6 +690,7 @@ impl CompressContext {
             } else {
                 let mut positions = PositionBase::new(params.window_log);
                 let mut offset = 0;
+                let mut skip = strategy::DfastSkip::for_input(input.len());
                 while offset < input.len() {
                     let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                     let is_last = offset + chunk_size >= input.len();
@@ -700,6 +701,7 @@ impl CompressContext {
                     }
                     let base = positions.base();
                     let src = &combined[base..];
+                    let written = output.written();
                     match params.strategy {
                         Strategy::Fast => {
                             fast::compress_fast_block(
@@ -717,7 +719,7 @@ impl CompressContext {
                                 src,
                                 start - base,
                                 end - base,
-                                &params,
+                                &skip.params(&params),
                                 &rep_offsets,
                                 &mut self.hash_table,
                                 &mut self.hash_long,
@@ -745,6 +747,7 @@ impl CompressContext {
                             strategy::block_policy(&params, input.len()),
                         )?;
                     }
+                    skip.record(chunk_size, output.written() - written);
                     offset += chunk_size;
                 }
             }
@@ -1032,6 +1035,7 @@ pub(crate) fn compress_core<S: OutputSink>(
                         hash_long,
                     );
 
+                    let mut skip = strategy::DfastSkip::for_input(input.len());
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let is_last = offset + chunk_size >= input.len();
@@ -1041,11 +1045,12 @@ pub(crate) fn compress_core<S: OutputSink>(
                             rebase::reduce_hash_table(hash_long, shift);
                         }
                         let base = positions.base();
+                        let written = output.written();
                         dfast::compress_dfast_block(
                             &combined[base..],
                             start - base,
                             end - base,
-                            &params,
+                            &skip.params(&params),
                             &rep_offsets,
                             hash_table,
                             hash_long,
@@ -1060,11 +1065,13 @@ pub(crate) fn compress_core<S: OutputSink>(
                             workspace,
                             strategy::block_policy(&params, input.len()),
                         )?;
+                        skip.record(chunk_size, output.written() - written);
                         offset += chunk_size;
                     }
                 } else {
                     hash_table.clear(hash_size);
                     hash_long.clear(long_size);
+                    let mut skip = strategy::DfastSkip::for_input(input.len());
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let block_end = offset + chunk_size;
@@ -1075,6 +1082,7 @@ pub(crate) fn compress_core<S: OutputSink>(
                             rebase::reduce_hash_table(hash_table, shift);
                             rebase::reduce_hash_table(hash_long, shift);
                         }
+                        let written = output.written();
                         if skip_match_search(&params, input.len(), block) {
                             block_encoder::encode_raw_block(block, is_last, output)?;
                         } else {
@@ -1083,7 +1091,7 @@ pub(crate) fn compress_core<S: OutputSink>(
                                 &input[base..],
                                 offset - base,
                                 block_end - base,
-                                &params,
+                                &skip.params(&params),
                                 &rep_offsets,
                                 hash_table,
                                 hash_long,
@@ -1099,6 +1107,7 @@ pub(crate) fn compress_core<S: OutputSink>(
                                 strategy::block_policy(&params, input.len()),
                             )?;
                         }
+                        skip.record(chunk_size, output.written() - written);
                         if let Some(c) = checksum.as_mut() {
                             c.update(block);
                         }

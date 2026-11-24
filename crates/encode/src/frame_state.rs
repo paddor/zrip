@@ -60,6 +60,8 @@ pub(crate) struct EncodeState {
     /// The tables are clean or hold this frame's positions. Set by the
     /// frame's first block that searches for matches.
     tables_ready: bool,
+    /// How well the frame's last block compressed, for DFast.
+    skip: strategy::DfastSkip,
     /// A copy of the last window that wrote the tables, while they still
     /// hold its positions and it was small: the next frame zeroes just the
     /// slots those positions went to instead of the whole tables.
@@ -100,6 +102,7 @@ impl EncodeState {
             window_buf,
             block_start,
             tables_ready: false,
+            skip: strategy::DfastSkip::for_input(usize::MAX),
             stale_window: Vec::new(),
             dict_hash: MatchTable::new(),
             combined: Vec::new(),
@@ -176,6 +179,7 @@ impl EncodeState {
             self.tables_ready = false;
         }
         self.first_block = self.dict.is_some();
+        self.skip = strategy::DfastSkip::for_input(usize::MAX);
         self.rep_offsets = match &self.dict {
             Some(d) => *d.rep_offsets(),
             None => [1, 4, 8],
@@ -326,6 +330,7 @@ impl EncodeState {
         let seed_dict = self.first_block && self.dict.is_some();
         let plen = self.block_start;
         out.reserve(self.buffered() + 32);
+        let written = out.len();
         let raw = {
             let chunk = &self.window_buf[plen..];
             crate::skip_match_search(&self.params, chunk.len(), chunk)
@@ -363,6 +368,7 @@ impl EncodeState {
                 }
             }
 
+            let block_params = self.skip.params(&self.params);
             #[cfg(feature = "ldm")]
             let used_ldm = if let Some(ref mut ldm) = self.ldm_state {
                 ldm.compress_block(
@@ -370,7 +376,7 @@ impl EncodeState {
                     plen,
                     self.window_buf.len(),
                     1usize << self.params.window_log,
-                    &self.params,
+                    &block_params,
                     &self.rep_offsets,
                     &mut self.hash_table,
                     &mut self.hash_long,
@@ -401,7 +407,7 @@ impl EncodeState {
                             &self.window_buf,
                             plen,
                             self.window_buf.len(),
-                            &self.params,
+                            &block_params,
                             &self.rep_offsets,
                             &mut self.hash_table,
                             &mut self.hash_long,
@@ -432,6 +438,8 @@ impl EncodeState {
                 )?;
             }
         }
+
+        self.skip.record(chunk.len(), out.len() - written);
 
         // Past two windows, keep only the last window and move the table
         // positions down by what was dropped.

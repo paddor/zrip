@@ -9,52 +9,52 @@ Linux VM on a 2018 Mac Mini, Intel Core i7-8700B @ 3.20GHz, performance governor
 <text x="22" y="188" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#E6EDF3" font-weight="bold" transform="rotate(270, 22, 188)">
 seconds / GB
 </text>
-<polyline fill="none" opacity="1" stroke="#21262D" stroke-width="1" points="70,233 680,233 "/>
-<text x="62" y="233" dy="0.5ex" text-anchor="end" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
+<polyline fill="none" opacity="1" stroke="#21262D" stroke-width="1" points="70,235 680,235 "/>
+<text x="62" y="235" dy="0.5ex" text-anchor="end" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
 10.0
 </text>
-<polyline fill="none" opacity="1" stroke="#21262D" stroke-width="1" points="70,153 680,153 "/>
-<text x="62" y="153" dy="0.5ex" text-anchor="end" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
+<polyline fill="none" opacity="1" stroke="#21262D" stroke-width="1" points="70,158 680,158 "/>
+<text x="62" y="158" dy="0.5ex" text-anchor="end" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
 20.0
 </text>
-<polyline fill="none" opacity="1" stroke="#21262D" stroke-width="1" points="70,74 680,74 "/>
-<text x="62" y="74" dy="0.5ex" text-anchor="end" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
+<polyline fill="none" opacity="1" stroke="#21262D" stroke-width="1" points="70,80 680,80 "/>
+<text x="62" y="80" dy="0.5ex" text-anchor="end" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
 30.0
 </text>
 <polyline fill="none" opacity="1" stroke="#30363D" stroke-width="2" points="70,313 680,313 "/>
-<rect x="90" y="293" width="72" height="20" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="90" y="260" width="72" height="33" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="90" y="255" width="72" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="90" y="294" width="72" height="19" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="90" y="262" width="72" height="32" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="90" y="257" width="72" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
 <text x="126" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 C zstd
 </text>
 <rect x="190" y="295" width="71" height="18" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="190" y="264" width="71" height="31" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="190" y="258" width="71" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="190" y="266" width="71" height="29" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="190" y="260" width="71" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <text x="226" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 zrip
 </text>
 <rect x="290" y="293" width="71" height="20" opacity="1" fill="#F59E0B" stroke="none"/>
-<rect x="290" y="260" width="71" height="33" opacity="1" fill="#C47D08" stroke="none"/>
-<rect x="290" y="254" width="71" height="6" opacity="1" fill="#F59E0B" stroke="none"/>
+<rect x="290" y="261" width="71" height="32" opacity="1" fill="#C47D08" stroke="none"/>
+<rect x="290" y="255" width="71" height="6" opacity="1" fill="#F59E0B" stroke="none"/>
 <text x="325" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 structured-zstd
 </text>
-<rect x="389" y="291" width="71" height="22" opacity="1" fill="#2DD4BF" stroke="none"/>
-<rect x="389" y="259" width="71" height="32" opacity="1" fill="#22A896" stroke="none"/>
-<rect x="389" y="253" width="71" height="6" opacity="1" fill="#2DD4BF" stroke="none"/>
+<rect x="389" y="293" width="71" height="20" opacity="1" fill="#2DD4BF" stroke="none"/>
+<rect x="389" y="261" width="71" height="32" opacity="1" fill="#22A896" stroke="none"/>
+<rect x="389" y="255" width="71" height="6" opacity="1" fill="#2DD4BF" stroke="none"/>
 <text x="425" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 mzstd
 </text>
-<rect x="489" y="287" width="71" height="26" opacity="1" fill="#FDE047" stroke="none"/>
-<rect x="489" y="258" width="71" height="29" opacity="1" fill="#CAB238" stroke="none"/>
-<rect x="489" y="243" width="71" height="15" opacity="1" fill="#FDE047" stroke="none"/>
+<rect x="489" y="288" width="71" height="25" opacity="1" fill="#FDE047" stroke="none"/>
+<rect x="489" y="259" width="71" height="29" opacity="1" fill="#CAB238" stroke="none"/>
+<rect x="489" y="245" width="71" height="14" opacity="1" fill="#FDE047" stroke="none"/>
 <text x="524" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 rusty_zstd
 </text>
-<rect x="589" y="162" width="71" height="151" opacity="1" fill="#4ADE80" stroke="none"/>
-<rect x="589" y="127" width="71" height="35" opacity="1" fill="#3AAF60" stroke="none"/>
-<rect x="589" y="96" width="71" height="31" opacity="1" fill="#4ADE80" stroke="none"/>
+<rect x="589" y="160" width="71" height="153" opacity="1" fill="#4ADE80" stroke="none"/>
+<rect x="589" y="126" width="71" height="34" opacity="1" fill="#3AAF60" stroke="none"/>
+<rect x="589" y="96" width="71" height="30" opacity="1" fill="#4ADE80" stroke="none"/>
 <text x="624" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 ruzstd
 </text>

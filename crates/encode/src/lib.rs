@@ -461,6 +461,7 @@ pub(crate) fn compress_frame(
                 let long_size = 1usize << params.hash_log;
                 let mut hash_short = MatchTable::zeroed(short_size);
                 let mut hash_long = MatchTable::zeroed(long_size);
+                let mut skip = strategy::DfastSkip::for_input(input.len());
                 while offset < input.len() {
                     let chunk_size = (input.len() - offset).min(block_size);
                     let block_end = offset + chunk_size;
@@ -479,9 +480,11 @@ pub(crate) fn compress_frame(
                     let src = &input[base..];
                     let (start, end) = (offset - base, block_end - base);
 
+                    let written = output.written();
                     if skip_match_search(params, input.len(), block) {
                         block_encoder::encode_raw_block(block, is_last, output)?;
                     } else {
+                        let block_params = skip.params(params);
                         #[cfg(feature = "ldm")]
                         let used_ldm = if let Some(ref mut ldm) = ldm_state {
                             ldm.compress_block(
@@ -489,7 +492,7 @@ pub(crate) fn compress_frame(
                                 start,
                                 end,
                                 window_size,
-                                params,
+                                &block_params,
                                 &rep_offsets,
                                 &mut hash_short,
                                 &mut hash_long,
@@ -507,7 +510,7 @@ pub(crate) fn compress_frame(
                                 src,
                                 start,
                                 end,
-                                params,
+                                &block_params,
                                 &rep_offsets,
                                 &mut hash_short,
                                 &mut hash_long,
@@ -524,6 +527,7 @@ pub(crate) fn compress_frame(
                             strategy::block_policy(params, input.len()),
                         )?;
                     }
+                    skip.record(chunk_size, output.written() - written);
                     offset = block_end;
                 }
             }
@@ -689,6 +693,7 @@ pub(crate) fn compress_with_dict_to(
                     );
                     let mut positions = PositionBase::new(params.window_log);
                     let mut offset = 0;
+                    let mut skip = strategy::DfastSkip::for_input(input.len());
                     while offset < input.len() {
                         let chunk_size = (input.len() - offset).min(MAX_BLOCK_SIZE);
                         let is_last = offset + chunk_size >= input.len();
@@ -698,11 +703,12 @@ pub(crate) fn compress_with_dict_to(
                             rebase::reduce_hash_table(&mut hash_long, shift);
                         }
                         let base = positions.base();
+                        let written = output.len();
                         dfast::compress_dfast_block(
                             &combined[base..],
                             start - base,
                             end - base,
-                            &params,
+                            &skip.params(&params),
                             &rep_offsets,
                             &mut hash_short,
                             &mut hash_long,
@@ -717,6 +723,7 @@ pub(crate) fn compress_with_dict_to(
                             &mut workspace,
                             strategy::block_policy(&params, input.len()),
                         )?;
+                        skip.record(chunk_size, output.len() - written);
                         offset += chunk_size;
                     }
                 }
@@ -768,6 +775,22 @@ mod tests {
         assert_eq!(strategy::src_log(3), 2);
         assert_eq!(strategy::src_log(1 << 10), 10);
         assert_eq!(strategy::src_log((1 << 10) + 1), 11);
+    }
+
+    #[test]
+    fn dfast_blocks_after_poorly_compressed_ones_search_sparsely() {
+        let params = strategy::level_params(3).unwrap();
+        let mut skip = strategy::DfastSkip::for_input(usize::MAX);
+        assert_eq!(skip.params(&params).search_strength, 8);
+        skip.record(100, 61);
+        assert_eq!(skip.params(&params).search_strength, 0);
+        skip.record(100, 60);
+        assert_eq!(skip.params(&params).search_strength, 8);
+
+        // Inputs of up to two blocks keep their search.
+        let mut skip = strategy::DfastSkip::for_input(256 * 1024);
+        skip.record(100, 100);
+        assert_eq!(skip.params(&params).search_strength, 8);
     }
 
     #[cfg(target_pointer_width = "64")]
