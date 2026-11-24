@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.26] - 2026-11-24
+
 ### Added
 
 - `Options::content_checksum(false)` leaves the content checksum out of

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-11-24
+
+- `Options::content_checksum(false)` leaves the content checksum out of
+  frames from `compress_opts`, `FrameEncoder::with_options` and
+  `PushEncoder::with_options`.
+- Levels 3 and 4 search as C zstd does on inputs over 256 KiB: the step
+  grows once every 256 bytes without a match, instead of after every miss
+  (L3) or every 8 bytes (L4). A block after one that compressed to more
+  than 60% of its size still grows it after every miss.
+
 ## [0.10.2] - 2026-11-24
 
 - `AdaptiveLevel` waits twice as long before retrying a step it reverts
