@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.8.19] - 2026-11-24
+
+- `FrameDecoder` and `PushDecoder` reserve at most 8 MiB of history at a
+  frame header, and no more than the output limit allows, instead of the
+  whole declared content size up to two windows. Past that, a frame grows
+  once to the rest of its content size, within two windows.
+- `PushDecoder` returns `NeedsOutput` once the output buffer is full,
+  before it parses the next block header.
+
 ## [0.8.18] - 2026-11-21
 
 - `decode_literals_ws` and `parse_sequence_tables_ws` dispatch to

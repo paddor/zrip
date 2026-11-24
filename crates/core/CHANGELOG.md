@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-24
+
+- `push::Status::NeedsOutput` says more output may follow, not that it is
+  pending: a push decoder returns it at a full buffer before it reads the
+  next block header.
+
 ## [0.14.0] - 2026-11-21
 
 - `fse::table_builder::build_decode_rows` spreads a distribution as C zstd
