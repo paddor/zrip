@@ -2,10 +2,24 @@
 
 ## [Unreleased]
 
+## [0.8.25] - 2026-11-24
+
 ### Changed
 
 - A step that `AdaptiveLevel` reverts again at the same level waits twice
   as long before its next try: 32, 64, 128, then 256 windows.
+
+### Fixed
+
+- `FrameDecoder` and `PushDecoder` reserved a frame's whole declared
+  content size, up to two windows, at its header, so a 14-byte header could
+  make them reserve 256 MiB. A header now reserves at most 8 MiB of
+  history, and no more than the output limit allows. Past that, a frame
+  grows once to the rest of its content size, within two windows.
+- `PushDecoder` parsed the next block header after filling the output
+  buffer, so a corrupt next block failed the call that filled it, and that
+  call's output was lost. It now returns `NeedsOutput` first.
+- The crate package included `npm/LICENSE` and `npm/README.md`.
 
 ## [0.8.24] - 2026-11-21
 

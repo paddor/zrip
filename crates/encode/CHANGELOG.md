@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-24
+
+- `AdaptiveLevel` waits twice as long before retrying a step it reverts
+  again at the same level: 32, 64, 128, then 256 windows.
+
 ## [0.10.1] - 2026-11-21
 
 - Depends on zrip-core 0.14.
