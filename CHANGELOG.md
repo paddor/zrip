@@ -16,6 +16,15 @@
   encode 5.5% faster. Output sizes move by at most a few bytes per input, in
   either direction.
 
+### Fixed
+
+- The decoders reject what C zstd 1.6.0 rejects. `Block_Maximum_Size`
+  bounds the output of every block, and in one-shot decoding the size of
+  raw and RLE blocks too, not only compressed ones. `FrameDecoder` and
+  `PushDecoder` reject empty compressed blocks, and frames whose last block
+  is empty but whose output does not match the declared content size. The
+  differential tests and fuzz targets now compare with C zstd 1.6.0.
+
 ## [0.8.26] - 2026-11-24
 
 ### Added

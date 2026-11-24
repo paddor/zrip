@@ -235,9 +235,6 @@ impl<R: Read> FrameDecoder<R> {
                 self.inner.read_exact(&mut byte)?;
                 self.frame.rle_block(byte[0], block_size);
             }
-            // An empty compressed block decodes to nothing, as in C zstd's
-            // streaming decoder.
-            BlockType::Compressed if block_size == 0 => {}
             BlockType::Compressed => {
                 self.read_buf.resize(block_size, 0);
                 self.inner.read_exact(&mut self.read_buf[..block_size])?;
@@ -247,8 +244,7 @@ impl<R: Read> FrameDecoder<R> {
             }
         }
 
-        let empty = block_size == 0 && block_type != BlockType::Rle;
-        self.state = match self.frame.end_block(last, empty).map_err(invalid)? {
+        self.state = match self.frame.end_block(last).map_err(invalid)? {
             AfterBlock::Block => State::BlockHeader,
             AfterBlock::Checksum => State::Checksum,
             AfterBlock::FrameEnd => State::FrameHeader,

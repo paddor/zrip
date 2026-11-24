@@ -438,10 +438,9 @@ fn decompress_frame_with_header(
 
         let block_size = block_header.block_size as usize;
 
-        // `Block_Maximum_Size`: the window, at most 128 KiB. As C zstd's
-        // one-shot decoder, only compressed blocks are held to it, and their
-        // compressed size, too. Raw and RLE blocks only have to fit the output.
-        if block_header.block_type == BlockType::Compressed && block_size > block_size_max {
+        // `Block_Maximum_Size`: the window, at most 128 KiB. It bounds every
+        // block: the compressed size, and the output of raw and RLE blocks.
+        if block_size > block_size_max {
             return Err(DecompressError::BlockTooLarge);
         }
 
@@ -507,6 +506,10 @@ fn decompress_frame_with_header(
                 })?;
                 offset += block_size;
             }
+        }
+        // As in C zstd, `Block_Maximum_Size` bounds every block's output.
+        if output.len() - block_output_start > block_size_max {
+            return Err(DecompressError::BlockTooLarge);
         }
         if let Some(ref mut hasher) = hasher {
             hasher.update(&output[block_output_start..]);
@@ -593,9 +596,10 @@ const ONE_SHOT_BLOCK_SLACK: usize = 32;
 /// `OutputTooSmall` past `max_output` bytes since `output_start`.
 ///
 /// As in C zstd's one-shot decoder, the literals may not exceed
-/// `block_size_max`, the frame's `Block_Maximum_Size`. The output may
-/// exceed it by [`ONE_SHOT_BLOCK_SLACK`] bytes, or by any amount when the
-/// literals stay outside the output buffer.
+/// `block_size_max`, the frame's `Block_Maximum_Size`. While decoding, the
+/// output may pass it by [`ONE_SHOT_BLOCK_SLACK`] bytes, or by any amount
+/// when the literals stay outside the output buffer; the frame loop then
+/// rejects the block.
 #[allow(clippy::too_many_arguments)]
 fn decode_compressed_block(
     data: &[u8],

@@ -193,8 +193,7 @@ impl FrameState {
         };
 
         // As in C zstd's streaming decoder, a content size over the output
-        // limit fails only once the output passes the limit: a frame that
-        // ends with an empty block skips the content size check.
+        // limit fails only once the output passes the limit.
 
         self.window_size = window_size;
         self.history_len = 0;
@@ -429,24 +428,20 @@ impl FrameState {
 
     /// Accounts for the block: checksum, limits, and the frame content size.
     /// On error, the block has no output.
-    ///
-    /// `empty` is a raw or compressed block of size 0. As C zstd's streaming
-    /// decoder, it decodes to nothing, and a frame that ends with one skips
-    /// the content size check.
-    pub(crate) fn end_block(
-        &mut self,
-        last: bool,
-        empty: bool,
-    ) -> Result<AfterBlock, DecompressError> {
-        let result = self.account_block(last, empty);
+    pub(crate) fn end_block(&mut self, last: bool) -> Result<AfterBlock, DecompressError> {
+        let result = self.account_block(last);
         if result.is_err() {
             self.discard_block();
         }
         result
     }
 
-    fn account_block(&mut self, last: bool, empty: bool) -> Result<AfterBlock, DecompressError> {
+    fn account_block(&mut self, last: bool) -> Result<AfterBlock, DecompressError> {
         let block = &self.history[self.block_start..self.history_len];
+        // As in C zstd, `Block_Maximum_Size` bounds every block's output.
+        if block.len() > self.block_size_max() {
+            return Err(DecompressError::BlockTooLarge);
+        }
         if let Some(ref mut hasher) = self.hasher {
             hasher.update(block);
         }
@@ -457,7 +452,7 @@ impl FrameState {
         }
         if let Some(fcs) = self.frame_content_size {
             let written = self.frame_bytes;
-            if written > fcs || last && !empty && written != fcs {
+            if written > fcs || last && written != fcs {
                 return Err(DecompressError::FrameSizeMismatch);
             }
         }
