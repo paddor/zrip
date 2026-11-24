@@ -260,7 +260,7 @@ impl Config {
             target: std::env::consts::ARCH.into(),
             hw_label: detect_hardware(),
             codecs: vec![
-                codec("C zstd", "libzstd v1.5.7 (C, unsafe)", 0x60a5fa, 0x4680c4),
+                codec("C zstd", "libzstd v1.6.0 (C, unsafe)", 0x60a5fa, 0x4680c4),
                 codec("zrip", "zrip (safe)", 0xf87171, 0xc45050),
                 codec(
                     "structured-zstd",

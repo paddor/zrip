@@ -50,9 +50,9 @@ dickens
 <text x="120" y="334" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.064516129032258" opacity="1" fill="#7D8590">
 10.2 MB
 </text>
-<rect x="200" y="287" width="16" height="15" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="200" y="266" width="16" height="21" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="200" y="260" width="16" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="200" y="285" width="16" height="17" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="200" y="265" width="16" height="20" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="200" y="259" width="16" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="216" y="285" width="17" height="17" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="216" y="263" width="17" height="22" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="216" y="257" width="17" height="6" opacity="1" fill="#F87171" stroke="none"/>
@@ -122,9 +122,9 @@ nci
 <text x="507" y="334" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.064516129032258" opacity="1" fill="#7D8590">
 33.6 MB
 </text>
-<rect x="588" y="284" width="16" height="18" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="588" y="253" width="16" height="31" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="588" y="247" width="16" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="588" y="283" width="16" height="19" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="588" y="252" width="16" height="31" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="588" y="246" width="16" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="604" y="287" width="16" height="15" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="604" y="253" width="16" height="34" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="604" y="247" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
@@ -187,8 +187,8 @@ osdb
 40
 </text>
 <polyline fill="none" opacity="1" stroke="#30363D" stroke-width="2" points="55,612 830,612 "/>
-<rect x="71" y="590" width="16" height="22" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="71" y="573" width="16" height="17" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="71" y="591" width="16" height="21" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="71" y="573" width="16" height="18" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="71" y="568" width="16" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="87" y="587" width="16" height="25" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="87" y="570" width="16" height="17" opacity="1" fill="#C45050" stroke="none"/>
@@ -235,8 +235,8 @@ samba
 <text x="249" y="644" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.064516129032258" opacity="1" fill="#7D8590">
 21.6 MB
 </text>
-<rect x="329" y="593" width="17" height="19" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="329" y="547" width="17" height="46" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="329" y="592" width="17" height="20" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="329" y="547" width="17" height="45" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="329" y="541" width="17" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="346" y="600" width="16" height="12" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="346" y="552" width="16" height="48" opacity="1" fill="#C45050" stroke="none"/>
@@ -259,9 +259,9 @@ sao
 <text x="378" y="644" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.064516129032258" opacity="1" fill="#7D8590">
 7.3 MB
 </text>
-<rect x="459" y="593" width="16" height="19" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="459" y="575" width="16" height="18" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="459" y="571" width="16" height="4" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="459" y="592" width="16" height="20" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="459" y="575" width="16" height="17" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="459" y="570" width="16" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="475" y="589" width="16" height="23" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="475" y="571" width="16" height="18" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="475" y="566" width="16" height="5" opacity="1" fill="#F87171" stroke="none"/>
@@ -333,7 +333,7 @@ xml
 </text>
 <rect x="190" y="668" width="12" height="12" opacity="1" fill="#60A5FA" stroke="none"/>
 <text x="208" y="674" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-libzstd v1.5.7 (C, <tspan fill="#F85149">unsafe</tspan>)
+libzstd v1.6.0 (C, <tspan fill="#F85149">unsafe</tspan>)
 </text>
 <rect x="190" y="688" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
 <text x="208" y="694" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">

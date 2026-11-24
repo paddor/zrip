@@ -102,9 +102,9 @@ Medium compressibility
 30.0
 </text>
 <polyline fill="none" opacity="1" stroke="#30363D" stroke-width="2" points="70,561 830,561 "/>
-<rect x="95" y="543" width="27" height="18" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="95" y="517" width="27" height="26" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="95" y="512" width="27" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="95" y="542" width="27" height="19" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="95" y="516" width="27" height="26" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="95" y="512" width="27" height="4" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="124" y="541" width="27" height="20" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="124" y="517" width="27" height="24" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="124" y="511" width="27" height="6" opacity="1" fill="#F87171" stroke="none"/>
@@ -120,9 +120,9 @@ Medium compressibility
 <text x="197" y="579" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#E6EDF3" font-weight="bold">
 Level -1
 </text>
-<rect x="349" y="542" width="27" height="19" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="349" y="520" width="27" height="22" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="349" y="514" width="27" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="349" y="541" width="27" height="20" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="349" y="519" width="27" height="22" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="349" y="513" width="27" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="378" y="539" width="27" height="22" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="378" y="517" width="27" height="22" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="378" y="510" width="27" height="7" opacity="1" fill="#F87171" stroke="none"/>
@@ -141,9 +141,9 @@ Level -1
 <text x="450" y="579" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#E6EDF3" font-weight="bold">
 Level 1
 </text>
-<rect x="602" y="527" width="27" height="34" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="602" y="507" width="27" height="20" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="602" y="500" width="27" height="7" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="602" y="525" width="27" height="36" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="602" y="506" width="27" height="19" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="602" y="499" width="27" height="7" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="631" y="521" width="27" height="40" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="631" y="501" width="27" height="20" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="631" y="493" width="27" height="8" opacity="1" fill="#F87171" stroke="none"/>
@@ -218,9 +218,9 @@ Level -1
 <text x="450" y="856" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#E6EDF3" font-weight="bold">
 Level 1
 </text>
-<rect x="602" y="797" width="27" height="41" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="602" y="765" width="27" height="32" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="602" y="759" width="27" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="602" y="796" width="27" height="42" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="602" y="764" width="27" height="32" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="602" y="758" width="27" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="631" y="813" width="27" height="25" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="631" y="780" width="27" height="33" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="631" y="774" width="27" height="6" opacity="1" fill="#F87171" stroke="none"/>
@@ -238,7 +238,7 @@ Level 3
 </text>
 <rect x="190" y="880" width="12" height="12" opacity="1" fill="#60A5FA" stroke="none"/>
 <text x="208" y="886" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-libzstd v1.5.7 (C, <tspan fill="#F85149">unsafe</tspan>)
+libzstd v1.6.0 (C, <tspan fill="#F85149">unsafe</tspan>)
 </text>
 <rect x="190" y="900" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
 <text x="208" y="906" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">

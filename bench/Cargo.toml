@@ -6,8 +6,8 @@ edition = "2024"
 
 [dependencies]
 zrip = { path = "..", features = ["dict_builder", "ldm"] }
-zstd = "0.13"
-zstd-safe = "7"
+zstd = "0.14.5"
+zstd-safe = "8.4.0"
 lz4rip = "0.12.3"
 ruzstd = "0.8"
 structured-zstd = "0.4.2"
