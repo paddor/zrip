@@ -177,9 +177,15 @@ flushed blocks would otherwise zero 128 KiB for each.
 
 ### Sequence execution (`exec.rs`, `fast_vec.rs`)
 
-One loop for all platforms, shaped after C zstd's
-`ZSTD_decompressSequences_body`. Sequences are decoded and executed in the
-same pass.
+One loop, shaped after C zstd's `ZSTD_decompressSequences_body`.
+Sequences are decoded and executed in the same pass.
+
+- **AArch64.** `exec/aarch64.rs` executes each sequence after decoding the
+  next, and its decoder holds the table rows of its states, loaded as soon
+  as the states are read. The copies then overlap the next sequence's bit
+  reads, and the bit position stays out of stack slots: 15-30% faster on
+  Apple M5. On x86_64 the same loop spills more and is 5-10% slower, so
+  x86_64 and the other targets keep the plain loop.
 
 - **Bit reader.** `SeqBits` carries the stream's unread bits as one number
   instead of C's container, fill and position. That frees two registers in a

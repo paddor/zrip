@@ -11,6 +11,11 @@ use zrip_core::error::DecompressError;
 use zrip_core::fse::FSE_SEQ_TABLE_MASK;
 use zrip_core::hint::{likely, unlikely};
 
+#[cfg(target_arch = "aarch64")]
+mod aarch64;
+#[cfg(target_arch = "aarch64")]
+use aarch64::run_sequences;
+
 /// Where a block's sequences may write and copy from.
 #[derive(Clone, Copy)]
 pub(crate) struct SequenceOutputScope<'a> {
@@ -259,6 +264,7 @@ pub(crate) fn decode_execute_sequences_room<const HAS_HISTORY: bool>(
 
 /// The decoding half of the sequence loop: the three FSE states and the
 /// repeat offsets.
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 struct SeqDecoder {
     ll_state: u32,
     of_state: u32,
@@ -266,6 +272,7 @@ struct SeqDecoder {
     rep: [u32; 3],
 }
 
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 impl SeqDecoder {
     /// Decodes one sequence as `(literal length, match length, offset)`,
     /// C zstd's `ZSTD_decodeSequence`. With `UPDATE` the states advance;
@@ -340,7 +347,9 @@ impl SeqDecoder {
 /// The sequence loop of [`decode_execute_sequences`], C zstd's
 /// `ZSTD_decompressSequences_body`: one word per sequence, a second one
 /// only when its extra bits could exhaust the first, and the last
-/// sequence peeled off so the loop never tests for it.
+/// sequence peeled off so the loop never tests for it. AArch64 has its own
+/// ([`aarch64`]).
+#[cfg(not(target_arch = "aarch64"))]
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn run_sequences<const NARROW: bool>(
