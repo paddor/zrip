@@ -1039,6 +1039,13 @@ fn dot(area: &Area<'_>, x: f64, y: f64, r: i32, color: RGBColor) -> Result<(), B
     Ok(())
 }
 
+/// `codecs` with zrip moved last, so its lines and points are drawn on top.
+fn zrip_on_top<'a>(codecs: &[&'a str]) -> Vec<&'a str> {
+    let mut order = codecs.to_vec();
+    order.sort_by_key(|c| *c == "zrip");
+    order
+}
+
 fn px(v: f64) -> i32 {
     v.round() as i32
 }
@@ -2162,7 +2169,7 @@ fn draw_scatter_panel(
     }
     line(area, x_left, p_bot, x_right, p_bot, AXIS, 2)?;
 
-    for codec in &cfg.scatter_codecs {
+    for codec in &zrip_on_top(&cfg.scatter_codecs) {
         let Some(style) = cfg.style(codec) else {
             continue;
         };
@@ -2459,7 +2466,7 @@ fn draw_decode_scatter_panel(
     };
 
     // C zstd's frames first, so each codec's own series lies on top.
-    for codec in &cfg.scatter_codecs {
+    for codec in &zrip_on_top(&cfg.scatter_codecs) {
         let Some(style) = cfg.style(codec) else {
             continue;
         };
@@ -2483,7 +2490,7 @@ fn draw_decode_scatter_panel(
             }
         }
     }
-    for codec in &cfg.scatter_codecs {
+    for codec in &zrip_on_top(&cfg.scatter_codecs) {
         let Some(style) = cfg.style(codec) else {
             continue;
         };
@@ -2605,7 +2612,7 @@ fn draw_small_encode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
             }
         }
         let mut end_labels = Vec::new();
-        for codec in &cfg.small_codecs {
+        for codec in &zrip_on_top(&cfg.small_codecs) {
             let rows = data.get(*codec).cloned().unwrap_or_default();
             if rows.is_empty() {
                 continue;
@@ -2839,7 +2846,7 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
                 )?;
             }
         }
-        for codec in &cfg.small_decode_codecs {
+        for codec in &zrip_on_top(&cfg.small_decode_codecs) {
             let rows = data.get(*codec).cloned().unwrap_or_default();
             if rows.is_empty() {
                 continue;
@@ -3137,7 +3144,10 @@ fn draw_sweep_level(
             10,
             TEXT,
         )?;
-        for ((base, _, dict), pts) in series.iter().zip(&lines) {
+        // zrip last, so its lines are drawn on top.
+        let mut order: Vec<_> = series.iter().zip(&lines).collect();
+        order.sort_by_key(|((base, _, _), _)| *base == "zrip");
+        for ((base, _, dict), pts) in order {
             let Some(style) = cfg.style(base) else {
                 continue;
             };
