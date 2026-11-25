@@ -118,13 +118,6 @@ pub(crate) enum LiteralsAt {
 }
 
 impl LiteralsAt {
-    /// Number of literals.
-    pub(crate) fn len(self) -> usize {
-        match self {
-            Self::Buffer(len) | Self::Block { len, .. } => len,
-        }
-    }
-
     /// The literals, given the block they were decoded from and the
     /// workspace's literal buffer.
     pub(crate) fn resolve<'a>(self, data: &'a [u8], buf: &'a [u8]) -> Literals<'a> {

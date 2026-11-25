@@ -135,6 +135,9 @@ enum Op {
     DecodePushFlush,
     /// One reused `DecompressContext::with_dict`.
     DecompressDict,
+    /// One reused `DecompressContext` on frames without a content size, as
+    /// stream encoders write them.
+    DecompressUnsized,
 }
 
 impl Op {
@@ -148,6 +151,7 @@ impl Op {
                 | Op::DecodePush
                 | Op::DecodePushFlush
                 | Op::DecompressDict
+                | Op::DecompressUnsized
         )
     }
 }
@@ -251,6 +255,7 @@ fn cases() -> Vec<Case> {
         case("dcontext", "64k_l-5", DecompressContext, -5, Text, 64 * KIB),
         case("dcontext", "64k_points", DecompressContext, 3, Points, 64 * KIB),
         case("dcontext", "1m_bin", DecompressContext, 1, Binary, MIB),
+        case("dcontext", "2k_unsized", DecompressUnsized, 3, Text, 2 * KIB),
         case("dinto", "16k", DecompressInto, 3, Text, 16 * KIB),
         case("dstream", "4m", DecodeStream, 3, Text, 4 * MIB),
         case("dpush", "4m", DecodePush, 3, Text, 4 * MIB),
@@ -714,34 +719,62 @@ fn measure(
                 }
             })
         }
-    Op::DecodePushFlush => {
-        let mut enc = PushEncoder::new(level).unwrap();
-        let mut messages: Vec<Vec<u8>> = inputs
-            .iter()
-            .map(|i| {
-                let mut m = Vec::new();
-                enc.encode_to_vec(i, &mut m, EndOp::Flush).unwrap();
-                m
-            })
-            .collect();
-        enc.encode_to_vec(&[], messages.last_mut().unwrap(), EndOp::End)
-            .unwrap();
-        let mut dec = PushDecoder::new();
-        let mut out = Vec::new();
-        for m in &messages {
-            dec.decode_to_vec(m, &mut out).unwrap();
-        }
-        dec.finish().unwrap();
-        assert_eq!(out, inputs.concat(), "{}", case.section);
-        time(settings, || {
-            for m in &messages {
-                out.clear();
-                dec.decode_to_vec(black_box(m), &mut out).unwrap();
-                black_box(&out);
+        Op::DecompressUnsized => {
+            let mut enc = PushEncoder::new(level).unwrap();
+            let frames: Vec<Vec<u8>> = inputs
+                .iter()
+                .map(|i| {
+                    let mut f = Vec::new();
+                    // Without the flush, the encoder knows the size.
+                    enc.encode_to_vec(i, &mut f, EndOp::Flush).unwrap();
+                    enc.encode_to_vec(&[], &mut f, EndOp::End).unwrap();
+                    assert_eq!(f[4] >> 5, 0, "the frame declares its size");
+                    f
+                })
+                .collect();
+            let mut dec = DecompressContext::new();
+            for (f, i) in frames.iter().zip(inputs) {
+                assert_eq!(
+                    &*dec.decompress(f).unwrap(),
+                    i.as_slice(),
+                    "{}",
+                    case.section
+                );
             }
-        })
-    }
-};
+            time(settings, || {
+                for f in &frames {
+                    black_box(dec.decompress(black_box(f)).unwrap());
+                }
+            })
+        }
+        Op::DecodePushFlush => {
+            let mut enc = PushEncoder::new(level).unwrap();
+            let mut messages: Vec<Vec<u8>> = inputs
+                .iter()
+                .map(|i| {
+                    let mut m = Vec::new();
+                    enc.encode_to_vec(i, &mut m, EndOp::Flush).unwrap();
+                    m
+                })
+                .collect();
+            enc.encode_to_vec(&[], messages.last_mut().unwrap(), EndOp::End)
+                .unwrap();
+            let mut dec = PushDecoder::new();
+            let mut out = Vec::new();
+            for m in &messages {
+                dec.decode_to_vec(m, &mut out).unwrap();
+            }
+            dec.finish().unwrap();
+            assert_eq!(out, inputs.concat(), "{}", case.section);
+            time(settings, || {
+                for m in &messages {
+                    out.clear();
+                    dec.decode_to_vec(black_box(m), &mut out).unwrap();
+                    black_box(&out);
+                }
+            })
+        }
+    };
     Measured {
         mb_s: bytes as f64 / ns * 1e3,
         ratio: case.op.encodes().then(|| bytes as f64 / out_bytes as f64),
