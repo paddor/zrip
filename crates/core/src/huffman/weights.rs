@@ -435,6 +435,25 @@ pub fn build_huffman_decode_table_into(
     table: &mut Vec<crate::huffman::HuffmanDecodeEntry>,
     all_weights: &mut Vec<u8>,
 ) -> Result<u8, DecompressError> {
+    build_huffman_decode_tables_into(weights, table, None, all_weights)
+}
+
+/// [`build_huffman_decode_table_into`] that also fills `rows`, when given,
+/// with the 16-bit rows of the 4-stream fast loop
+/// ([`build_row_table`](super::decode::build_row_table)). The rows are
+/// stored next to the entries, not built in a second pass over the table.
+/// `rows` gets as many entries as `table`.
+#[cfg(feature = "alloc")]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(target_feature = "avx2")),
+    inline(always)
+)]
+pub fn build_huffman_decode_tables_into(
+    weights: &[u8],
+    table: &mut Vec<crate::huffman::HuffmanDecodeEntry>,
+    rows: Option<&mut Vec<u16>>,
+    all_weights: &mut Vec<u8>,
+) -> Result<u8, DecompressError> {
     use crate::huffman::{HuffmanDecodeEntry, MAX_TABLE_LOG};
 
     if weights.is_empty() || weights.len() > 255 {
@@ -536,6 +555,33 @@ pub fn build_huffman_decode_table_into(
             *slot += 1;
         }
     }
+    match rows {
+        Some(rows) => {
+            if rows.len() != size {
+                rows.clear();
+                rows.resize(size, 0);
+            }
+            fill_table::<true>(table, rows, &rank_count, &sorted, max_w);
+        }
+        None => fill_table::<false>(table, &mut [], &rank_count, &sorted, max_w),
+    }
+
+    Ok(table_log as u8)
+}
+
+/// Fills `table`, and `rows` if `ROWS`, from the symbols sorted by weight:
+/// each nonzero weight takes one contiguous range.
+#[cfg(feature = "alloc")]
+#[inline(always)]
+fn fill_table<const ROWS: bool>(
+    table: &mut [crate::huffman::HuffmanDecodeEntry],
+    rows: &mut [u16],
+    rank_count: &[u32; 16],
+    sorted: &[u8; 256],
+    max_w: usize,
+) {
+    use crate::huffman::{HuffmanDecodeEntry, decode_row};
+
     let mut first = rank_count[0] as usize;
     let mut start = 0usize;
     for (w, &count) in rank_count.iter().enumerate().take(max_w + 1).skip(1) {
@@ -544,37 +590,46 @@ pub fn build_huffman_decode_table_into(
         first += count;
         let num_bits = (max_w - w) as u8;
         match w {
-            1 => fill_runs::<1>(table, start, symbols, num_bits),
-            2 => fill_runs::<2>(table, start, symbols, num_bits),
-            3 => fill_runs::<4>(table, start, symbols, num_bits),
-            4 => fill_runs::<8>(table, start, symbols, num_bits),
-            5 => fill_runs::<16>(table, start, symbols, num_bits),
+            1 => fill_runs::<1, ROWS>(table, rows, start, symbols, num_bits),
+            2 => fill_runs::<2, ROWS>(table, rows, start, symbols, num_bits),
+            3 => fill_runs::<4, ROWS>(table, rows, start, symbols, num_bits),
+            4 => fill_runs::<8, ROWS>(table, rows, start, symbols, num_bits),
+            5 => fill_runs::<16, ROWS>(table, rows, start, symbols, num_bits),
             _ => {
                 let entries = 1usize << (w - 1);
                 for (i, &symbol) in symbols.iter().enumerate() {
                     let pos = start + i * entries;
                     table[pos..pos + entries].fill(HuffmanDecodeEntry { symbol, num_bits });
+                    if ROWS {
+                        rows[pos..pos + entries].fill(decode_row(symbol, num_bits));
+                    }
                 }
             }
         }
         start += count << (w - 1);
     }
-
-    Ok(table_log as u8)
 }
 
-/// Writes `L` copies of each symbol's entry, one symbol after another,
-/// starting at `start`.
+/// Writes `L` copies of each symbol's entry, and of its row if `ROWS`, one
+/// symbol after another, starting at `start`.
 #[inline(always)]
-fn fill_runs<const L: usize>(
+fn fill_runs<const L: usize, const ROWS: bool>(
     table: &mut [crate::huffman::HuffmanDecodeEntry],
+    rows: &mut [u16],
     start: usize,
     symbols: &[u8],
     num_bits: u8,
 ) {
-    let run = &mut table[start..start + symbols.len() * L];
+    let end = start + symbols.len() * L;
+    let run = &mut table[start..end];
     for (chunk, &symbol) in run.as_chunks_mut::<L>().0.iter_mut().zip(symbols) {
         *chunk = [crate::huffman::HuffmanDecodeEntry { symbol, num_bits }; L];
+    }
+    if ROWS {
+        let run = &mut rows[start..end];
+        for (chunk, &symbol) in run.as_chunks_mut::<L>().0.iter_mut().zip(symbols) {
+            *chunk = [crate::huffman::decode_row(symbol, num_bits); L];
+        }
     }
 }
 
@@ -745,6 +800,7 @@ mod tests {
             seed
         };
         let (mut table, mut all) = (Vec::new(), Vec::new());
+        let (mut rows, mut expected_rows) = (Vec::new(), Vec::new());
         for _ in 0..3000 {
             // A random complete prefix code with 2 to 256 leaves, at most 11
             // bits deep, over random symbols. The highest symbol's weight is
@@ -777,6 +833,16 @@ mod tests {
                 t[..n].iter().map(|e| (e.symbol, e.num_bits)).collect()
             };
             assert_eq!(fields(&table), fields(&expected), "{weights:?}");
+
+            // The rows stored with the table are the rows of the table.
+            let log =
+                build_huffman_decode_tables_into(&weights, &mut table, Some(&mut rows), &mut all)
+                    .unwrap();
+            assert_eq!(log, expected_log);
+            assert_eq!(fields(&table), fields(&expected), "{weights:?}");
+            crate::huffman::decode::build_row_table(&expected, log, &mut expected_rows).unwrap();
+            assert_eq!(rows.len(), table.len());
+            assert_eq!(rows[..n], expected_rows[..n], "{weights:?}");
         }
     }
 

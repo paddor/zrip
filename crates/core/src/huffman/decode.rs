@@ -10,8 +10,8 @@ use super::primitives;
 use crate::bitstream::reader_reverse::ReverseBitReader;
 use crate::error::DecompressError;
 use crate::huffman::{
-    DECODE_TABLE_SIZE, FAST_TABLE_LOG, HuffmanDecodeEntry, MAX_TABLE_LOG, PAIR_TABLE_LOG,
-    PAIR_TABLE_SIZE,
+    DECODE_TABLE_SIZE, FAST_LOOP_ROWS, FAST_TABLE_LOG, HuffmanDecodeEntry, MAX_TABLE_LOG,
+    PAIR_TABLE_LOG, PAIR_TABLE_SIZE,
 };
 
 /// Decodes `output_size` symbols from one reverse stream into a new
@@ -112,7 +112,7 @@ pub fn decode_4_streams(
         table,
         table_log,
         None,
-        &rows,
+        rows_of(rows.as_ref()),
         data,
         output_size,
         &mut output,
@@ -131,11 +131,21 @@ pub fn decode_4_streams_into(
     output: &mut Vec<u8>,
 ) -> Result<(), DecompressError> {
     let rows = row_table_for(table, table_log);
-    decode_4_streams_with(table, table_log, None, &rows, data, output_size, output)
+    decode_4_streams_with(
+        table,
+        table_log,
+        None,
+        rows_of(rows.as_ref()),
+        data,
+        output_size,
+        output,
+    )
 }
 
 /// [`decode_4_streams_into`] with the rows from [`build_row_table`] for the
 /// same tree, which callers that decode many sections keep with the table.
+/// Where the fast loop reads entries ([`FAST_LOOP_ROWS`] is false), `rows`
+/// is not read and may be empty.
 #[inline(always)]
 pub fn decode_4_streams_rows_into(
     table: &[HuffmanDecodeEntry],
@@ -145,9 +155,6 @@ pub fn decode_4_streams_rows_into(
     output_size: usize,
     output: &mut Vec<u8>,
 ) -> Result<(), DecompressError> {
-    let rows: &[u16; DECODE_TABLE_SIZE] = rows
-        .first_chunk()
-        .ok_or(DecompressError::BadHuffmanStream)?;
     decode_4_streams_with(table, table_log, None, rows, data, output_size, output)
 }
 
@@ -181,14 +188,15 @@ pub fn decode_4_streams_pairs_into(
         table,
         table_log,
         Some(pairs),
-        &rows,
+        rows_of(rows.as_ref()),
         data,
         output_size,
         output,
     )
 }
 
-/// [`decode_4_streams_pairs_into`] with the rows from [`build_row_table`].
+/// [`decode_4_streams_pairs_into`] with the rows from [`build_row_table`],
+/// as [`decode_4_streams_rows_into`].
 // Out of line in builds that do not dispatch: pairs take sections of at
 // least `PAIR_MIN_LITERALS`, where a call costs nothing, and their fast loop
 // runs 7% slower inlined into the literals decoder.
@@ -210,9 +218,6 @@ pub fn decode_4_streams_pairs_rows_into(
     output: &mut Vec<u8>,
 ) -> Result<(), DecompressError> {
     let pairs: &[u32; PAIR_TABLE_SIZE] = pairs
-        .first_chunk()
-        .ok_or(DecompressError::BadHuffmanStream)?;
-    let rows: &[u16; DECODE_TABLE_SIZE] = rows
         .first_chunk()
         .ok_or(DecompressError::BadHuffmanStream)?;
     decode_4_streams_with(
@@ -284,6 +289,9 @@ pub fn prefers_pairs(literals: usize, compressed: usize) -> bool {
 /// shifts its container by the whole row, and the symbol in the high byte.
 /// A lookup is then one 16-bit load with its index scaled in the address,
 /// not two byte loads: 13-18% faster on high-entropy literals on Apple M5.
+/// For a table built from weights,
+/// [`build_huffman_decode_tables_into`](super::weights::build_huffman_decode_tables_into)
+/// fills the rows without a second pass.
 pub fn build_row_table(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
@@ -301,12 +309,16 @@ pub fn build_row_table(
 /// The fast-loop row of `entry` ([`build_row_table`]).
 #[inline(always)]
 const fn row_of(entry: HuffmanDecodeEntry) -> u16 {
-    entry.num_bits as u16 | ((entry.symbol as u16) << 8)
+    super::decode_row(entry.symbol, entry.num_bits)
 }
 
-/// The rows of `table` for a caller without cached ones: built only for
-/// tables the fast loop reads, at most [`FAST_TABLE_LOG`] bits.
-fn row_table_for(table: &[HuffmanDecodeEntry], table_log: u8) -> [u16; DECODE_TABLE_SIZE] {
+/// The rows of `table` for a caller without cached ones, on targets whose
+/// fast loop reads them ([`FAST_LOOP_ROWS`]): built only for tables the
+/// fast loop reads, at most [`FAST_TABLE_LOG`] bits.
+fn row_table_for(table: &[HuffmanDecodeEntry], table_log: u8) -> Option<[u16; DECODE_TABLE_SIZE]> {
+    if !FAST_LOOP_ROWS {
+        return None;
+    }
     let mut rows = [0u16; DECODE_TABLE_SIZE];
     if table_log <= FAST_TABLE_LOG {
         let n = (1usize << table_log).min(table.len());
@@ -314,7 +326,14 @@ fn row_table_for(table: &[HuffmanDecodeEntry], table_log: u8) -> [u16; DECODE_TA
             *row = row_of(*entry);
         }
     }
-    rows
+    Some(rows)
+}
+
+/// The rows from [`row_table_for`], empty where the fast loop reads
+/// entries.
+#[inline(always)]
+fn rows_of(rows: Option<&[u16; DECODE_TABLE_SIZE]>) -> &[u16] {
+    rows.map_or(&[], |rows| rows)
 }
 
 /// Packs a two-symbol row: the symbols in the low 16 bits, first one in the
@@ -367,7 +386,7 @@ fn decode_4_streams_with(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
     pairs: Option<&[u32; PAIR_TABLE_SIZE]>,
-    rows: &[u16; DECODE_TABLE_SIZE],
+    rows: &[u16],
     data: &[u8],
     output_size: usize,
     output: &mut Vec<u8>,
@@ -401,7 +420,7 @@ fn decode_4_streams_core_safe(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
     pairs: Option<&[u32; PAIR_TABLE_SIZE]>,
-    rows: &[u16; DECODE_TABLE_SIZE],
+    rows: &[u16],
     data: &[u8],
     output_size: usize,
     output: &mut [u8],

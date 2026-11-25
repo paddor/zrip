@@ -215,8 +215,15 @@ at most five bits use a two-symbol table, like C zstd's `HUF_DEltX2`.
 Otherwise the fast loop reads 16-bit rows, as C's `HUF_DEltX1`: the code
 length in the low byte, so the bit container shifts by the whole row, and
 the symbol in the high byte. A lookup is one load with the index scaled in
-the address. The rows are built once per table, next to it in the decode
-workspace.
+the address. The table build stores each row next to its entry, so a new
+table costs no second pass. Only tables from a dictionary or built for one
+stream get their rows from the entries, once per table.
+
+x86 reads the table entries instead (`FAST_LOOP_ROWS`). With rows, LLVM
+kept the four stream positions on the stack, so each reload waited on a
+store forward, and JSON literals decoded up to 9% slower on an i7-8700B.
+Decoding the streams one after another, not interleaved, freed the
+registers but was 5% slower still.
 
 ## Platform dispatch
 

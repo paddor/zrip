@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- x86 decodes as fast as in 0.8.26 again. 0.8.27 decoded one-shot JSON
+  messages of 1.8-116 KB 3-21% slower: it built the 16-bit rows of each new
+  Huffman table in a second pass, and on x86 its row loop kept the stream
+  positions on the stack. The table build now stores the rows, and x86
+  reads table entries.
+
 ## [0.8.27] - 2026-11-25
 
 ### Changed

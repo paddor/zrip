@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- A new Huffman table gets its fast-loop rows from the table build instead
+  of a second pass over the table, and only for 4-stream sections. On x86
+  the fast loop reads table entries again, as in 0.8.19. One-shot decoding
+  of 1.8-116 KB JSON on x86 is 3-18% faster than in 0.8.20.
+
 ## [0.8.20] - 2026-11-25
 
 - `PushDecoder` and `FrameDecoder` keep their output room from block to
