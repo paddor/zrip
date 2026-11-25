@@ -49,8 +49,8 @@ and window logs to the input size, so tables stay cheap to clear.
 
 | Level | Strategy | Hash table | Window | Min match | Target | Search strength |
 |------:|:---------|:-----------|:-------|:---------:|-------:|----------------:|
-| -7 | Fast | 32 KiB | 512 KiB | 8 | 2 | 3 |
-| -6 | Fast | 32 KiB | 512 KiB | 8 | 5 | 3 |
+| -7 | Fast | 32 KiB | 512 KiB | 8 | 2 | 4 |
+| -6 | Fast | 32 KiB | 512 KiB | 8 | 5 | 4 |
 | -5 | Fast | 32 KiB | 512 KiB | 8 | 4 | 4 |
 | -4 | Fast | 32 KiB | 512 KiB | 8 | 2 | 4 |
 | -3 | Fast | 64 KiB | 512 KiB | 8 | 2 | 4 |
@@ -59,13 +59,16 @@ and window logs to the input size, so tables stay cheap to clear.
 | 1 | Fast | 64 KiB | 512 KiB | 7 | 1 | 4 |
 | 2 | Fast | 128 KiB | 1 MiB | 7 | 1 | 4 |
 | 3 | DFast | 512 + 256 KiB | 2 MiB | 5 | 1 | 0 |
-| 4 | DFast | 2x 1 MiB | 16 MiB | 5 | 1 | 3 |
+| 4 | DFast | 1 + 2 MiB | 16 MiB | 5 | 1 | 3 |
 
 `Target` sets the search step. The step grows by one every
 `1 << search_strength` bytes without a match.
 
 - **L-7** aims at LZ4: raw literals and matches of eight bytes or more, so
-  frames hold few sequences, no Huffman tables, and decode fast.
+  frames hold few sequences, no Huffman tables, and decode fast. Matches are
+  its only compression, so it grows its step slower than C's negative
+  levels. A 64 KiB table gained as much ratio, but missed the cache so often
+  that L-6 encoded highly compressible data faster.
 - **L-6 to L-3** hash 8 bytes at shorter steps than C's negative levels.
   Longer matches leave fewer bytes to Huffman coding, the costly part. L-3
   searches as L-4 does, in a table twice the size.
@@ -106,8 +109,12 @@ also tries the long table at the next position.
   with under 64 sequences use predefined tables.
 - **Literals.** Huffman with treeless reuse of the previous table, four
   streams from 1 KiB up. Literals stay raw when Huffman cannot win: order-0
-  entropy above 7.97 bits per byte, or above 6.25 at L-6 to L-1. Long literal
-  runs are judged on samples, as in C zstd.
+  entropy above 7.97 bits per byte, or above 6.25 at L-6 to L-1. Faster
+  levels leave more literals, and Huffman literals decode slower than
+  matches, so in blocks with matches over an eighth or more L-6 to L-3
+  keep literals raw above 5.1, 5.25, 5.4 and 6 bits per byte. Each level
+  then decodes faster than the next. Long literal runs are judged on
+  samples, as in C zstd.
 - **Small inputs.** Building a Huffman table costs a few microseconds at any
   size. So L-6 to L-1 keep literals raw up to a per-level size (2 KiB at L-1
   to 12 KiB at L-6) and search denser to make up for it.

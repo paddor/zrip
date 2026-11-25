@@ -63,7 +63,8 @@ pub struct LevelParams {
     pub min_match: u32,
     /// Fast only: the search step starts at `target_length + 1` bytes, at
     /// least 2, as in C zstd. Above 1, with `min_match` 5 or more, it also
-    /// keeps dense literals raw.
+    /// keeps dense literals raw: over 6.25 bits per byte, and over 5 to 6
+    /// bits in blocks with matches at L-6 to L-3 (see `block_policy`).
     pub target_length: u32,
     /// The search step grows by one every 2^`search_strength` bytes
     /// without a match. C zstd fixes it at 8. A DFast block after one that
@@ -245,6 +246,27 @@ pub(crate) struct BlockPolicy {
     /// Literals whose sampled order-0 entropy exceeds this many bits per byte
     /// (8.8 fixed point) stay raw. `u32::MAX` disables the check.
     pub max_literal_entropy_fp8: u32,
+    /// The same limit for a block whose matches cover an eighth of it or
+    /// more. See [`BlockPolicy::for_matches`].
+    pub max_matched_literal_entropy_fp8: u32,
+}
+
+impl BlockPolicy {
+    /// The policy for a block of `block_len` bytes whose matches cover
+    /// `total_match` of them: a block with matches over an eighth or more
+    /// takes the limit for such blocks as its literal limit.
+    ///
+    /// A block that is almost all literals only shrinks through Huffman
+    /// coding, so it keeps the higher limit.
+    pub(crate) fn for_matches(self, block_len: usize, total_match: usize) -> Self {
+        if total_match < block_len / 8 {
+            return self;
+        }
+        Self {
+            max_literal_entropy_fp8: self.max_matched_literal_entropy_fp8,
+            ..self
+        }
+    }
 }
 
 /// Encoding choices for a block of an input of `input_len` bytes.
@@ -253,18 +275,33 @@ pub(crate) struct BlockPolicy {
 /// low-compressibility data it costs more time than it saves space. L-6 to
 /// L-1 keep literals above 6.25 bits per byte raw. Small inputs keep all
 /// literals raw (see `raw_literals_limit`), and L-7 keeps them raw always.
+///
+/// The faster a level searches, the more literals it leaves, and Huffman
+/// literals decode slower than matches. So in blocks with matches, L-6 to
+/// L-3 keep literals raw from a limit that rises with the level: 5.1, 5.25,
+/// 5.4 and 6 bits per byte. Each level then decodes faster than the next,
+/// at a few percent of ratio on text-like data. L-4 and L-3 search alike
+/// and differ in their table, which tells them apart here.
 pub(crate) fn block_policy(params: &LevelParams, input_len: usize) -> BlockPolicy {
-    let max_literal_entropy_fp8 = if params.strategy == Strategy::Fast && params.min_match >= 5 {
-        match params.target_length {
-            0 | 1 => u32::MAX,
-            _ => 6 * 256 + 64,
-        }
-    } else {
-        u32::MAX
-    };
+    const DENSE: u32 = 6 * 256 + 64;
+    let (max_literal_entropy_fp8, max_matched_literal_entropy_fp8) =
+        if params.strategy == Strategy::Fast && params.min_match >= 5 {
+            match params.target_length {
+                0 | 1 => (u32::MAX, u32::MAX),
+                // L-2 and L-1, which hash seven bytes.
+                _ if params.min_match < 8 => (DENSE, DENSE),
+                2 | 3 if params.hash_log > 13 => (DENSE, 6 * 256),
+                2 | 3 => (DENSE, 5 * 256 + 102),
+                4 => (DENSE, 5 * 256 + 64),
+                _ => (DENSE, 5 * 256 + 26),
+            }
+        } else {
+            (u32::MAX, u32::MAX)
+        };
     BlockPolicy {
         custom_tables: use_custom_sequence_tables(params, input_len),
         max_literal_entropy_fp8,
+        max_matched_literal_entropy_fp8,
     }
 }
 
@@ -281,10 +318,11 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         // confirms eight bytes), so frames decode with few sequences. Blocks
         // that are almost all literals try Huffman literals instead, so
         // low-compressibility data still shrinks a little. It steps 3 bytes
-        // and grows the step every 8 bytes without a match: text with few
-        // long matches leaves almost all bytes to Huffman coding anyway, so a
-        // denser search only cost time there. L-8, a separate level before,
-        // runs as L-7.
+        // and grows the step every 16 bytes without a match. Matches are its
+        // only compression, so it searches denser than L-6, in a table of
+        // the same size: a table twice the size gained as much ratio but
+        // missed the cache so often that L-6 encoded highly compressible
+        // data faster. L-8, a separate level before, runs as L-7.
         -8 | -7 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
@@ -293,7 +331,7 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             search_log: 0,
             min_match: 8,
             target_length: 2,
-            search_strength: 3,
+            search_strength: 4,
             force_raw_literals: true,
             #[cfg(feature = "ldm")]
             ldm_params: None,
@@ -301,8 +339,8 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
         // L-6 to L-3 hash and confirm 8 bytes. With Huffman literals, longer
         // matches at short steps beat shorter matches at long steps on both
         // ratio and speed, as fewer bytes are left to code as literals and
-        // frames decode with fewer sequences. The step grows every 8 or 16
-        // bytes without a match, so sparse regions cost few probes.
+        // frames decode with fewer sequences. The step grows every 16 bytes
+        // without a match, so sparse regions cost few probes.
         -6 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
@@ -311,7 +349,7 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             search_log: 0,
             min_match: 8,
             target_length: 5,
-            search_strength: 3,
+            search_strength: 4,
             force_raw_literals: false,
             #[cfg(feature = "ldm")]
             ldm_params: None,
@@ -435,13 +473,15 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             #[cfg(feature = "ldm")]
             ldm_params: None,
         },
-        // C zstd's level 4 tables and search, as at L3, with a 16 MiB window:
-        // smaller output than C's 2 MiB at the same speed.
+        // C zstd's level 4 search with a 16 MiB window, which gives smaller
+        // output than C's 2 MiB at the same speed, and a short table twice
+        // C's size. With C's, L4 encoded highly compressible data faster
+        // than L3.
         4 => LevelParams {
             strategy: Strategy::DFast,
             window_log: 24,
             hash_log: 18,
-            chain_log: 18,
+            chain_log: 19,
             search_log: 0,
             min_match: 5,
             target_length: 1,
