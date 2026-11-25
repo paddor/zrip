@@ -108,6 +108,9 @@ pub(crate) struct FrameState {
     block_start: usize,
     /// The current frame's window, in bytes.
     window_size: usize,
+    /// Set once a block wrote more than its first room: later blocks get
+    /// all the room they may use.
+    full_room: bool,
 }
 
 impl FrameState {
@@ -130,6 +133,7 @@ impl FrameState {
             history_len: 0,
             block_start: 0,
             window_size: 0,
+            full_room: false,
         }
     }
 
@@ -150,6 +154,7 @@ impl FrameState {
         self.history_len = 0;
         self.block_start = 0;
         self.window_size = 0;
+        self.full_room = false;
     }
 
     /// The current block's output so far.
@@ -262,14 +267,14 @@ impl FrameState {
         self.window_size.min(MAX_BLOCK_SIZE)
     }
 
-    /// The most a block may write: 128 KiB, or less once a known content
-    /// size is nearly reached.
+    /// The most a block may write: `Block_Maximum_Size`, or less once a
+    /// known content size is nearly reached. A small window caps it, so a
+    /// stream on a 64 KiB window reserves and zeroes 64 KiB, not 128.
     fn max_block(&self) -> usize {
+        let max = self.block_size_max();
         match self.frame_content_size {
-            Some(fcs) => fcs
-                .saturating_sub(self.frame_bytes)
-                .min(MAX_BLOCK_SIZE as u64) as usize,
-            None => MAX_BLOCK_SIZE,
+            Some(fcs) => fcs.saturating_sub(self.frame_bytes).min(max as u64) as usize,
+            None => max,
         }
     }
 
@@ -278,24 +283,20 @@ impl FrameState {
     fn most_history(&self) -> usize {
         let dict_len = self.dict.as_ref().map_or(0, |d| d.content().len());
         (2 * self.window_size).max(dict_len + self.window_size)
-            + MAX_BLOCK_SIZE
+            + self.block_size_max()
             + WILDCOPY_OVERLENGTH
     }
 
-    /// Starts a block. The previous block's output must be delivered: this
-    /// may drop history older than a window.
+    /// Starts a block that writes `room` bytes: a raw or RLE block's size.
+    /// A compressed block passes 0 and sizes its room when it decodes. The
+    /// previous block's output must be delivered: this may drop history
+    /// older than a window.
     ///
     /// The history keeps up to two windows and then drops the older one, so
     /// the `memmove` happens once per window of output, not once per block.
     /// Dictionary content stays reachable until the frame has produced a full
-    /// window. Capacity grows like `Vec`, with the output, but stops at the
-    /// most the history can hold. Plain doubling would reserve four windows.
-    ///
-    /// A known content size bounds the history too. Past what its header
-    /// reserved (`HEADER_RESERVE`), a frame grows once to the rest of it,
-    /// within the output limit: one copy of the history, not one per
-    /// doubling.
-    pub(crate) fn start_block(&mut self) {
+    /// window.
+    pub(crate) fn start_block(&mut self, room: usize) {
         let window = self.window_size;
         if self.frame_bytes >= window as u64 && self.history_len > 2 * window {
             let start = self.history_len - window;
@@ -303,7 +304,20 @@ impl FrameState {
             self.history_len = window;
         }
         self.block_start = self.history_len;
-        let needed = self.block_start + self.max_block() + WILDCOPY_OVERLENGTH;
+        self.reserve_block(room);
+    }
+
+    /// Reserves `room` bytes of block output, plus copy slack.
+    ///
+    /// Capacity grows like `Vec`, with the output, but stops at the most the
+    /// history can hold. Plain doubling would reserve four windows.
+    ///
+    /// A known content size bounds the history too. Past what its header
+    /// reserved (`HEADER_RESERVE`), a frame grows once to the rest of it,
+    /// within the output limit: one copy of the history, not one per
+    /// doubling.
+    fn reserve_block(&mut self, room: usize) {
+        let needed = self.block_start + room + WILDCOPY_OVERLENGTH;
         if needed > self.history.capacity() {
             let doubled = 2 * self.history.capacity();
             let target = match self.frame_content_size {
@@ -380,7 +394,7 @@ impl FrameState {
         } else {
             0
         };
-        let max_block_output = self.max_block();
+        let max_block = self.max_block();
 
         let block_size_max = self.block_size_max();
         let (lit_consumed, lits_at) = decode_literals_ws(block_data, &mut self.ws, block_size_max)?;
@@ -393,6 +407,7 @@ impl FrameState {
             if remaining.len() != seq_count_size {
                 return Err(DecompressError::CorruptSequences);
             }
+            self.reserve_block(lits_at.len());
             let lits = lits_at.resolve(block_data, &self.ws.literal_buf);
             append(&mut self.history, &mut self.history_len, lits.as_slice());
             return Ok(());
@@ -403,23 +418,58 @@ impl FrameState {
             parse_sequence_tables_ws(table_data, &mut self.seq_tables, &mut self.ws)?;
         let seq_data = &table_data[tables_consumed..];
 
-        // The block's output stays within one block, so `end_block` reports a
-        // crossed output limit as `OutputTooSmall`.
-        let scope = SequenceOutputScope {
-            output_base,
-            max_block_output,
-            history: &[],
+        // The sequence loop zeroes the block's room up front. As in one-shot
+        // decoding, the room starts at a guess from the block, or the room
+        // earlier blocks left if that is more, so a fresh decoder on small
+        // blocks zeroes and reserves little. A block that writes more starts
+        // over with all the room it may use, and so do the stream's later
+        // blocks: each one would start over too while the history grows,
+        // which made a new decoder up to 18% slower on 1000-byte matches.
+        let left = self
+            .history
+            .len()
+            .saturating_sub(self.block_start + WILDCOPY_OVERLENGTH);
+        let first_rep_offsets = self.rep_offsets;
+        let mut max_block_output = if self.full_room {
+            max_block
+        } else {
+            seq_data
+                .len()
+                .saturating_mul(crate::ROOM_PER_SEQUENCE_BYTE)
+                .saturating_add(lits_at.len())
+                .max(left)
+                .min(max_block)
         };
-        decode_sequences_dispatch_room(
-            seq_data,
-            num_sequences,
-            &mut self.seq_tables,
-            &mut self.rep_offsets,
-            lits_at.resolve(block_data, &self.ws.literal_buf),
-            &mut self.history,
-            &mut self.history_len,
-            scope,
-        )?;
+        loop {
+            self.reserve_block(max_block_output);
+            // The block's output stays within one block, so `end_block`
+            // reports a crossed output limit as `OutputTooSmall`.
+            let scope = SequenceOutputScope {
+                output_base,
+                max_block_output,
+                history: &[],
+            };
+            let result = decode_sequences_dispatch_room(
+                seq_data,
+                num_sequences,
+                &mut self.seq_tables,
+                &mut self.rep_offsets,
+                lits_at.resolve(block_data, &self.ws.literal_buf),
+                &mut self.history,
+                &mut self.history_len,
+                scope,
+            );
+            match result {
+                Err(DecompressError::BlockTooLarge) if max_block_output < max_block => {
+                    self.history_len = self.block_start;
+                    // A lone sequence sets its repeat offsets before it runs.
+                    self.rep_offsets = first_rep_offsets;
+                    self.full_room = true;
+                    max_block_output = max_block;
+                }
+                result => break result?,
+            }
+        }
         if self.history_len - self.block_start > self.block_size_max() {
             return Err(DecompressError::BlockTooLarge);
         }

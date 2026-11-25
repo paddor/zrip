@@ -180,7 +180,14 @@ holds up to two windows of output and drops the older one when full, so the
 `memmove` happens once per window, not once per block. The room past the
 output that a block's copies may write into stays from block to block, so
 each byte of it is zeroed once, not once per block: a stream of small
-flushed blocks would otherwise zero 128 KiB for each.
+flushed blocks would otherwise zero 128 KiB for each. As in one-shot
+decoding, a compressed block's first room is a guess from its sequence
+section and literals, or the room left by earlier blocks if that is more,
+and a block that writes more starts over with `Block_Maximum_Size`. A new
+decoder on small messages so reserves and zeroes only what they need. With
+a whole block of room, glibc gave every new decoder fresh pages: a new
+`PushDecoder` per stream of 19 small messages on a 64 KiB window took 4.5x
+C zstd's time per message.
 
 ### Sequence execution (`exec.rs`, `fast_vec.rs`)
 

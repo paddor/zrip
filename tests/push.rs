@@ -411,6 +411,38 @@ fn decode_limits() {
     assert_eq!(out, data);
 }
 
+/// `Block_Maximum_Size` is the window below 128 KiB: a block that decodes
+/// to more than a 1 KiB window is too large, as in C zstd.
+#[test]
+fn block_output_past_a_small_window_is_rejected() {
+    let data = b"abcdefgh".repeat(500);
+    let mut c = zstd::stream::Encoder::new(Vec::new(), 3).unwrap();
+    c.window_log(16).unwrap();
+    std::io::Write::write_all(&mut c, &data).unwrap();
+    let mut frame = c.finish().unwrap();
+    // No content size: the window descriptor follows the frame header
+    // descriptor. Window_Descriptor 0 is a 1 KiB window.
+    assert_eq!(frame[4..6], [0, (16 - 10) << 3]);
+    let mut out = Vec::new();
+    PushDecoder::new().decode_to_vec(&frame, &mut out).unwrap();
+    assert_eq!(out, data);
+    frame[5] = 0;
+
+    assert!(zstd::stream::decode_all(&frame[..]).is_err());
+    let too_large = DecompressError::BlockTooLarge;
+    assert_eq!(zrip::decompress(&frame), Err(too_large.clone()));
+    assert_eq!(
+        PushDecoder::new().decode_to_vec(&frame, &mut Vec::new()),
+        Err(too_large)
+    );
+    let mut reader = zrip::FrameDecoder::new(&frame[..]);
+    let err = std::io::Read::read_to_end(&mut reader, &mut Vec::new()).unwrap_err();
+    let inner = err
+        .get_ref()
+        .and_then(|e| e.downcast_ref::<DecompressError>());
+    assert_eq!(inner, Some(&DecompressError::BlockTooLarge));
+}
+
 #[test]
 fn one_pass_frames_match_one_shot() {
     // A frame that ends before any of it went out is encoded in one pass.

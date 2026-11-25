@@ -126,6 +126,13 @@ impl LiteralsAt {
             Self::Block { start, len } => Literals::new(&data[start..], len),
         }
     }
+
+    /// How many literals the block has.
+    pub(crate) fn len(self) -> usize {
+        match self {
+            Self::Buffer(len) | Self::Block { len, .. } => len,
+        }
+    }
 }
 
 /// Decodes the literals section at the start of `data`, returning its size

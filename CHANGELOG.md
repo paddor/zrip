@@ -10,6 +10,14 @@
   positions on the stack. The table build now stores the rows, and x86
   reads table entries.
 
+### Changed
+
+- A new `PushDecoder` or `FrameDecoder` reserves and zeroes room for the
+  messages it decodes, not for a whole 128 KiB block, so glibc no longer
+  hands each new decoder fresh pages. A new `PushDecoder` per stream of 19
+  small flushed messages on a 64 KiB window decodes 17x faster, in a
+  quarter of C zstd's time.
+
 ## [0.8.27] - 2026-11-25
 
 ### Changed

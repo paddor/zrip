@@ -224,7 +224,10 @@ impl<R: Read> FrameDecoder<R> {
     ) -> io::Result<()> {
         self.output_pos = 0;
         self.output_end = 0;
-        self.frame.start_block();
+        self.frame.start_block(match block_type {
+            BlockType::Compressed => 0,
+            _ => block_size,
+        });
 
         match block_type {
             BlockType::Raw => {
