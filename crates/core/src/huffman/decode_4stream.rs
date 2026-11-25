@@ -6,8 +6,8 @@ use crate::bitstream::reader_reverse::ReverseBitReader;
 use crate::error::DecompressError;
 use crate::huffman::primitives as huffman_primitives;
 use crate::huffman::{
-    DECODE_TABLE_SIZE, FAST_TABLE_LOG, HuffmanDecodeEntry, MAX_TABLE_LOG, PAIR_TABLE_LOG,
-    PAIR_TABLE_SIZE,
+    DECODE_TABLE_SIZE, FAST_LOOP_ROWS, FAST_TABLE_LOG, HuffmanDecodeEntry, MAX_TABLE_LOG,
+    PAIR_TABLE_LOG, PAIR_TABLE_SIZE,
 };
 
 /// Decodes the 4-stream section `data` into `output[..output_size]`, one
@@ -19,7 +19,7 @@ pub(super) fn decode_4_streams_core(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
     pairs: Option<&[u32; PAIR_TABLE_SIZE]>,
-    rows: &[u16; DECODE_TABLE_SIZE],
+    rows: &[u16],
     data: &[u8],
     output_size: usize,
     output: &mut [u8],
@@ -84,10 +84,17 @@ pub(super) fn decode_4_streams_core(
     // would add a cycle per symbol.
     let shift = 64 - tl;
 
-    // The table for the fast rounds, at its fixed size.
-    if table.len() < DECODE_TABLE_SIZE {
-        return Err(DecompressError::BadHuffmanStream);
-    }
+    // The table for the fast rounds, at its fixed size, and its rows on
+    // targets whose fast loop reads them ([`FAST_LOOP_ROWS`]).
+    let fixed: &[HuffmanDecodeEntry; DECODE_TABLE_SIZE] = table
+        .first_chunk()
+        .ok_or(DecompressError::BadHuffmanStream)?;
+    let rows: &[u16; DECODE_TABLE_SIZE] = if FAST_LOOP_ROWS {
+        rows.first_chunk()
+            .ok_or(DecompressError::BadHuffmanStream)?
+    } else {
+        &[0; DECODE_TABLE_SIZE]
+    };
 
     // Output decoded so far in each segment.
     let mut done = [0usize; 4];
@@ -216,22 +223,27 @@ pub(super) fn decode_4_streams_core(
                 reload!(b4, a4);
                 // Symbol by symbol across the streams, so the four lookup
                 // chains interleave and each symbol is stored at once.
-                // One 16-bit row per symbol ([`super::decode::build_row_table`]):
+                // A row ([`super::decode::build_row_table`]) is one load:
                 // the container shifts by the whole row, whose low byte is
                 // the code length, and the high byte is the symbol.
+                macro_rules! symbol {
+                    ($b:expr, $c:expr, $i:expr) => {{
+                        if FAST_LOOP_ROWS {
+                            let r = rows[($b >> shift) as usize];
+                            $c[$i] = (r >> 8) as u8;
+                            $b <<= r & 63;
+                        } else {
+                            let e = fixed[($b >> shift) as usize];
+                            $c[$i] = e.symbol;
+                            $b <<= e.num_bits;
+                        }
+                    }};
+                }
                 for i in 0..5 {
-                    let r1 = rows[(b1 >> shift) as usize];
-                    c1[i] = (r1 >> 8) as u8;
-                    b1 <<= r1 & 63;
-                    let r2 = rows[(b2 >> shift) as usize];
-                    c2[i] = (r2 >> 8) as u8;
-                    b2 <<= r2 & 63;
-                    let r3 = rows[(b3 >> shift) as usize];
-                    c3[i] = (r3 >> 8) as u8;
-                    b3 <<= r3 & 63;
-                    let r4 = rows[(b4 >> shift) as usize];
-                    c4[i] = (r4 >> 8) as u8;
-                    b4 <<= r4 & 63;
+                    symbol!(b1, c1, i);
+                    symbol!(b2, c2, i);
+                    symbol!(b3, c3, i);
+                    symbol!(b4, c4, i);
                 }
             }
             for d in &mut done {

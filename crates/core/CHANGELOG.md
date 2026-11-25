@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- `build_huffman_decode_tables_into` builds a Huffman decode table and, if
+  asked, its 16-bit fast-loop rows in the same stores, without the second
+  pass over the table that `build_row_table` makes.
+- On x86 the 4-stream fast loop reads decode table entries again, not
+  rows (`FAST_LOOP_ROWS`). `decode_4_streams_rows_into` and
+  `decode_4_streams_pairs_rows_into` do not read `rows` there.
+
 ## [0.14.2] - 2026-11-25
 
 - Huffman decode tables carry 16-bit rows, the code length in the low byte

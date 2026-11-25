@@ -29,6 +29,23 @@ pub const PAIR_TABLE_LOG: u8 = 11;
 /// Rows of a two-symbol table.
 pub const PAIR_TABLE_SIZE: usize = 1 << PAIR_TABLE_LOG;
 
+/// Whether the 4-stream fast loop reads 16-bit rows
+/// ([`decode::build_row_table`]) instead of decode table entries. A row is
+/// one load per symbol, which is faster on AArch64. On x86 the row loop
+/// left no register for the stream positions, which then went through the
+/// stack on the lookup chain, and decoded JSON literals up to 9% slower on
+/// an i7-8700B, so x86 reads entries.
+pub const FAST_LOOP_ROWS: bool = !cfg!(any(target_arch = "x86", target_arch = "x86_64"));
+
+/// The 16-bit row of the 4-stream fast loop for a code of `num_bits` bits
+/// that decodes to `symbol`, as C zstd's `HUF_DEltX1`: the code length in
+/// the low byte, so the loop shifts its container by the whole row, and the
+/// symbol in the high byte.
+#[inline(always)]
+pub(crate) const fn decode_row(symbol: u8, num_bits: u8) -> u16 {
+    num_bits as u16 | ((symbol as u16) << 8)
+}
+
 /// One decode table cell: the symbol whose code prefixes this index.
 #[derive(Clone, Copy, Default)]
 pub struct HuffmanDecodeEntry {

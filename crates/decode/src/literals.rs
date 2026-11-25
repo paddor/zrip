@@ -5,12 +5,12 @@
 use crate::BlockDecodeWorkspace;
 use crate::fast_vec::{LITERAL_OVERREAD, Literals};
 use zrip_core::error::DecompressError;
-use zrip_core::huffman::FAST_TABLE_LOG;
 use zrip_core::huffman::decode::{
     build_pair_table, build_row_table, decode_4_streams_into, decode_4_streams_pairs_rows_into,
     decode_4_streams_rows_into, decode_single_stream_vec, prefers_pairs,
 };
-use zrip_core::huffman::weights::{build_huffman_decode_table_into, parse_huffman_weights_into};
+use zrip_core::huffman::weights::{build_huffman_decode_tables_into, parse_huffman_weights_into};
+use zrip_core::huffman::{FAST_LOOP_ROWS, FAST_TABLE_LOG};
 
 /// `Literals_Block_Type`, the low 2 bits of the section header.
 #[derive(Debug, Clone, Copy)]
@@ -258,13 +258,17 @@ fn decode_literals_ws_impl(
                 let can_reuse = ws.huf_last_weights_valid && ws.huf_weights == ws.huf_last_weights;
                 if !can_reuse {
                     ws.huf_is_dict = false;
-                    ws.huf_table_log = build_huffman_decode_table_into(
+                    // Four streams read the fast loop's rows, where it reads
+                    // rows, and the build stores them with the table.
+                    let rows = FAST_LOOP_ROWS && num_streams == 4;
+                    ws.huf_table_log = build_huffman_decode_tables_into(
                         &ws.huf_weights,
                         &mut ws.huf_table,
+                        rows.then_some(&mut ws.huf_rows),
                         &mut ws.huf_all_weights,
                     )?;
                     ws.huf_pairs_valid = false;
-                    ws.huf_rows_valid = false;
+                    ws.huf_rows_valid = rows;
                     ws.huf_last_weights.clear();
                     ws.huf_last_weights.extend_from_slice(&ws.huf_weights);
                     ws.huf_last_weights_valid = true;
@@ -310,8 +314,9 @@ fn decode_huffman_streams(
             &mut ws.literal_buf,
         )?;
     } else if ws.huf_table_log <= FAST_TABLE_LOG {
-        // The fast loop's rows are built once per table.
-        if !ws.huf_rows_valid {
+        // Tables from a dictionary, or built for one stream, get their rows
+        // here, once.
+        if FAST_LOOP_ROWS && !ws.huf_rows_valid {
             build_row_table(&ws.huf_table, ws.huf_table_log, &mut ws.huf_rows)?;
             ws.huf_rows_valid = true;
         }
