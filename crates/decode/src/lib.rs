@@ -96,6 +96,11 @@ pub(crate) struct BlockDecodeWorkspace {
     pub huf_pairs: Vec<u32>,
     /// Whether `huf_pairs` describes the current `huf_table`.
     pub huf_pairs_valid: bool,
+    /// Single-symbol rows of the 4-stream fast loop for `huf_table`, built
+    /// on first use.
+    pub huf_rows: Vec<u16>,
+    /// Whether `huf_rows` describes the current `huf_table`.
+    pub huf_rows_valid: bool,
     /// `huf_table` came from this frame or its dictionary, so treeless
     /// literals may use it. Cleared at each frame start.
     pub huf_valid: bool,
@@ -151,6 +156,8 @@ impl BlockDecodeWorkspace {
             huf_table_log: 0,
             huf_pairs: Vec::new(),
             huf_pairs_valid: false,
+            huf_rows: Vec::new(),
+            huf_rows_valid: false,
             huf_valid: false,
             huf_all_weights: Vec::new(),
             huf_weights: Vec::new(),
@@ -185,6 +192,7 @@ impl BlockDecodeWorkspace {
     pub(crate) fn huffman_table_replaced(&mut self) {
         self.huf_is_dict = false;
         self.huf_pairs_valid = false;
+        self.huf_rows_valid = false;
         self.huf_last_weights_valid = false;
         self.huf_last_header_valid = false;
     }

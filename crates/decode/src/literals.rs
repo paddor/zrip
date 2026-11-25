@@ -7,8 +7,8 @@ use crate::fast_vec::{LITERAL_OVERREAD, Literals};
 use zrip_core::error::DecompressError;
 use zrip_core::huffman::FAST_TABLE_LOG;
 use zrip_core::huffman::decode::{
-    build_pair_table, decode_4_streams_into, decode_4_streams_pairs_into, decode_single_stream_vec,
-    prefers_pairs,
+    build_pair_table, build_row_table, decode_4_streams_into, decode_4_streams_pairs_rows_into,
+    decode_4_streams_rows_into, decode_single_stream_vec, prefers_pairs,
 };
 use zrip_core::huffman::weights::{build_huffman_decode_table_into, parse_huffman_weights_into};
 
@@ -264,6 +264,7 @@ fn decode_literals_ws_impl(
                         &mut ws.huf_all_weights,
                     )?;
                     ws.huf_pairs_valid = false;
+                    ws.huf_rows_valid = false;
                     ws.huf_last_weights.clear();
                     ws.huf_last_weights.extend_from_slice(&ws.huf_weights);
                     ws.huf_last_weights_valid = true;
@@ -308,22 +309,37 @@ fn decode_huffman_streams(
             regen_size,
             &mut ws.literal_buf,
         )?;
-    } else if ws.huf_table_log <= FAST_TABLE_LOG
-        && prefers_pairs(regen_size, compressed_stream.len())
-    {
-        // Two symbols per lookup; the pair table is built lazily.
-        if !ws.huf_pairs_valid {
-            build_pair_table(&ws.huf_table, ws.huf_table_log, &mut ws.huf_pairs)?;
-            ws.huf_pairs_valid = true;
+    } else if ws.huf_table_log <= FAST_TABLE_LOG {
+        // The fast loop's rows are built once per table.
+        if !ws.huf_rows_valid {
+            build_row_table(&ws.huf_table, ws.huf_table_log, &mut ws.huf_rows)?;
+            ws.huf_rows_valid = true;
         }
-        decode_4_streams_pairs_into(
-            &ws.huf_table,
-            ws.huf_table_log,
-            &ws.huf_pairs,
-            compressed_stream,
-            regen_size,
-            &mut ws.literal_buf,
-        )?;
+        if prefers_pairs(regen_size, compressed_stream.len()) {
+            // Two symbols per lookup; the pair table is built lazily.
+            if !ws.huf_pairs_valid {
+                build_pair_table(&ws.huf_table, ws.huf_table_log, &mut ws.huf_pairs)?;
+                ws.huf_pairs_valid = true;
+            }
+            decode_4_streams_pairs_rows_into(
+                &ws.huf_table,
+                ws.huf_table_log,
+                &ws.huf_pairs,
+                &ws.huf_rows,
+                compressed_stream,
+                regen_size,
+                &mut ws.literal_buf,
+            )?;
+        } else {
+            decode_4_streams_rows_into(
+                &ws.huf_table,
+                ws.huf_table_log,
+                &ws.huf_rows,
+                compressed_stream,
+                regen_size,
+                &mut ws.literal_buf,
+            )?;
+        }
     } else {
         decode_4_streams_into(
             &ws.huf_table,

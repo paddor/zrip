@@ -199,6 +199,11 @@ same pass.
 
 Four streams decode interleaved, five symbols per stream per round. Codes of
 at most five bits use a two-symbol table, like C zstd's `HUF_DEltX2`.
+Otherwise the fast loop reads 16-bit rows, as C's `HUF_DEltX1`: the code
+length in the low byte, so the bit container shifts by the whole row, and
+the symbol in the high byte. A lookup is one load with the index scaled in
+the address. The rows are built once per table, next to it in the decode
+workspace.
 
 ## Platform dispatch
 
