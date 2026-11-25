@@ -69,7 +69,9 @@ impl SeqBits {
     /// near the start. Requires `src.len() >= 8`.
     #[inline(always)]
     fn word(self, src: &[u8]) -> Word {
-        let pos = if unlikely(self.left < WORD_BITS) {
+        // No `unlikely` here or on the repeat offsets: its cold path is a
+        // call, and the sequence loop is faster without one.
+        let pos = if self.left < WORD_BITS {
             0
         } else {
             (self.left - WORD_BITS) >> 3
@@ -299,7 +301,7 @@ impl SeqDecoder {
         // Offset values above 3 carry `offset + 3`; 1 to 3 pick a repeat
         // offset. Without literals the pick shifts by one, and index 3 means
         // `rep0 - 1`, which is 0 for `rep0 == 1` and fails on execution.
-        let offset = if likely(offset_value > 3) {
+        let offset = if offset_value > 3 {
             let offset = offset_value - 3;
             self.rep = [offset, rep0, rep1];
             offset
