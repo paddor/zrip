@@ -29,9 +29,9 @@ seconds / GB
 <rect x="71" y="280" width="16" height="22" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="71" y="258" width="16" height="22" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="71" y="253" width="16" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="87" y="277" width="16" height="25" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="87" y="255" width="16" height="22" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="87" y="248" width="16" height="7" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="87" y="276" width="16" height="26" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="87" y="254" width="16" height="22" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="87" y="248" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="103" y="279" width="17" height="23" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="103" y="257" width="17" height="22" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="103" y="250" width="17" height="7" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -55,7 +55,7 @@ dickens
 <rect x="200" y="259" width="16" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="216" y="285" width="17" height="17" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="216" y="263" width="17" height="22" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="216" y="257" width="17" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="216" y="258" width="17" height="5" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="233" y="286" width="16" height="16" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="233" y="266" width="16" height="20" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="233" y="259" width="16" height="7" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -190,9 +190,9 @@ osdb
 <rect x="71" y="591" width="16" height="21" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="71" y="573" width="16" height="18" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="71" y="568" width="16" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="87" y="587" width="16" height="25" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="87" y="570" width="16" height="17" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="87" y="564" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="87" y="586" width="16" height="26" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="87" y="569" width="16" height="17" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="87" y="563" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="103" y="589" width="17" height="23" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="103" y="572" width="17" height="17" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="103" y="565" width="17" height="7" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -216,7 +216,7 @@ reymont
 <rect x="200" y="582" width="16" height="4" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="216" y="597" width="17" height="15" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="216" y="584" width="17" height="13" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="216" y="579" width="17" height="5" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="216" y="580" width="17" height="4" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="233" y="599" width="16" height="13" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="233" y="585" width="16" height="14" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="233" y="580" width="16" height="5" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -262,9 +262,9 @@ sao
 <rect x="459" y="592" width="16" height="20" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="459" y="575" width="16" height="17" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="459" y="570" width="16" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="475" y="589" width="16" height="23" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="475" y="572" width="16" height="17" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="475" y="566" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="475" y="590" width="16" height="22" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="475" y="573" width="16" height="17" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="475" y="567" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="491" y="592" width="16" height="20" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="491" y="575" width="16" height="17" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="491" y="568" width="16" height="7" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -286,8 +286,8 @@ webster
 <rect x="588" y="604" width="16" height="8" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="588" y="561" width="16" height="43" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="588" y="557" width="16" height="4" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="604" y="604" width="16" height="8" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="604" y="562" width="16" height="42" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="604" y="605" width="16" height="7" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="604" y="562" width="16" height="43" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="604" y="557" width="16" height="5" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="620" y="603" width="16" height="9" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="620" y="561" width="16" height="42" opacity="1" fill="#C47D08" stroke="none"/>
