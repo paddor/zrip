@@ -28,9 +28,9 @@ High compressibility
 <rect x="82" y="257" width="12" height="27" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="82" y="252" width="12" height="5" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="82" y="245" width="12" height="7" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="96" y="270" width="12" height="14" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="96" y="265" width="12" height="5" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="96" y="261" width="12" height="4" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="96" y="267" width="12" height="17" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="96" y="262" width="12" height="5" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="96" y="258" width="12" height="4" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="110" y="252" width="12" height="32" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="110" y="247" width="12" height="5" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="110" y="233" width="12" height="14" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -69,7 +69,7 @@ Level -6
 <rect x="329" y="242" width="12" height="8" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="343" y="260" width="12" height="24" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="343" y="256" width="12" height="4" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="343" y="249" width="12" height="7" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="343" y="250" width="12" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="357" y="249" width="12" height="35" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="357" y="244" width="12" height="5" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="357" y="228" width="12" height="16" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -102,7 +102,7 @@ Level -4
 </text>
 <rect x="576" y="251" width="12" height="33" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="576" y="247" width="12" height="4" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="576" y="238" width="12" height="9" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="576" y="239" width="12" height="8" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="590" y="256" width="12" height="28" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="590" y="252" width="12" height="4" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="590" y="244" width="12" height="8" opacity="1" fill="#F87171" stroke="none"/>
@@ -118,9 +118,9 @@ Level -4
 <text x="625" y="302" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#E6EDF3" font-weight="bold">
 Level -3
 </text>
-<rect x="699" y="249" width="12" height="35" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="699" y="246" width="12" height="3" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="699" y="236" width="12" height="10" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="699" y="250" width="12" height="34" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="699" y="246" width="12" height="4" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="699" y="237" width="12" height="9" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="713" y="252" width="12" height="32" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="713" y="248" width="12" height="4" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="713" y="239" width="12" height="9" opacity="1" fill="#F87171" stroke="none"/>
@@ -174,7 +174,7 @@ Level 1
 </text>
 <rect x="1069" y="227" width="12" height="57" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="1069" y="224" width="12" height="3" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="1069" y="202" width="12" height="22" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="1069" y="203" width="12" height="21" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="1083" y="227" width="12" height="57" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="1083" y="223" width="12" height="4" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="1083" y="203" width="12" height="20" opacity="1" fill="#F87171" stroke="none"/>
@@ -217,9 +217,9 @@ Medium compressibility
 <rect x="82" y="542" width="12" height="19" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="82" y="536" width="12" height="6" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="82" y="533" width="12" height="3" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="96" y="557" width="12" height="4" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="96" y="550" width="12" height="7" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="96" y="549" width="12" height="1" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="96" y="555" width="12" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="96" y="548" width="12" height="7" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="96" y="547" width="12" height="1" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="110" y="538" width="12" height="23" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="110" y="532" width="12" height="6" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="110" y="523" width="12" height="9" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -310,8 +310,8 @@ Level -3
 <rect x="699" y="531" width="12" height="30" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="699" y="526" width="12" height="5" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="699" y="520" width="12" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="713" y="539" width="12" height="22" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="713" y="533" width="12" height="6" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="713" y="538" width="12" height="23" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="713" y="533" width="12" height="5" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="713" y="528" width="12" height="5" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="727" y="526" width="12" height="35" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="727" y="521" width="12" height="5" opacity="1" fill="#C47D08" stroke="none"/>
@@ -363,7 +363,7 @@ Level 1
 </text>
 <rect x="1069" y="500" width="12" height="61" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="1069" y="496" width="12" height="4" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="1069" y="476" width="12" height="20" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="1069" y="477" width="12" height="19" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="1083" y="518" width="12" height="43" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="1083" y="514" width="12" height="4" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="1083" y="497" width="12" height="17" opacity="1" fill="#F87171" stroke="none"/>
@@ -400,11 +400,11 @@ Low compressibility
 </text>
 <polyline fill="none" opacity="1" stroke="#30363D" stroke-width="2" points="70,838 1180,838 "/>
 <rect x="82" y="829" width="12" height="9" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="82" y="821" width="12" height="8" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="82" y="820" width="12" height="1" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="96" y="836" width="12" height="2" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="96" y="827" width="12" height="9" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="96" y="826" width="12" height="1" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="82" y="820" width="12" height="9" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="82" y="820" width="12" height="0" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="96" y="835" width="12" height="3" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="96" y="826" width="12" height="9" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="96" y="826" width="12" height="0" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="110" y="825" width="12" height="13" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="110" y="816" width="12" height="9" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="110" y="813" width="12" height="3" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -423,8 +423,8 @@ Level -7
 <rect x="206" y="829" width="12" height="9" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="206" y="820" width="12" height="9" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="206" y="819" width="12" height="1" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="220" y="831" width="12" height="7" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="220" y="823" width="12" height="8" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="220" y="832" width="12" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="220" y="823" width="12" height="9" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="220" y="822" width="12" height="1" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="234" y="824" width="12" height="14" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="234" y="816" width="12" height="8" opacity="1" fill="#C47D08" stroke="none"/>
@@ -438,11 +438,11 @@ Level -7
 <text x="255" y="856" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#E6EDF3" font-weight="bold">
 Level -6
 </text>
-<rect x="329" y="828" width="12" height="10" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="329" y="819" width="12" height="9" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="329" y="827" width="12" height="11" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="329" y="819" width="12" height="8" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="329" y="818" width="12" height="1" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="343" y="830" width="12" height="8" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="343" y="822" width="12" height="8" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="343" y="831" width="12" height="7" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="343" y="822" width="12" height="9" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="343" y="821" width="12" height="1" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="357" y="823" width="12" height="15" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="357" y="814" width="12" height="9" opacity="1" fill="#C47D08" stroke="none"/>
@@ -474,8 +474,8 @@ Level -5
 <text x="502" y="856" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#E6EDF3" font-weight="bold">
 Level -4
 </text>
-<rect x="576" y="825" width="12" height="13" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="576" y="816" width="12" height="9" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="576" y="824" width="12" height="14" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="576" y="816" width="12" height="8" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="576" y="815" width="12" height="1" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="590" y="826" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="590" y="817" width="12" height="9" opacity="1" fill="#C45050" stroke="none"/>
@@ -511,8 +511,8 @@ Level -3
 Level -2
 </text>
 <rect x="822" y="815" width="12" height="23" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="822" y="807" width="12" height="8" opacity="1" fill="#4680C4" stroke="none"/>
-<rect x="822" y="805" width="12" height="2" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="822" y="806" width="12" height="9" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="822" y="805" width="12" height="1" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="836" y="823" width="12" height="15" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="836" y="815" width="12" height="8" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="836" y="813" width="12" height="2" opacity="1" fill="#F87171" stroke="none"/>
@@ -532,8 +532,8 @@ Level -1
 <rect x="946" y="773" width="12" height="7" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="946" y="761" width="12" height="12" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="960" y="794" width="12" height="44" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="960" y="787" width="12" height="7" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="960" y="774" width="12" height="13" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="960" y="786" width="12" height="8" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="960" y="774" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="974" y="776" width="12" height="62" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="974" y="768" width="12" height="8" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="974" y="748" width="12" height="20" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -550,8 +550,8 @@ Level 1
 <rect x="1069" y="767" width="12" height="7" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="1069" y="754" width="12" height="13" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="1083" y="794" width="12" height="44" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="1083" y="787" width="12" height="7" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="1083" y="774" width="12" height="13" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="1083" y="786" width="12" height="8" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="1083" y="774" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="1097" y="771" width="12" height="67" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="1097" y="764" width="12" height="7" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="1097" y="741" width="12" height="23" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -566,7 +566,7 @@ Level 2
 </text>
 <rect x="365" y="880" width="12" height="12" opacity="1" fill="#60A5FA" stroke="none"/>
 <text x="383" y="886" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
-libzstd v1.5.7 (C, <tspan fill="#F85149">unsafe</tspan>)
+libzstd v1.6.0 (C, <tspan fill="#F85149">unsafe</tspan>)
 </text>
 <rect x="365" y="900" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
 <text x="383" y="906" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">

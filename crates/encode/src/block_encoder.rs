@@ -605,6 +605,8 @@ fn encode_compressed_block_impl(
         return encode_literals_only_block(src, last, output, workspace, policy);
     }
 
+    let policy = policy.for_matches(src.len(), total_match);
+
     // Restored if the block goes out raw.
     let saved_rep = *rep_offsets;
 
@@ -784,6 +786,7 @@ fn encode_literals_only_block(
 const LITERAL_HEAVY_POLICY: BlockPolicy = BlockPolicy {
     custom_tables: false,
     max_literal_entropy_fp8: 6 * 256 + 24,
+    max_matched_literal_entropy_fp8: 6 * 256 + 24,
 };
 
 /// [`encode_compressed_block`] for parameters that keep literals raw: raw
@@ -2188,6 +2191,7 @@ mod tests {
     const POLICY: BlockPolicy = BlockPolicy {
         custom_tables: true,
         max_literal_entropy_fp8: u32::MAX,
+        max_matched_literal_entropy_fp8: u32::MAX,
     };
 
     /// Bytes skewed toward low symbols (about 5 bits per byte) with almost no
@@ -2367,6 +2371,7 @@ mod tests {
         let limited = BlockPolicy {
             custom_tables: true,
             max_literal_entropy_fp8: 6 * 256,
+            max_matched_literal_entropy_fp8: 6 * 256,
         };
         let mut out = Vec::new();
         let mut ws = BlockEncodeWorkspace::new();
@@ -2379,6 +2384,63 @@ mod tests {
         encode_compressed_block(&src, &[], &mut [1, 4, 8], true, &mut out, &mut ws, POLICY)
             .unwrap();
         assert_eq!(block_header(&out).1, 2, "Huffman-coded without a limit");
+    }
+
+    #[test]
+    fn blocks_with_matches_take_their_own_entropy_limit() {
+        // Runs of 1 KiB at 6 bits per byte, each followed by a copy of
+        // itself. Every block is 16 KiB.
+        let run = |seed: u32| -> Vec<u8> {
+            (0..1024u32)
+                .map(|i| ((i + seed).wrapping_mul(KNUTH) >> 26) as u8)
+                .collect()
+        };
+        let literal_type = |runs_with_copy: u32, policy: BlockPolicy| -> u8 {
+            let mut src = Vec::new();
+            let mut sequences = Vec::new();
+            for r in 0..runs_with_copy {
+                let bytes = run(r << 10);
+                src.extend_from_slice(&bytes);
+                src.extend_from_slice(&bytes);
+                sequences.push(Sequence {
+                    literal_length: 1024,
+                    offset: 1024,
+                    match_length: 1024,
+                });
+            }
+            for r in src.len() as u32 / 1024..16 {
+                src.extend_from_slice(&run(0x8000_0000 | r << 10));
+            }
+            let mut out = Vec::new();
+            let mut ws = BlockEncodeWorkspace::new();
+            encode_compressed_block(
+                &src,
+                &sequences,
+                &mut [1, 4, 8],
+                true,
+                &mut out,
+                &mut ws,
+                policy,
+            )
+            .unwrap();
+            assert_eq!(block_header(&out).1, 2, "compressed block");
+            out[3] & 3
+        };
+        let one_limit = BlockPolicy {
+            custom_tables: true,
+            max_literal_entropy_fp8: 6 * 256 + 64,
+            max_matched_literal_entropy_fp8: 6 * 256 + 64,
+        };
+        let lower_with_matches = BlockPolicy {
+            max_matched_literal_entropy_fp8: 5 * 256 + 128,
+            ..one_limit
+        };
+        // Matches cover half the block.
+        assert_eq!(literal_type(8, one_limit), 2, "Huffman literals");
+        assert_eq!(literal_type(8, lower_with_matches), 0, "raw literals");
+        // Matches cover 1/16: the block is almost all literals.
+        assert_eq!(literal_type(1, one_limit), 2);
+        assert_eq!(literal_type(1, lower_with_matches), 2);
     }
 
     #[test]

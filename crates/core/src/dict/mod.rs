@@ -97,11 +97,14 @@ impl Dictionary {
             u32::from_le_bytes([data[pos + 8], data[pos + 9], data[pos + 10], data[pos + 11]]);
         pos += 12;
 
-        if rep1 == 0 || rep2 == 0 || rep3 == 0 {
+        // As C zstd: each repeat offset reaches into the content.
+        let content = data[pos..].to_vec();
+        if [rep1, rep2, rep3]
+            .iter()
+            .any(|&rep| rep == 0 || rep as usize > content.len())
+        {
             return Err(DecompressError::InvalidDictionary);
         }
-
-        let content = data[pos..].to_vec();
 
         Ok(Self {
             id,
@@ -228,8 +231,8 @@ mod tests {
         dict.extend_from_slice(&4u32.to_le_bytes());
         dict.extend_from_slice(&8u32.to_le_bytes());
 
-        // Content (at least 1 byte)
-        dict.extend_from_slice(b"content");
+        // Content: the repeat offsets reach 8 bytes back.
+        dict.extend_from_slice(b"contents");
         dict
     }
 
@@ -241,6 +244,26 @@ mod tests {
             result.is_err(),
             "accuracy_log=10 should be rejected for OF (max=8)"
         );
+    }
+
+    #[test]
+    fn dict_rejects_repeat_offsets_past_content() {
+        // C zstd: `rep == 0 || rep > dictContentSize` is a corrupt dictionary.
+        let valid = build_dict_with_of_accuracy(8);
+        let content_len = b"contents".len();
+        let reps_at = valid.len() - content_len - 12;
+        for (slot, rep) in [(0, 9u32), (1, 9), (2, 9), (0, 0), (1, u32::MAX)] {
+            let mut dict = valid.clone();
+            dict[reps_at + 4 * slot..][..4].copy_from_slice(&rep.to_le_bytes());
+            assert!(
+                Dictionary::from_bytes(&dict).is_err(),
+                "repeat offset {rep} in slot {slot} must be rejected"
+            );
+        }
+        // The last repeat offset may reach the content's first byte.
+        let mut dict = valid.clone();
+        dict[reps_at..][..4].copy_from_slice(&(content_len as u32).to_le_bytes());
+        assert!(Dictionary::from_bytes(&dict).is_ok());
     }
 
     #[test]

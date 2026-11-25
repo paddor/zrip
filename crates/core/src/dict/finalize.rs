@@ -3,6 +3,7 @@
 
 #![forbid(unsafe_code)]
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::dict::DICT_MAGIC;
@@ -10,14 +11,29 @@ use crate::fse::{LL_DEFAULT_ACCURACY, ML_DEFAULT_ACCURACY, OF_DEFAULT_ACCURACY};
 use crate::fse::{LL_DEFAULT_DIST, ML_DEFAULT_DIST, OF_DEFAULT_DIST};
 use crate::huffman::encode::HuffmanEncodeTable;
 
+/// Least content a dictionary holds: the largest default repeat offset.
+const MIN_CONTENT: usize = 8;
+
 /// Builds dictionary bytes from the last `dict_size - 256` bytes of
 /// `content`, or all of it if shorter. The Huffman table follows the
 /// samples' literals; the FSE tables are the predefined ones.
 pub fn finalize_dictionary(content: &[u8], samples: &[&[u8]], dict_size: usize) -> Vec<u8> {
     // Leave 256 bytes of `dict_size` for the header and tables.
     let content_len = content.len().min(dict_size.saturating_sub(256));
+    let content_start = content.len() - content_len;
+    // As C zstd, content shorter than the largest default repeat offset is
+    // padded with zeros in front, so every repeat offset reaches into it.
+    let padded;
+    let kept = if content_len < MIN_CONTENT {
+        let mut bytes = vec![0u8; MIN_CONTENT - content_len];
+        bytes.extend_from_slice(&content[content_start..]);
+        padded = bytes;
+        &padded[..]
+    } else {
+        &content[content_start..]
+    };
 
-    let rep_offsets = compute_rep_offsets(content, samples);
+    let rep_offsets = compute_rep_offsets(kept, samples);
     let dict_id = compute_dict_id(content);
 
     let mut dict = Vec::with_capacity(dict_size);
@@ -31,8 +47,6 @@ pub fn finalize_dictionary(content: &[u8], samples: &[&[u8]], dict_size: usize) 
     // the content. As in C zstd's `ZDICT_finalizeDictionary`, every byte value
     // counts once more, so the table codes any literals and frames can always
     // reuse it.
-    let content_start = content.len().saturating_sub(content_len);
-    let kept = &content[content_start..];
     dict.extend_from_slice(literal_table(kept, samples).weights_description());
 
     // FSE tables: serialize the default distributions
@@ -140,7 +154,9 @@ fn literal_counts(content: &[u8], samples: &[&[u8]]) -> [u32; 256] {
 
 /// Repeat offsets: the distances back from the end of `content` at which
 /// sample starts match most (4 bytes or more), in place of the defaults
-/// `[1, 4, 8]`. C zstd always writes the defaults.
+/// `[1, 4, 8]`. C zstd always writes the defaults. `content` is what the
+/// dictionary keeps, at least [`MIN_CONTENT`] bytes, so each offset reaches
+/// into it.
 fn compute_rep_offsets(content: &[u8], samples: &[&[u8]]) -> [u32; 3] {
     let max_offset = content.len().min(1024);
     if max_offset == 0 {
@@ -206,6 +222,31 @@ fn compute_dict_id(content: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_content_is_padded_to_the_repeat_offsets() {
+        for len in 0..12usize {
+            let content: Vec<u8> = (1..=len as u8).collect();
+            let dict = finalize_dictionary(&content, &[b"sample bytes"], 4096);
+            let parsed = crate::dict::Dictionary::from_bytes(&dict).expect("valid dictionary");
+            assert_eq!(parsed.content().len(), len.max(MIN_CONTENT));
+            assert!(parsed.content().ends_with(&content));
+        }
+    }
+
+    #[test]
+    fn repeat_offsets_stay_inside_the_kept_content() {
+        // A 512-byte dictionary keeps 256 bytes of content. The sample
+        // matches 600 bytes before the content's end, outside of them.
+        let content: Vec<u8> = (0..2048u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
+            .collect();
+        let sample = &content[2048 - 600..2048 - 500];
+        let dict = finalize_dictionary(&content, &[sample], 512);
+        let parsed = crate::dict::Dictionary::from_bytes(&dict).expect("valid dictionary");
+        assert_eq!(parsed.content().len(), 256);
+        assert_eq!(*parsed.rep_offsets(), [1, 4, 8]);
+    }
 
     #[test]
     fn flat_literal_counts_build_a_table() {

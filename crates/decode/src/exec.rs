@@ -11,6 +11,11 @@ use zrip_core::error::DecompressError;
 use zrip_core::fse::FSE_SEQ_TABLE_MASK;
 use zrip_core::hint::{likely, unlikely};
 
+#[cfg(target_arch = "aarch64")]
+mod aarch64;
+#[cfg(target_arch = "aarch64")]
+use aarch64::run_sequences;
+
 /// Where a block's sequences may write and copy from.
 #[derive(Clone, Copy)]
 pub(crate) struct SequenceOutputScope<'a> {
@@ -69,7 +74,9 @@ impl SeqBits {
     /// near the start. Requires `src.len() >= 8`.
     #[inline(always)]
     fn word(self, src: &[u8]) -> Word {
-        let pos = if unlikely(self.left < WORD_BITS) {
+        // No `unlikely` here or on the repeat offsets: its cold path is a
+        // call, and the sequence loop is faster without one.
+        let pos = if self.left < WORD_BITS {
             0
         } else {
             (self.left - WORD_BITS) >> 3
@@ -257,6 +264,7 @@ pub(crate) fn decode_execute_sequences_room<const HAS_HISTORY: bool>(
 
 /// The decoding half of the sequence loop: the three FSE states and the
 /// repeat offsets.
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 struct SeqDecoder {
     ll_state: u32,
     of_state: u32,
@@ -264,6 +272,7 @@ struct SeqDecoder {
     rep: [u32; 3],
 }
 
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 impl SeqDecoder {
     /// Decodes one sequence as `(literal length, match length, offset)`,
     /// C zstd's `ZSTD_decodeSequence`. With `UPDATE` the states advance;
@@ -299,7 +308,7 @@ impl SeqDecoder {
         // Offset values above 3 carry `offset + 3`; 1 to 3 pick a repeat
         // offset. Without literals the pick shifts by one, and index 3 means
         // `rep0 - 1`, which is 0 for `rep0 == 1` and fails on execution.
-        let offset = if likely(offset_value > 3) {
+        let offset = if offset_value > 3 {
             let offset = offset_value - 3;
             self.rep = [offset, rep0, rep1];
             offset
@@ -338,7 +347,9 @@ impl SeqDecoder {
 /// The sequence loop of [`decode_execute_sequences`], C zstd's
 /// `ZSTD_decompressSequences_body`: one word per sequence, a second one
 /// only when its extra bits could exhaust the first, and the last
-/// sequence peeled off so the loop never tests for it.
+/// sequence peeled off so the loop never tests for it. AArch64 has its own
+/// ([`aarch64`]).
+#[cfg(not(target_arch = "aarch64"))]
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn run_sequences<const NARROW: bool>(

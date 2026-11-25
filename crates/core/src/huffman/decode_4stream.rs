@@ -19,6 +19,7 @@ pub(super) fn decode_4_streams_core(
     table: &[HuffmanDecodeEntry],
     table_log: u8,
     pairs: Option<&[u32; PAIR_TABLE_SIZE]>,
+    rows: &[u16; DECODE_TABLE_SIZE],
     data: &[u8],
     output_size: usize,
     output: &mut [u8],
@@ -84,9 +85,9 @@ pub(super) fn decode_4_streams_core(
     let shift = 64 - tl;
 
     // The table for the fast rounds, at its fixed size.
-    let fixed: &[HuffmanDecodeEntry; DECODE_TABLE_SIZE] = table
-        .first_chunk()
-        .ok_or(DecompressError::BadHuffmanStream)?;
+    if table.len() < DECODE_TABLE_SIZE {
+        return Err(DecompressError::BadHuffmanStream);
+    }
 
     // Output decoded so far in each segment.
     let mut done = [0usize; 4];
@@ -215,19 +216,22 @@ pub(super) fn decode_4_streams_core(
                 reload!(b4, a4);
                 // Symbol by symbol across the streams, so the four lookup
                 // chains interleave and each symbol is stored at once.
+                // One 16-bit row per symbol ([`super::decode::build_row_table`]):
+                // the container shifts by the whole row, whose low byte is
+                // the code length, and the high byte is the symbol.
                 for i in 0..5 {
-                    let e1 = fixed[(b1 >> shift) as usize];
-                    c1[i] = e1.symbol;
-                    b1 <<= e1.num_bits;
-                    let e2 = fixed[(b2 >> shift) as usize];
-                    c2[i] = e2.symbol;
-                    b2 <<= e2.num_bits;
-                    let e3 = fixed[(b3 >> shift) as usize];
-                    c3[i] = e3.symbol;
-                    b3 <<= e3.num_bits;
-                    let e4 = fixed[(b4 >> shift) as usize];
-                    c4[i] = e4.symbol;
-                    b4 <<= e4.num_bits;
+                    let r1 = rows[(b1 >> shift) as usize];
+                    c1[i] = (r1 >> 8) as u8;
+                    b1 <<= r1 & 63;
+                    let r2 = rows[(b2 >> shift) as usize];
+                    c2[i] = (r2 >> 8) as u8;
+                    b2 <<= r2 & 63;
+                    let r3 = rows[(b3 >> shift) as usize];
+                    c3[i] = (r3 >> 8) as u8;
+                    b3 <<= r3 & 63;
+                    let r4 = rows[(b4 >> shift) as usize];
+                    c4[i] = (r4 >> 8) as u8;
+                    b4 <<= r4 & 63;
                 }
             }
             for d in &mut done {

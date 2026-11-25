@@ -383,6 +383,10 @@ fn parse_sequence_tables_ws_impl(
         return Ok(ws.seq_table_header.len());
     }
 
+    // From here on the tables change. A description that fails partway
+    // leaves them unlike the cached ones, so a later hit must copy those.
+    ws.seq_table_cache_tables_current = false;
+
     let mut reader = BitReader::new(&data[1..]);
 
     match ll_mode {
@@ -551,8 +555,6 @@ fn parse_sequence_tables_ws_impl(
             None => ws.seq_table_cache = Some(Box::new(prev.clone())),
         }
         ws.seq_table_cache_tables_current = true;
-    } else {
-        ws.seq_table_cache_tables_current = false;
     }
 
     Ok(consumed)

@@ -33,6 +33,7 @@ produced at any zstd compression level. The encoder supports levels -7 through
 
 ![per-file pipeline](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/pipeline.svg)
 ![encode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/scatter.svg)
+![decode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/decode_scatter.svg)
 ![per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/matrix.svg)
 ![tiny input pipeline by compressibility](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/tiny_matrix.svg)
 ![small input encode throughput](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/small_encode.svg)
@@ -46,9 +47,20 @@ produced at any zstd compression level. The encoder supports levels -7 through
 ![dictionary sweep at level 3](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/sweep_l3.svg)
 </details>
 
-No current aarch64 charts. If you have an aarch64 machine, run the benchmark
-and chart commands from [`DEVELOPMENT.md`](DEVELOPMENT.md) and send a PR with
-`doc/charts/aarch64/`.
+<details>
+<summary>aarch64 (Apple M5, Linux VM)</summary>
+
+![aarch64 pipeline summary](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/summary.svg)
+![aarch64 per-file pipeline](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/pipeline.svg)
+![aarch64 encode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/scatter.svg)
+![aarch64 decode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/decode_scatter.svg)
+![aarch64 per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/matrix.svg)
+![aarch64 tiny input pipeline by compressibility](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/tiny_matrix.svg)
+![aarch64 small input encode throughput](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/small_encode.svg)
+![aarch64 small input decode throughput](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/small_decode.svg)
+![aarch64 dictionary sweep at level 1](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/sweep.svg)
+![aarch64 dictionary sweep at level 3](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/aarch64/sweep_l3.svg)
+</details>
 
 <details>
 <summary>wasm32 (wasmtime)</summary>

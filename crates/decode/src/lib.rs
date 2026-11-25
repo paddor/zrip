@@ -70,7 +70,7 @@ use crate::exec::{
     decode_execute_single_sequence,
 };
 use crate::fast_vec::{Literals, WILDCOPY_OVERLENGTH};
-use crate::literals::{LiteralsAt, decode_literals_ws};
+use crate::literals::decode_literals_ws;
 use crate::sequences::{SequenceDecodeTables, parse_sequence_count, parse_sequence_tables_ws};
 use zrip_core::block::{BlockType, parse_block_header};
 use zrip_core::error::DecompressError;
@@ -96,6 +96,11 @@ pub(crate) struct BlockDecodeWorkspace {
     pub huf_pairs: Vec<u32>,
     /// Whether `huf_pairs` describes the current `huf_table`.
     pub huf_pairs_valid: bool,
+    /// Single-symbol rows of the 4-stream fast loop for `huf_table`, built
+    /// on first use.
+    pub huf_rows: Vec<u16>,
+    /// Whether `huf_rows` describes the current `huf_table`.
+    pub huf_rows_valid: bool,
     /// `huf_table` came from this frame or its dictionary, so treeless
     /// literals may use it. Cleared at each frame start.
     pub huf_valid: bool,
@@ -151,6 +156,8 @@ impl BlockDecodeWorkspace {
             huf_table_log: 0,
             huf_pairs: Vec::new(),
             huf_pairs_valid: false,
+            huf_rows: Vec::new(),
+            huf_rows_valid: false,
             huf_valid: false,
             huf_all_weights: Vec::new(),
             huf_weights: Vec::new(),
@@ -185,6 +192,7 @@ impl BlockDecodeWorkspace {
     pub(crate) fn huffman_table_replaced(&mut self) {
         self.huf_is_dict = false;
         self.huf_pairs_valid = false;
+        self.huf_rows_valid = false;
         self.huf_last_weights_valid = false;
         self.huf_last_header_valid = false;
     }
@@ -588,18 +596,15 @@ fn initial_sequence_state(
     }
 }
 
-/// C zstd's `WILDCOPY_OVERLENGTH`: in one-shot decoding, it puts a block's
-/// literals this far past the block's maximum in the output buffer.
-const ONE_SHOT_BLOCK_SLACK: usize = 32;
+/// Match bytes a block's first room allows per byte of its sequence section.
+/// A sequence takes two to three bytes there, so only blocks whose matches
+/// average well over 100 bytes write more.
+const ROOM_PER_SEQUENCE_BYTE: usize = 64;
 
 /// Decodes one compressed block body and appends its output. Fails with
-/// `OutputTooSmall` past `max_output` bytes since `output_start`.
-///
-/// As in C zstd's one-shot decoder, the literals may not exceed
-/// `block_size_max`, the frame's `Block_Maximum_Size`. While decoding, the
-/// output may pass it by [`ONE_SHOT_BLOCK_SLACK`] bytes, or by any amount
-/// when the literals stay outside the output buffer; the frame loop then
-/// rejects the block.
+/// `OutputTooSmall` past `max_output` bytes since `output_start`, and with
+/// `BlockTooLarge` past `block_size_max`, the frame's `Block_Maximum_Size`,
+/// which also bounds the literals.
 #[allow(clippy::too_many_arguments)]
 fn decode_compressed_block(
     data: &[u8],
@@ -638,22 +643,19 @@ fn decode_compressed_block(
 
     let before = output.len();
     let room = remaining_output_limit(output.len(), output_start, max_output)?;
-    // C zstd keeps raw literals in place when 32 bytes follow them in the
-    // block. Other literals go to the output buffer, after the block's
-    // maximum, when it has room for both, and stop the output there. Else
-    // they go to a side buffer, and the output may fill the buffer.
-    let in_output = !matches!(lits_at, LiteralsAt::Block { .. })
-        && room > block_size_max + 2 * ONE_SHOT_BLOCK_SLACK + lits_at.len();
-    let max_block = if in_output {
-        room.min(block_size_max + ONE_SHOT_BLOCK_SLACK)
-    } else {
-        room
-    };
+    let max_block = room.min(block_size_max);
+    let literals = lits_at.resolve(data, &ws.literal_buf);
 
-    // Valid blocks write at most 128 KiB, and the block's room is zeroed up
-    // front. A block that C zstd lets write more retries with more room.
-    let mut max_block_output =
-        max_block.min(zrip_core::frame::MAX_BLOCK_SIZE + ONE_SHOT_BLOCK_SLACK);
+    // The sequence loop zeroes the block's room up front. The room starts
+    // at a guess from the block's size, so a small block zeroes little even
+    // when the frame does not tell its size. A block that writes more
+    // starts over with all the room it may use.
+    let first_rep_offsets = *rep_offsets;
+    let mut max_block_output = seq_data
+        .len()
+        .saturating_mul(ROOM_PER_SEQUENCE_BYTE)
+        .saturating_add(literals.len())
+        .min(max_block);
     loop {
         let scope = SequenceOutputScope {
             output_base: output_start,
@@ -665,27 +667,24 @@ fn decode_compressed_block(
             num_sequences,
             seq_tables,
             rep_offsets,
-            lits_at.resolve(data, &ws.literal_buf),
+            literals,
             output,
             scope,
         );
         match result {
             Err(DecompressError::BlockTooLarge) if max_block_output < max_block => {
                 output.truncate(before);
-                max_block_output = max_block.min(max_block_output.saturating_mul(2));
+                // A lone sequence sets its repeat offsets before it runs.
+                *rep_offsets = first_rep_offsets;
+                max_block_output = max_block;
             }
             // The output limit, not the block's maximum, ran out.
-            Err(DecompressError::BlockTooLarge) if max_block_output == room => {
+            Err(DecompressError::BlockTooLarge) if room <= block_size_max => {
                 return Err(DecompressError::OutputTooSmall);
             }
-            result => break result?,
+            result => return result,
         }
     }
-    if output.len() - output_start > max_output {
-        return Err(DecompressError::OutputTooSmall);
-    }
-
-    Ok(())
 }
 
 /// Decodes and executes a block's sequences. Runs once per block.

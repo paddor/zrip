@@ -25,7 +25,9 @@ const LEGEND_COL_W: f64 = 270.0;
 const TRANSFER_RATE: f64 = 100e6;
 const LEVEL: i32 = 1;
 const DECODE_LEVEL: i32 = 3;
-const MATRIX_LEVELS: &[i32] = &[-1, 1, 3];
+const MATRIX_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
+/// The wasm32 cache holds the matrix codecs' rows at these levels only.
+const WASM_MATRIX_LEVELS: &[i32] = &[-1, 1, 3];
 const SUMMARY_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 const BAND_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 const C_ZSTD_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
@@ -70,6 +72,13 @@ const SCATTER_LOG_X_MIN: f64 = 1.477; // 10^1.477 ~= 30 MB/s
 const SCATTER_LOG_X_MAX: f64 = 4.0; // 10^4 = 10000 MB/s
 const SCATTER_X_TICKS: &[f64] = &[50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0];
 
+/// Tick candidates of the decode scatter's log axis, in MB/s. Each panel
+/// shows the ones in its range.
+const DECODE_SCATTER_X_TICKS: &[f64] = &[
+    100.0, 150.0, 200.0, 300.0, 500.0, 700.0, 1000.0, 1500.0, 2000.0, 3000.0, 5000.0, 7000.0,
+    10000.0, 15000.0, 20000.0,
+];
+
 #[derive(Clone)]
 struct CodecStyle {
     key: &'static str,
@@ -86,6 +95,7 @@ struct Config {
     scatter_codecs: Vec<&'static str>,
     summary_codecs: Vec<&'static str>,
     matrix_codecs: Vec<&'static str>,
+    matrix_levels: &'static [i32],
     tiny_codecs: Vec<&'static str>,
     pipeline_codecs: Vec<&'static str>,
     small_codecs: Vec<&'static str>,
@@ -118,6 +128,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let charts: Vec<ChartKind> = if args.chart == ChartKind::All {
         vec![
             ChartKind::Scatter,
+            ChartKind::DecodeScatter,
             ChartKind::Summary,
             ChartKind::Matrix,
             ChartKind::Pipeline,
@@ -134,6 +145,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         match chart {
             ChartKind::All => unreachable!(),
             ChartKind::Scatter => draw_scatter(&cfg, &out_dir)?,
+            ChartKind::DecodeScatter => draw_decode_scatter(&cfg, &out_dir)?,
             ChartKind::Summary => draw_summary(&cfg, &out_dir)?,
             ChartKind::Matrix => draw_matrix(&cfg, &out_dir)?,
             ChartKind::Pipeline => draw_pipeline(&cfg, &out_dir)?,
@@ -151,6 +163,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 enum ChartKind {
     All,
     Scatter,
+    DecodeScatter,
     Summary,
     Matrix,
     Pipeline,
@@ -201,7 +214,7 @@ impl Args {
 
 fn print_help() {
     println!(
-        "Usage: zrip_charts [all|scatter|summary|matrix|pipeline|small-encode|small-decode|tiny-matrix|sweep] [OUT_DIR] [--profile wasm32]"
+        "Usage: zrip_charts [all|scatter|decode-scatter|summary|matrix|pipeline|small-encode|small-decode|tiny-matrix|sweep] [OUT_DIR] [--profile wasm32]"
     );
 }
 
@@ -209,6 +222,7 @@ fn parse_chart_kind(s: &str) -> Option<ChartKind> {
     match s {
         "all" => Some(ChartKind::All),
         "scatter" => Some(ChartKind::Scatter),
+        "decode-scatter" | "decode_scatter" => Some(ChartKind::DecodeScatter),
         "summary" => Some(ChartKind::Summary),
         "matrix" => Some(ChartKind::Matrix),
         "pipeline" => Some(ChartKind::Pipeline),
@@ -245,6 +259,7 @@ impl Config {
             cfg.scatter_codecs = vec!["C zstd", "zrip", "structured-zstd"];
             cfg.summary_codecs = vec!["C zstd", "zrip", "structured-zstd"];
             cfg.matrix_codecs = cfg.summary_codecs.clone();
+            cfg.matrix_levels = WASM_MATRIX_LEVELS;
             cfg.tiny_codecs = cfg.summary_codecs.clone();
             cfg.pipeline_codecs = cfg.summary_codecs.clone();
             cfg.small_codecs = vec!["C zstd", "zrip", "structured-zstd"];
@@ -260,7 +275,7 @@ impl Config {
             target: std::env::consts::ARCH.into(),
             hw_label: detect_hardware(),
             codecs: vec![
-                codec("C zstd", "libzstd v1.5.7 (C, unsafe)", 0x60a5fa, 0x4680c4),
+                codec("C zstd", "libzstd v1.6.0 (C, unsafe)", 0x60a5fa, 0x4680c4),
                 codec("zrip", "zrip (safe)", 0xf87171, 0xc45050),
                 codec(
                     "structured-zstd",
@@ -303,6 +318,7 @@ impl Config {
                 "rusty_zstd",
                 "ruzstd",
             ],
+            matrix_levels: MATRIX_LEVELS,
             tiny_codecs: vec![
                 "C zstd",
                 "zrip",
@@ -664,6 +680,35 @@ fn load_small_decode_data(
     (out, common_bitstream)
 }
 
+/// Full-corpus rows of each codec decoding C zstd's frames, from
+/// `decode_cmp/L<level>/`: the latest row per input and level.
+fn load_decode_cmp_data(cfg: &Config, codecs: &[&str]) -> BTreeMap<String, Vec<BenchRow>> {
+    let base = cache_dir(cfg).join("decode_cmp");
+    let allowed: BTreeSet<&str> = MAIN_CORPUS.iter().copied().collect();
+    let mut out = BTreeMap::new();
+    for level in C_ZSTD_LEVELS {
+        let level_dir = base.join(format!("L{level}"));
+        for &codec in codecs {
+            load_rows_from_path(
+                &level_dir.join(codec_file(codec)),
+                codec,
+                10_000,
+                Some(&allowed),
+                &mut out,
+            );
+        }
+    }
+    out.into_iter()
+        .map(|(codec, rows)| {
+            let mut latest = BTreeMap::new();
+            for row in rows {
+                latest.insert((row.input.clone(), row.level), row);
+            }
+            (codec, latest.into_values().collect())
+        })
+        .collect()
+}
+
 /// Level of the small-decode rows for `codec`. lz4rip has a single level.
 fn small_decode_level(codec: &str) -> i32 {
     if codec == "lz4rip" {
@@ -797,6 +842,9 @@ fn missing_cache_hint(chart_name: &str) -> String {
         }
         "sweep" => {
             format!("Run `{BENCH} -- --sweep --impl all`.")
+        }
+        "decode scatter" => {
+            format!("Run `{BENCH} -- --decode-only --impl all`.")
         }
         _ => {
             format!("Run `{BENCH} -- --impl all`.")
@@ -989,6 +1037,13 @@ fn dot(area: &Area<'_>, x: f64, y: f64, r: i32, color: RGBColor) -> Result<(), B
         ShapeStyle::from(&color).filled(),
     ))?;
     Ok(())
+}
+
+/// `codecs` with zrip moved last, so its lines and points are drawn on top.
+fn zrip_on_top<'a>(codecs: &[&'a str]) -> Vec<&'a str> {
+    let mut order = codecs.to_vec();
+    order.sort_by_key(|c| *c == "zrip");
+    order
 }
 
 fn px(v: f64) -> i32 {
@@ -1650,17 +1705,18 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
         &data,
         &cfg.matrix_codecs,
         &main_inputs,
-        |codec| supported_chart_levels(codec, MATRIX_LEVELS),
+        |codec| supported_chart_levels(codec, cfg.matrix_levels),
         "matrix",
     )?;
     let spec = MatrixSpec {
         file: "matrix.svg",
         title: "12-file Silesia: Pipeline @100 MB/s by compressibility (lower is better)",
-        width: 850,
+        // 128 px per level column, and 850 for a few levels.
+        width: (cfg.matrix_levels.len() as u32 * 128).max(850),
         aggregate: Aggregate::Bytes,
         transfer_rate: TRANSFER_RATE,
         codecs: cfg.matrix_codecs.clone(),
-        levels: MATRIX_LEVELS,
+        levels: cfg.matrix_levels,
         row_level: same_level,
         groups: GROUPS
             .iter()
@@ -1932,7 +1988,7 @@ fn draw_scatter(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
         supported_encode_levels,
         "scatter",
     )?;
-    let points = compute_scatter_points(&data, &cfg.scatter_codecs);
+    let points = compute_scatter_points(&data, &cfg.scatter_codecs, enc_mbs, false);
     if points.is_empty() {
         return Ok(());
     }
@@ -1995,9 +2051,14 @@ fn draw_scatter(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// One point per codec, level and group: the geometric means of `speed` and
+/// of the ratio over the group's files. ruzstd compresses at level 1 only;
+/// `all_ruzstd_levels` keeps its other levels, for frames it only decodes.
 fn compute_scatter_points(
     data: &BTreeMap<String, Vec<BenchRow>>,
     codecs: &[&str],
+    speed: fn(&BenchRow) -> Option<f64>,
+    all_ruzstd_levels: bool,
 ) -> BTreeMap<(String, i32, String), (f64, f64)> {
     let mut points = BTreeMap::new();
     for codec in codecs {
@@ -2006,27 +2067,27 @@ fn compute_scatter_points(
         };
         let levels = rows.iter().map(|r| r.level).collect::<BTreeSet<_>>();
         for level in levels {
-            if *codec == "ruzstd" && level != 1 {
+            if *codec == "ruzstd" && level != 1 && !all_ruzstd_levels {
                 continue;
             }
             for (group, files) in GROUPS {
-                let mut enc_logs = Vec::new();
+                let mut speed_logs = Vec::new();
                 let mut ratio_logs = Vec::new();
                 for row in rows
                     .iter()
                     .filter(|r| r.level == level && files.contains(&r.input.as_str()))
                 {
-                    if let Some(mbs) = enc_mbs(row) {
-                        enc_logs.push(mbs.ln());
+                    if let Some(mbs) = speed(row) {
+                        speed_logs.push(mbs.ln());
                         ratio_logs.push(ratio(row).ln());
                     }
                 }
-                if !enc_logs.is_empty() {
-                    let n = enc_logs.len() as f64;
+                if !speed_logs.is_empty() {
+                    let n = speed_logs.len() as f64;
                     points.insert(
                         ((*codec).to_string(), level, (*group).to_string()),
                         (
-                            (enc_logs.iter().sum::<f64>() / n).exp(),
+                            (speed_logs.iter().sum::<f64>() / n).exp(),
                             (ratio_logs.iter().sum::<f64>() / n).exp(),
                         ),
                     );
@@ -2108,7 +2169,7 @@ fn draw_scatter_panel(
     }
     line(area, x_left, p_bot, x_right, p_bot, AXIS, 2)?;
 
-    for codec in &cfg.scatter_codecs {
+    for codec in &zrip_on_top(&cfg.scatter_codecs) {
         let Some(style) = cfg.style(codec) else {
             continue;
         };
@@ -2151,6 +2212,304 @@ fn draw_scatter_panel(
     text(
         area,
         "encode MB/s (log)",
+        px((x_left + x_right) / 2.0),
+        px(p_bot + 34.0),
+        10,
+        MUTED,
+        HPos::Center,
+        false,
+    )?;
+    Ok(())
+}
+
+/// Codecs of the decode scatter that decode zstd frames.
+fn zstd_decoders(cfg: &Config) -> Vec<&str> {
+    cfg.scatter_codecs
+        .iter()
+        .copied()
+        .filter(|c| *c != "lz4rip")
+        .collect()
+}
+
+/// `decode_scatter.svg`: decode speed against the ratio of the frames
+/// decoded, per level. Each codec has two series: its own frames, and
+/// C zstd's frames, which every codec decodes at the same ratio.
+fn draw_decode_scatter(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
+    let main_inputs = input_names(MAIN_CORPUS);
+    let own_data = load_all_data(cfg, &cfg.scatter_codecs, 10_000, Some(MAIN_CORPUS));
+    require_named_rows(
+        &own_data,
+        &cfg.scatter_codecs,
+        &main_inputs,
+        supported_encode_levels,
+        "scatter",
+    )?;
+    let decoders = zstd_decoders(cfg);
+    let c_data = load_decode_cmp_data(cfg, &decoders);
+    require_named_rows(
+        &c_data,
+        &decoders,
+        &main_inputs,
+        |_| C_ZSTD_LEVELS.to_vec(),
+        "decode scatter",
+    )?;
+    // C zstd's own frames are the common ones: it gets one series, from the
+    // rows the other codecs' common series come from.
+    let own_codecs = cfg
+        .scatter_codecs
+        .iter()
+        .copied()
+        .filter(|c| *c != "C zstd")
+        .collect::<Vec<_>>();
+    let own = compute_scatter_points(&own_data, &own_codecs, dec_mbs, false);
+    let common = compute_scatter_points(&c_data, &decoders, dec_mbs, true);
+
+    let width = 850;
+    let top = if cfg.hw_label.is_some() { 66.0 } else { 48.0 };
+    let panel_h = 250.0;
+    let gap = 85.0;
+    let bottom = 150.0;
+    let height = (top + panel_h * 3.0 + gap * 2.0 + bottom) as u32;
+    let path = output_path(out_dir, "decode_scatter.svg");
+    let area = root(&path, width, height)?;
+    chart_header(
+        &area,
+        width,
+        "12-file Silesia: Decode Speed vs Compression Ratio",
+        cfg.hw_label.as_deref(),
+        18,
+    )?;
+
+    let x_left = 70.0;
+    let x_right = 830.0;
+    for (i, (group, _)) in GROUPS.iter().enumerate() {
+        let p_top = top + i as f64 * (panel_h + gap);
+        let p_bot = p_top + panel_h;
+        let (y_lo, y_hi) = match *group {
+            "High compressibility" => (2.5, 8.0),
+            "Medium compressibility" => (1.4, 3.2),
+            _ => (0.95, 1.55),
+        };
+        draw_decode_scatter_panel(
+            &area, cfg, &own, &common, group, x_left, x_right, p_top, p_bot, y_lo, y_hi,
+        )?;
+    }
+    vtext(
+        &area,
+        "compression ratio of the frames",
+        16,
+        px((top + top + 2.0 * (panel_h + gap) + panel_h) / 2.0),
+        11,
+        TEXT,
+    )?;
+    let legend_y = top + panel_h * 3.0 + gap * 2.0 + 55.0;
+    draw_frame_source_legend(&area, width as f64 / 2.0, legend_y)?;
+    draw_marker_legend(
+        &area,
+        cfg,
+        &cfg.scatter_codecs
+            .iter()
+            .copied()
+            .filter(|c| own_data.contains_key(*c) || c_data.contains_key(*c))
+            .collect::<Vec<_>>(),
+        width as f64 / 2.0,
+        legend_y + 28.0,
+        width as f64 - 60.0,
+        3,
+    )?;
+    area.present()?;
+    drop(area);
+    finish_svg(&path, width, height)?;
+    println!("wrote {}", path.display());
+    Ok(())
+}
+
+/// A ring: a point of a codec decoding C zstd's frames.
+fn ring(area: &Area<'_>, x: f64, y: f64, color: RGBColor) -> Result<(), Box<dyn Error>> {
+    dot(area, x, y, 3, color)?;
+    dot(area, x, y, 1, PANEL)
+}
+
+fn draw_frame_source_legend(area: &Area<'_>, mid_x: f64, y: f64) -> Result<(), Box<dyn Error>> {
+    let x = mid_x - 250.0;
+    line(area, x, y, x + 24.0, y, MUTED, 1)?;
+    dot(area, x + 12.0, y, 3, MUTED)?;
+    text(
+        area,
+        "its own frames, per level",
+        px(x + 32.0),
+        px(y),
+        10,
+        MUTED,
+        HPos::Left,
+        false,
+    )?;
+    let x = mid_x + 10.0;
+    dashed_line(area, (x, y), (x + 24.0, y), MUTED, 1)?;
+    ring(area, x + 12.0, y, MUTED)?;
+    text(
+        area,
+        "C zstd's frames: same bytes for every decoder",
+        px(x + 32.0),
+        px(y),
+        10,
+        MUTED,
+        HPos::Left,
+        false,
+    )?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_decode_scatter_panel(
+    area: &Area<'_>,
+    cfg: &Config,
+    own: &BTreeMap<(String, i32, String), (f64, f64)>,
+    common: &BTreeMap<(String, i32, String), (f64, f64)>,
+    group: &str,
+    x_left: f64,
+    x_right: f64,
+    p_top: f64,
+    p_bot: f64,
+    y_lo: f64,
+    y_hi: f64,
+) -> Result<(), Box<dyn Error>> {
+    rect(area, x_left, p_top, x_right, p_bot, PANEL)?;
+    text(
+        area,
+        group,
+        px((x_left + x_right) / 2.0),
+        px(p_top - 13.0),
+        12,
+        TEXT,
+        HPos::Center,
+        true,
+    )?;
+    let series = |points: &BTreeMap<(String, i32, String), (f64, f64)>, codec: &str| {
+        let mut pts = points
+            .iter()
+            .filter_map(|((c, level, g), &(x, y))| {
+                (c == codec && g == group).then_some((*level, x, y))
+            })
+            .collect::<Vec<_>>();
+        pts.sort_by_key(|(level, _, _)| *level);
+        pts
+    };
+
+    // The panel's own log range: decode speeds of one group lie close
+    // together, and far from the other groups'.
+    let speeds = own
+        .iter()
+        .chain(common)
+        .filter(|((_, _, g), _)| g == group)
+        .map(|(_, &(x, _))| x.log10());
+    let (lo, hi) = speeds.fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+    if lo > hi {
+        return Ok(());
+    }
+    let margin = ((hi - lo) * 0.06).max(0.02);
+    let (log_lo, log_hi) = (lo - margin, hi + margin);
+    let map_x = |mbs: f64| x_left + (mbs.log10() - log_lo) / (log_hi - log_lo) * (x_right - x_left);
+    let map_y = |r: f64| p_bot - (r - y_lo) / (y_hi - y_lo) * (p_bot - p_top);
+
+    for &tick in DECODE_SCATTER_X_TICKS {
+        let x = map_x(tick);
+        if x_left < x && x < x_right {
+            line(area, x, p_top, x, p_bot, GRID, 1)?;
+            text(
+                area,
+                format!("{tick:.0}"),
+                px(x),
+                px(p_bot + 16.0),
+                9,
+                MUTED,
+                HPos::Center,
+                false,
+            )?;
+        }
+    }
+    let step = nice_step(y_hi - y_lo, 5);
+    let mut v = (y_lo / step).ceil() * step;
+    while v <= y_hi {
+        let y = map_y(v);
+        line(area, x_left, y, x_right, y, GRID, 1)?;
+        text(
+            area,
+            format!("{v:.2}x"),
+            px(x_left - 8.0),
+            px(y),
+            10,
+            MUTED,
+            HPos::Right,
+            false,
+        )?;
+        v += step;
+    }
+    line(area, x_left, p_bot, x_right, p_bot, AXIS, 2)?;
+
+    let label = |codec: &str, level: i32, x: f64, y: f64, color: RGBColor| {
+        let (label_x, hpos) = if x > x_right - 28.0 {
+            (x - 6.0, HPos::Right)
+        } else {
+            (x + 6.0, HPos::Left)
+        };
+        text(
+            area,
+            fmt_scatter_level(codec, level),
+            px(label_x),
+            px(y),
+            8,
+            color,
+            hpos,
+            true,
+        )
+    };
+
+    // C zstd's frames first, so each codec's own series lies on top.
+    for codec in &zrip_on_top(&cfg.scatter_codecs) {
+        let Some(style) = cfg.style(codec) else {
+            continue;
+        };
+        let pts = series(common, codec);
+        let mapped = pts
+            .iter()
+            .map(|(_, x, y)| (map_x(*x), map_y(*y)))
+            .collect::<Vec<_>>();
+        if *codec == "C zstd" {
+            polyline(area, &mapped, style.color, 1, 1.0, false)?;
+            for (&(level, _, _), &(sx, sy)) in pts.iter().zip(&mapped) {
+                dot(area, sx, sy, 3, style.color)?;
+                if should_label_scatter_level(level) {
+                    label(codec, level, sx, sy, style.color)?;
+                }
+            }
+        } else {
+            polyline(area, &mapped, style.dim, 1, 1.0, true)?;
+            for &(sx, sy) in &mapped {
+                ring(area, sx, sy, style.color)?;
+            }
+        }
+    }
+    for codec in &zrip_on_top(&cfg.scatter_codecs) {
+        let Some(style) = cfg.style(codec) else {
+            continue;
+        };
+        let pts = series(own, codec);
+        let mapped = pts
+            .iter()
+            .map(|(_, x, y)| (map_x(*x), map_y(*y)))
+            .collect::<Vec<_>>();
+        polyline(area, &mapped, style.color, 1, 1.0, false)?;
+        for (&(level, _, _), &(sx, sy)) in pts.iter().zip(&mapped) {
+            dot(area, sx, sy, 3, style.color)?;
+            if should_label_scatter_level(level) {
+                label(codec, level, sx, sy, style.color)?;
+            }
+        }
+    }
+    text(
+        area,
+        "decode MB/s (log)",
         px((x_left + x_right) / 2.0),
         px(p_bot + 34.0),
         10,
@@ -2253,7 +2612,7 @@ fn draw_small_encode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
             }
         }
         let mut end_labels = Vec::new();
-        for codec in &cfg.small_codecs {
+        for codec in &zrip_on_top(&cfg.small_codecs) {
             let rows = data.get(*codec).cloned().unwrap_or_default();
             if rows.is_empty() {
                 continue;
@@ -2487,7 +2846,7 @@ fn draw_small_decode(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>>
                 )?;
             }
         }
-        for codec in &cfg.small_decode_codecs {
+        for codec in &zrip_on_top(&cfg.small_decode_codecs) {
             let rows = data.get(*codec).cloned().unwrap_or_default();
             if rows.is_empty() {
                 continue;
@@ -2785,7 +3144,10 @@ fn draw_sweep_level(
             10,
             TEXT,
         )?;
-        for ((base, _, dict), pts) in series.iter().zip(&lines) {
+        // zrip last, so its lines are drawn on top.
+        let mut order: Vec<_> = series.iter().zip(&lines).collect();
+        order.sort_by_key(|((base, _, _), _)| *base == "zrip");
+        for ((base, _, dict), pts) in order {
             let Some(style) = cfg.style(base) else {
                 continue;
             };
