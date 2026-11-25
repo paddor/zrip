@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [0.8.20] - 2026-11-25
+
+- `PushDecoder` and `FrameDecoder` keep their output room from block to
+  block instead of zeroing 128 KiB for each block. Small flushed blocks
+  decode about 8x faster.
+- The decoders reject what C zstd 1.6.0 rejects: `Block_Maximum_Size`
+  bounds every block's output, and the streaming decoders reject empty
+  compressed blocks and an empty last block whose output does not match
+  the declared content size.
+- A reset `PushDecoder` or `FrameDecoder` no longer reuses sequence tables
+  from a description that failed partway.
+- One-shot decoding sizes each block's output room from the block for
+  frames without a content size: a 256-byte frame decodes in 1.8 us
+  instead of 4.8 us.
+- The sequence loop drops its branch hints: 3% faster in native and
+  portable builds.
+- On AArch64 the sequence loop decodes the next sequence before it
+  executes the current one: 15-30% faster on Apple M5.
+- Huffman literals decode from 16-bit table rows.
+- Depends on zrip-core 0.14.2.
+
 ## [0.8.19] - 2026-11-24
 
 - `FrameDecoder` and `PushDecoder` reserve at most 8 MiB of history at a

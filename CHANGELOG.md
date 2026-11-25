@@ -2,7 +2,31 @@
 
 ## [Unreleased]
 
+## [0.8.27] - 2026-11-25
+
 ### Changed
+
+- L-7 grows its search step every 16 bytes without a match, as L-6 does.
+  Its ratio on Silesia slices rises from 1.50 to 1.59, and it encodes
+  slower. L4's short hash table doubles, so L4 no longer encodes highly
+  compressible data faster than L3. Blocks whose matches cover an eighth
+  or more keep literals raw at L-6 to L-3 above 5.1, 5.25, 5.4 and 6 bits
+  per byte, so each level decodes faster than the next.
+
+- Huffman literals decode from 16-bit table rows, as C zstd's
+  `HUF_DEltX1` does: one load per symbol.
+
+- On AArch64 the sequence loop decodes the next sequence before it
+  executes the current one: 15-30% faster on Apple M5. Other targets keep
+  the plain loop.
+
+- The sequence loop drops its branch hints. Decoding is 3% faster in
+  native and portable builds, up to 9% on short matches.
+
+- One-shot decoding sizes each block's output room from the block, not a
+  whole 128 KiB, for frames without a content size. A 256-byte frame
+  decodes in 1.8 us instead of 4.8 us, and `decompress` no longer returns
+  a 131 KiB buffer for it.
 
 - `PushDecoder` and `FrameDecoder` no longer zero 128 KiB of output room
   for each block: the room stays from block to block, and each byte is
@@ -24,6 +48,16 @@
   `PushDecoder` reject empty compressed blocks, and frames whose last block
   is empty but whose output does not match the declared content size. The
   differential tests and fuzz targets now compare with C zstd 1.6.0.
+
+- A `PushDecoder` or `FrameDecoder` reset after a frame whose sequence
+  table description failed partway no longer decodes later frames with the
+  broken tables. Valid frames failed, and without a checksum they could
+  decode to wrong bytes. One-shot contexts were not affected.
+
+- `Dictionary::from_bytes` rejects repeat offsets larger than the
+  dictionary content, as C zstd does. `finalize_dictionary` no longer
+  writes such dictionaries: it picks the repeat offsets from the content
+  it keeps and pads content shorter than 8 bytes with zeros in front.
 
 ## [0.8.26] - 2026-11-24
 
