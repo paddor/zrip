@@ -25,7 +25,9 @@ const LEGEND_COL_W: f64 = 270.0;
 const TRANSFER_RATE: f64 = 100e6;
 const LEVEL: i32 = 1;
 const DECODE_LEVEL: i32 = 3;
-const MATRIX_LEVELS: &[i32] = &[-1, 1, 3];
+const MATRIX_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
+/// The wasm32 cache holds the matrix codecs' rows at these levels only.
+const WASM_MATRIX_LEVELS: &[i32] = &[-1, 1, 3];
 const SUMMARY_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 const BAND_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
 const C_ZSTD_LEVELS: &[i32] = &[-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4];
@@ -93,6 +95,7 @@ struct Config {
     scatter_codecs: Vec<&'static str>,
     summary_codecs: Vec<&'static str>,
     matrix_codecs: Vec<&'static str>,
+    matrix_levels: &'static [i32],
     tiny_codecs: Vec<&'static str>,
     pipeline_codecs: Vec<&'static str>,
     small_codecs: Vec<&'static str>,
@@ -256,6 +259,7 @@ impl Config {
             cfg.scatter_codecs = vec!["C zstd", "zrip", "structured-zstd"];
             cfg.summary_codecs = vec!["C zstd", "zrip", "structured-zstd"];
             cfg.matrix_codecs = cfg.summary_codecs.clone();
+            cfg.matrix_levels = WASM_MATRIX_LEVELS;
             cfg.tiny_codecs = cfg.summary_codecs.clone();
             cfg.pipeline_codecs = cfg.summary_codecs.clone();
             cfg.small_codecs = vec!["C zstd", "zrip", "structured-zstd"];
@@ -314,6 +318,7 @@ impl Config {
                 "rusty_zstd",
                 "ruzstd",
             ],
+            matrix_levels: MATRIX_LEVELS,
             tiny_codecs: vec![
                 "C zstd",
                 "zrip",
@@ -1693,17 +1698,18 @@ fn draw_matrix(cfg: &Config, out_dir: &Path) -> Result<(), Box<dyn Error>> {
         &data,
         &cfg.matrix_codecs,
         &main_inputs,
-        |codec| supported_chart_levels(codec, MATRIX_LEVELS),
+        |codec| supported_chart_levels(codec, cfg.matrix_levels),
         "matrix",
     )?;
     let spec = MatrixSpec {
         file: "matrix.svg",
         title: "12-file Silesia: Pipeline @100 MB/s by compressibility (lower is better)",
-        width: 850,
+        // 128 px per level column, and 850 for a few levels.
+        width: (cfg.matrix_levels.len() as u32 * 128).max(850),
         aggregate: Aggregate::Bytes,
         transfer_rate: TRANSFER_RATE,
         codecs: cfg.matrix_codecs.clone(),
-        levels: MATRIX_LEVELS,
+        levels: cfg.matrix_levels,
         row_level: same_level,
         groups: GROUPS
             .iter()
