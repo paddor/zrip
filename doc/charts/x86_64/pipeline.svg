@@ -150,8 +150,8 @@ ooffice
 <rect x="717" y="267" width="16" height="20" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="717" y="263" width="16" height="4" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="733" y="284" width="16" height="18" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="733" y="264" width="16" height="20" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="733" y="260" width="16" height="4" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="733" y="265" width="16" height="19" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="733" y="260" width="16" height="5" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="749" y="287" width="16" height="15" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="749" y="267" width="16" height="20" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="749" y="262" width="16" height="5" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -286,8 +286,8 @@ webster
 <rect x="588" y="604" width="16" height="8" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="588" y="561" width="16" height="43" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="588" y="557" width="16" height="4" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="604" y="605" width="16" height="7" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="604" y="562" width="16" height="43" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="604" y="604" width="16" height="8" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="604" y="562" width="16" height="42" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="604" y="557" width="16" height="5" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="620" y="603" width="16" height="9" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="620" y="561" width="16" height="42" opacity="1" fill="#C47D08" stroke="none"/>

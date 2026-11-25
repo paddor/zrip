@@ -30,7 +30,7 @@ C zstd
 </text>
 <rect x="190" y="295" width="71" height="18" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="190" y="265" width="71" height="30" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="190" y="260" width="71" height="5" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="190" y="259" width="71" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <text x="226" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
 zrip
 </text>

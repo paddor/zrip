@@ -1,0 +1,87 @@
+<svg viewBox="0 0 700 483" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, -apple-system, sans-serif">
+<rect x="0" y="0" width="700" height="483" opacity="1" fill="#0D1117" stroke="none"/>
+<text x="350" y="22" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="12.096774193548388" opacity="1" fill="#E6EDF3" font-weight="bold">
+12-file Silesia: Pipeline @100 MB/s geomean, L-7..L4 (ruzstd L1)
+</text>
+<text x="350" y="40" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
+Linux VM, Apple M5
+</text>
+<text x="22" y="188" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#E6EDF3" font-weight="bold" transform="rotate(270, 22, 188)">
+seconds / GB
+</text>
+<polyline fill="none" opacity="1" stroke="#21262D" stroke-width="1" points="70,226 680,226 "/>
+<text x="62" y="226" dy="0.5ex" text-anchor="end" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
+5.0
+</text>
+<polyline fill="none" opacity="1" stroke="#21262D" stroke-width="1" points="70,139 680,139 "/>
+<text x="62" y="139" dy="0.5ex" text-anchor="end" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
+10.0
+</text>
+<polyline fill="none" opacity="1" stroke="#30363D" stroke-width="2" points="70,313 680,313 "/>
+<rect x="90" y="296" width="72" height="17" opacity="1" fill="#60A5FA" stroke="none"/>
+<rect x="90" y="225" width="72" height="71" opacity="1" fill="#4680C4" stroke="none"/>
+<rect x="90" y="220" width="72" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
+<text x="126" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
+C zstd
+</text>
+<rect x="190" y="297" width="71" height="16" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="190" y="231" width="71" height="66" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="190" y="225" width="71" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<text x="226" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
+zrip
+</text>
+<rect x="290" y="294" width="71" height="19" opacity="1" fill="#F59E0B" stroke="none"/>
+<rect x="290" y="223" width="71" height="71" opacity="1" fill="#C47D08" stroke="none"/>
+<rect x="290" y="218" width="71" height="5" opacity="1" fill="#F59E0B" stroke="none"/>
+<text x="325" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
+structured-zstd
+</text>
+<rect x="389" y="294" width="71" height="19" opacity="1" fill="#2DD4BF" stroke="none"/>
+<rect x="389" y="223" width="71" height="71" opacity="1" fill="#22A896" stroke="none"/>
+<rect x="389" y="217" width="71" height="6" opacity="1" fill="#2DD4BF" stroke="none"/>
+<text x="425" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
+mzstd
+</text>
+<rect x="489" y="289" width="71" height="24" opacity="1" fill="#FDE047" stroke="none"/>
+<rect x="489" y="225" width="71" height="64" opacity="1" fill="#CAB238" stroke="none"/>
+<rect x="489" y="215" width="71" height="10" opacity="1" fill="#FDE047" stroke="none"/>
+<text x="524" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
+rusty_zstd
+</text>
+<rect x="589" y="200" width="71" height="113" opacity="1" fill="#4ADE80" stroke="none"/>
+<rect x="589" y="124" width="71" height="76" opacity="1" fill="#3AAF60" stroke="none"/>
+<rect x="589" y="96" width="71" height="28" opacity="1" fill="#4ADE80" stroke="none"/>
+<text x="624" y="329" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3" font-weight="bold">
+ruzstd
+</text>
+<rect x="115" y="359" width="12" height="12" opacity="1" fill="#60A5FA" stroke="none"/>
+<text x="133" y="365" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+libzstd v1.6.0 (C, <tspan fill="#F85149">unsafe</tspan>)
+</text>
+<rect x="115" y="379" width="12" height="12" opacity="1" fill="#F87171" stroke="none"/>
+<text x="133" y="385" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+zrip (safe)
+</text>
+<rect x="115" y="399" width="12" height="12" opacity="1" fill="#F59E0B" stroke="none"/>
+<text x="133" y="405" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+structured-zstd v0.4.2 (<tspan fill="#F85149">unsafe</tspan>)
+</text>
+<rect x="385" y="359" width="12" height="12" opacity="1" fill="#2DD4BF" stroke="none"/>
+<text x="403" y="365" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+mzstd v0.2.15 (safe)
+</text>
+<rect x="385" y="379" width="12" height="12" opacity="1" fill="#FDE047" stroke="none"/>
+<text x="403" y="385" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+rusty_zstd v0.5.0 (<tspan fill="#F85149">unsafe</tspan>)
+</text>
+<rect x="385" y="399" width="12" height="12" opacity="1" fill="#4ADE80" stroke="none"/>
+<text x="403" y="405" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#E6EDF3">
+ruzstd v0.8.3 (safe)
+</text>
+<text x="140" y="443" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.064516129032258" opacity="1" fill="#E6EDF3">
+bright = compress + decompress
+</text>
+<text x="380" y="443" dy="0.5ex" text-anchor="start" font-family="sans-serif" font-size="8.064516129032258" opacity="1" fill="#7D8590">
+dim = transfer @100 MB/s
+</text>
+</svg>
