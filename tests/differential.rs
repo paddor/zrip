@@ -221,6 +221,125 @@ fn mutated_frames_agree() {
 
 /// A frame of `blocks`: magic, a frame header descriptor `fhd` and the
 /// header fields after it, then the blocks.
+/// Feeds `input` to `decoder` and returns the output with how it ended.
+fn push_all(decoder: &mut zrip::push::PushDecoder, input: &[u8]) -> (Vec<u8>, Result<(), String>) {
+    use zrip::push::Status;
+    let mut out = Vec::new();
+    let mut buf = vec![0u8; 4096];
+    let mut pos = 0;
+    loop {
+        let p = match decoder.decode(&input[pos..], &mut buf) {
+            Ok(p) => p,
+            Err(e) => return (out, Err(format!("{e:?}"))),
+        };
+        pos += p.consumed;
+        out.extend_from_slice(&buf[..p.produced]);
+        if pos == input.len() && p.status != Status::NeedsOutput {
+            let end = decoder.finish().map_err(|e| format!("{e:?}"));
+            return (out, end);
+        }
+        if p.consumed == 0 && p.produced == 0 && p.status != Status::Finished {
+            return (out, Err("no progress".into()));
+        }
+    }
+}
+
+/// A decoder that has decoded other frames decodes like a new one. What it
+/// keeps between frames, the tables, the literals, and the history room
+/// that the streaming decoders do not zero again, must not reach its output,
+/// whether the input is valid or not.
+///
+/// Errors only have to agree that the input fails: a block with one
+/// sequence takes another path when room follows the output, and a corrupt
+/// one may fail another check first.
+#[test]
+fn reused_decoders_agree_with_new_ones() {
+    use zrip::push::PushDecoder;
+    use zrip::{DecompressContext, Dictionary};
+
+    let per_seed: usize = std::env::var("ZRIP_DIFF_MUTATIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(300);
+    let dict = train_dict();
+    let zdict = Dictionary::from_bytes(&dict).unwrap();
+    let seeds = seed_frames(&dict);
+    // Frames that leave bytes in every buffer which no seed decodes to.
+    let stale = [
+        zrip::compress(&vec![0xA5; 300_000], 1).unwrap(),
+        zrip::compress(&noise(200_000, 77), 1).unwrap(),
+        zrip::compress(&text(200_000, 78), -5).unwrap(),
+        zrip::compress(&mixed(200_000, 79), 3).unwrap(),
+    ];
+    let mut contexts = [
+        DecompressContext::new(),
+        DecompressContext::with_dict(zdict.clone()),
+    ];
+    let mut pushers = vec![
+        PushDecoder::with_limit(check::LIMIT),
+        PushDecoder::with_dict_and_limit(zdict.clone(), check::LIMIT),
+    ];
+    let mut failures = Vec::new();
+    let mut rng = Rng(0xD1B5_4A32_D192_ED03);
+    let mut count = 0usize;
+    for (i, (frame, with_dict)) in seeds.iter().enumerate() {
+        let other = &seeds[(i * 7 + 3) % seeds.len()].0;
+        let k = usize::from(*with_dict);
+        for j in 0..per_seed {
+            if count.is_multiple_of(64) {
+                let frame = &stale[(count / 64) % stale.len()];
+                for ctx in &mut contexts {
+                    ctx.decompress_with_limit(frame, check::LIMIT).unwrap();
+                }
+                for push in &mut pushers {
+                    push.reset();
+                    push_all(push, frame).1.unwrap();
+                }
+            }
+            count += 1;
+            let m = mutate(frame, other, &mut rng);
+
+            let mut new = match with_dict {
+                true => DecompressContext::with_dict(zdict.clone()),
+                false => DecompressContext::new(),
+            };
+            let new = new
+                .decompress_with_limit(&m, check::LIMIT)
+                .map(|out| out.into_owned())
+                .ok();
+            let reused = contexts[k]
+                .decompress_with_limit(&m, check::LIMIT)
+                .map(|out| out.into_owned())
+                .ok();
+            if new != reused {
+                failures.push(format!("seed {i} mutation {j}: DecompressContext"));
+            }
+
+            let mut new = match with_dict {
+                true => PushDecoder::with_dict_and_limit(zdict.clone(), check::LIMIT),
+                false => PushDecoder::with_limit(check::LIMIT),
+            };
+            let (new, new_end) = push_all(&mut new, &m);
+            pushers[k].reset();
+            let (reused, reused_end) = push_all(&mut pushers[k], &m);
+            if new != reused || new_end.is_ok() != reused_end.is_ok() {
+                failures.push(format!("seed {i} mutation {j}: PushDecoder"));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} reused decoders disagree with new ones:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(40)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
 fn frame(fhd: u8, fields: &[u8], blocks: &[u8]) -> Vec<u8> {
     let mut f = MAGIC.to_vec();
     f.push(fhd);

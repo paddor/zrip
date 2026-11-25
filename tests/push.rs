@@ -802,3 +802,42 @@ fn blocks_decode_over_the_room_earlier_blocks_left() {
     std::io::Read::read_to_end(&mut zrip::FrameDecoder::new(stream.as_slice()), &mut out).unwrap();
     assert_eq!(out, expected);
 }
+
+#[test]
+fn a_failed_table_description_leaves_later_frames_alone() {
+    use std::io::Read;
+
+    // One sequence: literal lengths in RLE mode, then an offset table
+    // description that ends early. The first table is replaced, the block
+    // fails.
+    let corrupt = [
+        0x28, 0xB5, 0x2F, 0xFD, 0x24, 0x11, 0x3D, 0x00, 0x00, 0x08, 0x17, 0x01, 0x60, 0x08, 0x10,
+        0x02, 0x30, 0xCD, 0x5F, 0x23,
+    ];
+    let data = mixed(5_000, 3);
+    // The decoders keep the tables of the last block and reuse them for a
+    // block that describes the same ones, as this frame does after itself.
+    let valid = zrip::compress(&data, 1).unwrap();
+
+    let mut dec = PushDecoder::new();
+    let mut out = Vec::new();
+    dec.decode_to_vec(&valid, &mut out).unwrap();
+    assert_eq!(out, data);
+    dec.reset();
+    assert!(dec.decode_to_vec(&corrupt, &mut Vec::new()).is_err());
+    dec.reset();
+    out.clear();
+    dec.decode_to_vec(&valid, &mut out).unwrap();
+    assert_eq!(out, data);
+
+    let mut dec = zrip::FrameDecoder::new(&valid[..]);
+    out.clear();
+    dec.read_to_end(&mut out).unwrap();
+    assert_eq!(out, data);
+    dec.reset(&corrupt[..]);
+    assert!(dec.read_to_end(&mut Vec::new()).is_err());
+    dec.reset(&valid[..]);
+    out.clear();
+    dec.read_to_end(&mut out).unwrap();
+    assert_eq!(out, data);
+}
