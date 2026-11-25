@@ -29,8 +29,8 @@ seconds / GB
 <rect x="71" y="284" width="16" height="18" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="71" y="238" width="16" height="46" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="71" y="234" width="16" height="4" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="87" y="281" width="16" height="21" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="87" y="236" width="16" height="45" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="87" y="282" width="16" height="20" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="87" y="236" width="16" height="46" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="87" y="230" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="103" y="283" width="17" height="19" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="103" y="237" width="17" height="46" opacity="1" fill="#C47D08" stroke="none"/>
@@ -264,7 +264,7 @@ sao
 <rect x="459" y="555" width="16" height="4" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="475" y="593" width="16" height="19" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="475" y="557" width="16" height="36" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="475" y="552" width="16" height="5" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="475" y="551" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="491" y="594" width="16" height="18" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="491" y="558" width="16" height="36" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="491" y="553" width="16" height="5" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -311,8 +311,8 @@ x-ray
 <rect x="717" y="589" width="16" height="15" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="717" y="587" width="16" height="2" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="733" y="603" width="16" height="9" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="733" y="588" width="16" height="15" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="733" y="585" width="16" height="3" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="733" y="589" width="16" height="14" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="733" y="586" width="16" height="3" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="749" y="603" width="16" height="9" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="749" y="589" width="16" height="14" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="749" y="586" width="16" height="3" opacity="1" fill="#F59E0B" stroke="none"/>
