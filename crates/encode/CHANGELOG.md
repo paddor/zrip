@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-11-25
+
+- Blocks whose custom sequence tables would not beat the predefined ones
+  no longer build them. Flushed 2 KB JSON messages encode 5.5% faster.
+- L-7 grows its search step every 16 bytes without a match, as L-6 does:
+  its ratio on Silesia slices rises from 1.50 to 1.59. L4's short hash
+  table doubles, so L4 no longer encodes highly compressible data faster
+  than L3. Blocks whose matches cover an eighth or more keep literals raw
+  at L-6 to L-3 above 5.1, 5.25, 5.4 and 6 bits per byte.
+- Depends on zrip-core 0.14.2.
+
 ## [0.10.3] - 2026-11-24
 
 - `Options::content_checksum(false)` leaves the content checksum out of

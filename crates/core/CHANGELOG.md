@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-11-25
+
+- Huffman decode tables carry 16-bit rows, the code length in the low byte
+  and the symbol in the high byte, as C zstd's `HUF_DEltX1`. The fast
+  loops read one row per symbol.
+- `Dictionary::from_bytes` rejects repeat offsets larger than the
+  dictionary content, as C zstd does. `finalize_dictionary` picks the
+  repeat offsets from the content it keeps and pads content shorter than 8
+  bytes with zeros in front.
+
 ## [0.14.1] - 2026-11-24
 
 - `push::Status::NeedsOutput` says more output may follow, not that it is
