@@ -400,6 +400,7 @@ Rust chart generation lives in the `bench` crate and reads
 | Command | Output | Description |
 |---------|--------|-------------|
 | `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- scatter` | `scatter.svg` | Encode speed vs ratio geomean |
+| `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- decode-scatter` | `decode_scatter.svg` | Decode speed vs ratio geomean, per level: each codec on its own frames and on C zstd's |
 | `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- summary` | `summary.svg` | Summary comparison table |
 | `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- matrix` | `matrix.svg` | Per-file/level heatmap matrix |
 | `cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- pipeline` | `pipeline.svg` | Encode+decode pipeline throughput |
@@ -420,6 +421,8 @@ cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
   --small-only
 cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
   --small-only --decode-only --levels 3 --impl zrip
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --decode-only --impl zrip
 ```
 
 That updates the `zrip` rows used by the charts without rerunning stable
@@ -434,6 +437,17 @@ cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- scatter
 cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- summary
 cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- matrix
 cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- pipeline
+```
+
+`decode_scatter.svg` also needs every codec decoding C zstd's frames of
+the full corpus, at every level. `--decode-only` measures that and writes
+the rows to `~/.cache/zrip/<arch>/decode_cmp/`. Each codec's series on its
+own frames comes from the corpus rows:
+
+```bash
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --decode-only --impl all
+cargo run --manifest-path bench/Cargo.toml --bin zrip_charts -- decode-scatter
 ```
 
 The `all` chart command also renders small-input charts, so it needs
@@ -508,6 +522,8 @@ change, or when explicitly asked to re-run every implementation.
 ```bash
 cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
   --impl all
+cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
+  --decode-only --impl all
 cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \
   --small-only --impl all
 cargo run --manifest-path bench/Cargo.toml --example zrip_bench --release -- \

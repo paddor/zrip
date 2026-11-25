@@ -107,7 +107,7 @@ Medium compressibility
 <rect x="95" y="512" width="27" height="4" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="124" y="541" width="27" height="20" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="124" y="517" width="27" height="24" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="124" y="511" width="27" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="124" y="512" width="27" height="5" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="153" y="543" width="27" height="18" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="153" y="516" width="27" height="27" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="153" y="510" width="27" height="6" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -146,7 +146,7 @@ Level 1
 <rect x="602" y="499" width="27" height="7" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="631" y="521" width="27" height="40" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="631" y="501" width="27" height="20" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="631" y="493" width="27" height="8" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="631" y="494" width="27" height="7" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="660" y="526" width="27" height="35" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="660" y="506" width="27" height="20" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="660" y="498" width="27" height="8" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -223,7 +223,7 @@ Level 1
 <rect x="602" y="758" width="27" height="6" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="631" y="813" width="27" height="25" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="631" y="780" width="27" height="33" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="631" y="774" width="27" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="631" y="775" width="27" height="5" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="660" y="798" width="27" height="40" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="660" y="767" width="27" height="31" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="660" y="760" width="27" height="7" opacity="1" fill="#F59E0B" stroke="none"/>

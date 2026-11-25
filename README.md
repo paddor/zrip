@@ -33,6 +33,7 @@ produced at any zstd compression level. The encoder supports levels -7 through
 
 ![per-file pipeline](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/pipeline.svg)
 ![encode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/scatter.svg)
+![decode speed vs compression ratio](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/decode_scatter.svg)
 ![per-file encode/decode matrix](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/matrix.svg)
 ![tiny input pipeline by compressibility](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/tiny_matrix.svg)
 ![small input encode throughput](https://raw.githubusercontent.com/paddor/zrip/main/doc/charts/x86_64/small_encode.svg)

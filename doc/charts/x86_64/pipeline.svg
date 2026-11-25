@@ -78,8 +78,8 @@ mozilla
 <rect x="329" y="265" width="17" height="20" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="329" y="261" width="17" height="4" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="346" y="286" width="16" height="16" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="346" y="266" width="16" height="20" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="346" y="260" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="346" y="265" width="16" height="21" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="346" y="260" width="16" height="5" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="362" y="285" width="16" height="17" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="362" y="265" width="16" height="20" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="362" y="259" width="16" height="6" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -263,8 +263,8 @@ sao
 <rect x="459" y="575" width="16" height="17" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="459" y="570" width="16" height="5" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="475" y="589" width="16" height="23" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="475" y="571" width="16" height="18" opacity="1" fill="#C45050" stroke="none"/>
-<rect x="475" y="566" width="16" height="5" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="475" y="572" width="16" height="17" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="475" y="566" width="16" height="6" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="491" y="592" width="16" height="20" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="491" y="575" width="16" height="17" opacity="1" fill="#C47D08" stroke="none"/>
 <rect x="491" y="568" width="16" height="7" opacity="1" fill="#F59E0B" stroke="none"/>
@@ -286,8 +286,8 @@ webster
 <rect x="588" y="604" width="16" height="8" opacity="1" fill="#60A5FA" stroke="none"/>
 <rect x="588" y="561" width="16" height="43" opacity="1" fill="#4680C4" stroke="none"/>
 <rect x="588" y="557" width="16" height="4" opacity="1" fill="#60A5FA" stroke="none"/>
-<rect x="604" y="604" width="16" height="8" opacity="1" fill="#F87171" stroke="none"/>
-<rect x="604" y="562" width="16" height="42" opacity="1" fill="#C45050" stroke="none"/>
+<rect x="604" y="605" width="16" height="7" opacity="1" fill="#F87171" stroke="none"/>
+<rect x="604" y="562" width="16" height="43" opacity="1" fill="#C45050" stroke="none"/>
 <rect x="604" y="557" width="16" height="5" opacity="1" fill="#F87171" stroke="none"/>
 <rect x="620" y="603" width="16" height="9" opacity="1" fill="#F59E0B" stroke="none"/>
 <rect x="620" y="561" width="16" height="42" opacity="1" fill="#C47D08" stroke="none"/>
