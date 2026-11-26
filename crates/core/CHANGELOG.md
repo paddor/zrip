@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.14.4] - 2026-11-26
+
 - `finalize_dictionary` fills `dict_size`: the content takes what the
   header and tables leave, as in C zstd, not `dict_size - 256` bytes.
   `finalize_dictionary` and `select_segments` count sizes under the new

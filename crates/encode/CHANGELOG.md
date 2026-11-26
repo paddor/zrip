@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.10.6] - 2026-11-26
+
+- Depends on zrip-core 0.14.4.
+
 ## [0.10.5] - 2026-11-26
 
 - Depends on zrip-core 0.14.3.
