@@ -15,7 +15,7 @@ workspace = true
 default = ["std", "simd"]
 std = ["alloc", "zrip-core/std"]
 alloc = ["zrip-core/alloc"]
-simd = ["dep:fearless_simd"]
+simd = ["std", "dep:fearless_simd"]
 frame = ["std"]
 nightly = ["zrip-core/nightly"]
 # No effect today: every build is safe Rust. Kept so existing feature lists

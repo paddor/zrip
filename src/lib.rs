@@ -84,7 +84,8 @@
 //! - **`frame`** (default): frame header parsing/writing; implies `std`.
 //! - **`ldm`** (default): long distance matching for large-window compression.
 //! - **`dict_builder`**: FastCOVER dictionary training.
-//! - **`simd`** (default): runtime SIMD dispatch (AVX2+BMI2, NEON, SIMD128).
+//! - **`simd`** (default): runtime SIMD dispatch (AVX2+BMI2, NEON, SIMD128);
+//!   implies `std`.
 //! - **`paranoid`**: keeps any future `unsafe` out; no effect today.
 //! - **`nightly`**: `#[optimize]` attributes for hot paths.
 

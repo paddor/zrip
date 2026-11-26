@@ -11,6 +11,13 @@
   (`zrip::dict::MIN_DICT_SIZE`), which C zstd rejects, give a 256-byte
   dictionary; they gave a 127-byte one of padding.
 
+### Changed
+
+- The `simd` feature implies `std`, as `ldm` does. Builds with `alloc` and
+  `simd` but without `std` decoded without SIMD, because the decoder needs
+  `std` to detect the CPU at run time. They linked `std` already, through
+  `zrip-encode` and `fearless_simd`, so no build gains a requirement.
+
 ## [0.8.28] - 2026-11-26
 
 ### Fixed

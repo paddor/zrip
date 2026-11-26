@@ -192,7 +192,9 @@ fn encode_frames_back_to_back_and_reset() {
 #[test]
 fn encode_options_and_dict() {
     let data = mixed(1 << 20, 5);
-    let opts = zrip::Options::default().window_log(20).ldm(true);
+    let opts = zrip::Options::default().window_log(20);
+    #[cfg(feature = "ldm")]
+    let opts = opts.ldm(true);
     let mut enc = PushEncoder::with_options(1, &opts).unwrap();
     let frame = push_encode(&mut enc, &data, 70_000, 1 << 16);
     assert_eq!(zstd::decode_all(&frame[..]).unwrap(), data);
@@ -484,7 +486,9 @@ fn one_pass_frames_match_one_shot() {
         zrip::compress_with_dict(&samples[0], 3, &dict).unwrap()
     );
 
-    let opts = zrip::Options::default().window_log(20).ldm(true);
+    let opts = zrip::Options::default().window_log(20);
+    #[cfg(feature = "ldm")]
+    let opts = opts.ldm(true);
     let data = mixed(200_000, 3);
     let mut enc = PushEncoder::with_options(1, &opts).unwrap();
     let mut out = Vec::new();
