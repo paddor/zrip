@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [0.8.22] - 2026-11-26
+
 - The `simd` feature implies `std`, as in `zrip-encode`. Without `std` the
   SIMD dispatch was compiled out, though `fearless_simd` linked `std`.
+- Depends on zrip-core 0.14.4.
 
 ## [0.8.21] - 2026-11-26
 

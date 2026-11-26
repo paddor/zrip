@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.29] - 2026-11-26
+
 ### Fixed
 
 - Trained dictionaries fill the size asked for, header and tables
