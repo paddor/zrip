@@ -463,7 +463,10 @@ impl PushDecoder {
                 self.frame.check_block_header(header)?;
                 let size = header.block_size as usize;
                 let last = header.last_block;
-                self.frame.start_block();
+                self.frame.start_block(match header.block_type {
+                    BlockType::Compressed => 0,
+                    _ => size,
+                });
                 self.output_pos = 0;
                 self.output_end = 0;
                 self.unit = match header.block_type {

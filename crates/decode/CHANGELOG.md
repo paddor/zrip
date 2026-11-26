@@ -6,6 +6,12 @@
   of a second pass over the table, and only for 4-stream sections. On x86
   the fast loop reads table entries again, as in 0.8.19. One-shot decoding
   of 1.8-116 KB JSON on x86 is 3-18% faster than in 0.8.20.
+- `PushDecoder` and `FrameDecoder` bound blocks by the window below 128 KiB
+  (`Block_Maximum_Size`), and size a compressed block's first room from
+  the block, as one-shot decoding does. A new decoder reserves and zeroes
+  room for the messages it decodes, not for a whole block: a new
+  `PushDecoder` per stream of 19 small flushed messages on a 64 KiB window
+  decodes 17x faster, in a quarter of C zstd's time.
 
 ## [0.8.20] - 2026-11-25
 

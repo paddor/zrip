@@ -431,6 +431,32 @@ fn decoders_take_what_the_frame_needs() {
 }
 
 #[test]
+fn new_stream_decoders_reserve_what_small_messages_need() {
+    // A stream on a 64 KiB window, flushed after a message and without a
+    // content size. A new decoder reserves and zeroes room for the message,
+    // not for a whole block, which on glibc took fresh pages per decoder.
+    let msg = sample(500);
+    let mut c = zstd::stream::Encoder::new(Vec::new(), 3).unwrap();
+    c.window_log(16).unwrap();
+    c.write_all(&msg).unwrap();
+    c.flush().unwrap();
+    let stream = c.get_ref().clone();
+    // The decoders' workspaces take about 13 KiB.
+    let report = Report::new(4, 24 * 1024);
+    report.check("frame decoder, 64 KiB window", 0, msg.len(), || {
+        let mut out = vec![0; msg.len()];
+        FrameDecoder::new(stream.as_slice())
+            .read_exact(&mut out)
+            .unwrap();
+    });
+    report.check("push decoder, 64 KiB window", 0, msg.len(), || {
+        let mut out = Vec::new();
+        PushDecoder::new().decode_to_vec(&stream, &mut out).unwrap();
+    });
+    report.finish();
+}
+
+#[test]
 fn stream_decoders_reserve_at_most_8_mib_for_a_declared_content_size() {
     // A 128 MiB window and content size: the header alone, and with a
     // 16-byte raw block.
