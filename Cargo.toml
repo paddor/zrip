@@ -29,9 +29,12 @@ nightly = ["zrip-core/nightly", "zrip-encode/nightly", "zrip-decode/nightly"]
 paranoid = ["zrip-core/paranoid", "zrip-encode/paranoid", "zrip-decode/paranoid"]
 
 [dependencies]
-zrip-core = { version = "0.14.2", path = "crates/core", default-features = false }
-zrip-encode = { version = "0.10.4", path = "crates/encode", default-features = false }
-zrip-decode = { version = "0.8.20", path = "crates/decode", default-features = false }
+# Exact versions: a sub-crate release that moves to a new zrip-core must never pair with an
+# older zrip (0.8.0 to 0.8.23 no longer build since zrip-decode 0.8.20 took zrip-core 0.14).
+# release-plz moves the pins with each release.
+zrip-core = { version = "=0.14.2", path = "crates/core", default-features = false }
+zrip-encode = { version = "=0.10.4", path = "crates/encode", default-features = false }
+zrip-decode = { version = "=0.8.20", path = "crates/decode", default-features = false }
 
 [lints]
 workspace = true
@@ -145,6 +148,10 @@ path = "tests/roundtrip.rs"
 [[test]]
 name = "zrip_spec_conformance"
 path = "tests/spec_conformance.rs"
+
+[[test]]
+name = "zrip_sub_crate_pins"
+path = "tests/sub_crate_pins.rs"
 
 [[test]]
 name = "zrip_zstd_golden"

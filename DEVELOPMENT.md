@@ -43,7 +43,8 @@ Do not add a crates.io token secret.
 ### Steps
 
 1. **Review the release-plz PR.** Verify semver bumps and dependency versions
-   for every affected crate.
+   for every affected crate. zrip pins its sub-crates with `=` (see
+   `tests/sub_crate_pins.rs`); release-plz moves the pins to the new versions.
 
 2. **Curate changelogs.** Insert a new `## [x.y.z]` section immediately below
    `## [Unreleased]` for each bumped crate and place its release notes there.
