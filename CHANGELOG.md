@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- zrip depends on the exact zrip-core, zrip-decode and zrip-encode versions
+  it is released with. zrip 0.8.0 to 0.8.23 accept any newer sub-crate of
+  the same minor version, and since zrip-decode 0.8.20 moved to zrip-core
+  0.14 they fail to build when their dependencies are resolved anew. Use
+  0.8.24 or later.
 - x86 decodes as fast as in 0.8.26 again. 0.8.27 decoded one-shot JSON
   messages of 1.8-116 KB 3-21% slower: it built the 16-bit rows of each new
   Huffman table in a second pass, and on x86 its row loop kept the stream
