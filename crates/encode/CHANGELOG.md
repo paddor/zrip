@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-11-26
+
+- Depends on zrip-core 0.14.3.
+
 ## [0.10.4] - 2026-11-25
 
 - Blocks whose custom sequence tables would not beat the predefined ones
