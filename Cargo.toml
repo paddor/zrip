@@ -138,6 +138,10 @@ name = "zrip_push"
 path = "tests/push.rs"
 
 [[test]]
+name = "zrip_push_long_distance"
+path = "tests/push_long_distance.rs"
+
+[[test]]
 name = "zrip_push_uninit_soak"
 path = "tests/push_uninit_soak.rs"
 

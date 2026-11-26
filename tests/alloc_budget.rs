@@ -457,6 +457,31 @@ fn new_stream_decoders_reserve_what_small_messages_need() {
 }
 
 #[test]
+fn stream_decoders_do_not_reserve_a_window_without_a_content_size() {
+    // A 128 MiB window without a content size, as C zstd's long distance
+    // matching declares it, then a 16-byte raw block. The decoders reserve
+    // for the block, not for the window a peer states.
+    let mut frame = vec![0x28, 0xb5, 0x2f, 0xfd, 0x00, (27 - 10) << 3];
+    frame.extend_from_slice(&[0x80, 0x00, 0x00]);
+    frame.extend_from_slice(&[7; 16]);
+    let report = Report::new(4, 24 * 1024);
+    report.check("frame decoder, 128 MiB window", 0, 16, || {
+        let mut out = Vec::new();
+        FrameDecoder::new(frame.as_slice())
+            .read_to_end(&mut out)
+            .unwrap_err();
+    });
+    report.check("push decoder, 128 MiB window", 0, 16, || {
+        let mut out = Vec::new();
+        let mut dec = PushDecoder::new();
+        dec.decode_to_vec(&frame, &mut out).unwrap();
+        assert_eq!(out, [7; 16]);
+        dec.finish().unwrap_err();
+    });
+    report.finish();
+}
+
+#[test]
 fn stream_decoders_reserve_at_most_8_mib_for_a_declared_content_size() {
     // A 128 MiB window and content size: the header alone, and with a
     // 16-byte raw block.
