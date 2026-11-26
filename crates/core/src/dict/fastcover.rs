@@ -6,6 +6,8 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::dict::MIN_DICT_SIZE;
+
 /// FastCOVER parameters.
 pub struct FastCoverParams {
     /// Segment size in bytes.
@@ -30,8 +32,12 @@ impl Default for FastCoverParams {
 /// Picks up to `dict_size` bytes of content from `samples`: the `k`-byte
 /// segments whose d-mers are most frequent, best last. Pads with the end
 /// of the samples when segments run out. Samples shorter than `k` in
-/// total come back as is, cut to `dict_size`.
+/// total come back as is, cut to `dict_size`. Sizes under
+/// [`MIN_DICT_SIZE`] count as `MIN_DICT_SIZE`, as in
+/// [`finalize_dictionary`](super::finalize::finalize_dictionary), which
+/// keeps the end of the content that fits beside its tables.
 pub fn select_segments(samples: &[&[u8]], dict_size: usize, params: &FastCoverParams) -> Vec<u8> {
+    let dict_size = dict_size.max(MIN_DICT_SIZE);
     let d = params.d;
     let k = params.k;
     let accel = params.accel.max(1);

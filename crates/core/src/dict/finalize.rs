@@ -6,7 +6,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::dict::DICT_MAGIC;
+use crate::dict::{DICT_MAGIC, MIN_DICT_SIZE};
 use crate::fse::{LL_DEFAULT_ACCURACY, ML_DEFAULT_ACCURACY, OF_DEFAULT_ACCURACY};
 use crate::fse::{LL_DEFAULT_DIST, ML_DEFAULT_DIST, OF_DEFAULT_DIST};
 use crate::huffman::encode::HuffmanEncodeTable;
@@ -14,12 +14,34 @@ use crate::huffman::encode::HuffmanEncodeTable;
 /// Least content a dictionary holds: the largest default repeat offset.
 const MIN_CONTENT: usize = 8;
 
-/// Builds dictionary bytes from the last `dict_size - 256` bytes of
-/// `content`, or all of it if shorter. The Huffman table follows the
-/// samples' literals; the FSE tables are the predefined ones.
+/// Magic, dictionary ID and the three repeat offsets.
+const FIXED_HEADER: usize = 4 + 4 + 12;
+
+/// Builds a dictionary of at most `dict_size` bytes, header and tables
+/// included, from the end of `content`. Sizes under [`MIN_DICT_SIZE`] count
+/// as `MIN_DICT_SIZE`. The Huffman table follows the samples' literals; the
+/// FSE tables are the predefined ones.
 pub fn finalize_dictionary(content: &[u8], samples: &[&[u8]], dict_size: usize) -> Vec<u8> {
-    // Leave 256 bytes of `dict_size` for the header and tables.
-    let content_len = content.len().min(dict_size.saturating_sub(256));
+    let dict_size = dict_size.max(MIN_DICT_SIZE);
+    let fse_tables = default_fse_tables();
+
+    // As C zstd's `ZDICT_finalizeDictionary`: the Huffman table follows all
+    // content that fits beside the fixed header and the FSE tables, then the
+    // content is cut to what fits beside the Huffman table too. The table
+    // codes every byte, so it holds for the shorter content.
+    let tables = FIXED_HEADER + fse_tables.len();
+    let candidate = &content[content.len() - content.len().min(dict_size - tables)..];
+    // Every byte value counts once more, so the table codes any literals
+    // and frames can always reuse it.
+    let huf_table = literal_table(candidate, samples);
+    let huf = huf_table.weights_description();
+    let room = dict_size - tables - huf.len();
+    debug_assert!(
+        room >= MIN_CONTENT,
+        "MIN_DICT_SIZE holds the largest tables"
+    );
+
+    let content_len = content.len().min(room);
     let content_start = content.len() - content_len;
     // As C zstd, content shorter than the largest default repeat offset is
     // padded with zeros in front, so every repeat offset reaches into it.
@@ -44,27 +66,11 @@ pub fn finalize_dictionary(content: &[u8], samples: &[&[u8]], dict_size: usize) 
     dict.extend_from_slice(&dict_id.to_le_bytes());
 
     // Huffman table for the literals the samples leave when matched against
-    // the content. As in C zstd's `ZDICT_finalizeDictionary`, every byte value
-    // counts once more, so the table codes any literals and frames can always
-    // reuse it.
-    dict.extend_from_slice(literal_table(kept, samples).weights_description());
+    // the content.
+    dict.extend_from_slice(huf);
 
-    // FSE tables: serialize the default distributions
-    let of_bytes = crate::fse::table_builder::serialize_fse_table_description(
-        &OF_DEFAULT_DIST,
-        OF_DEFAULT_ACCURACY,
-    );
-    dict.extend_from_slice(&of_bytes);
-    let ml_bytes = crate::fse::table_builder::serialize_fse_table_description(
-        &ML_DEFAULT_DIST,
-        ML_DEFAULT_ACCURACY,
-    );
-    dict.extend_from_slice(&ml_bytes);
-    let ll_bytes = crate::fse::table_builder::serialize_fse_table_description(
-        &LL_DEFAULT_DIST,
-        LL_DEFAULT_ACCURACY,
-    );
-    dict.extend_from_slice(&ll_bytes);
+    // FSE tables
+    dict.extend_from_slice(&fse_tables);
 
     // Repeat offsets
     dict.extend_from_slice(&rep_offsets[0].to_le_bytes());
@@ -74,7 +80,17 @@ pub fn finalize_dictionary(content: &[u8], samples: &[&[u8]], dict_size: usize) 
     // Content
     dict.extend_from_slice(kept);
 
+    debug_assert!(dict.len() <= dict_size);
     dict
+}
+
+/// The OF, ML and LL tables' descriptions of the predefined distributions.
+fn default_fse_tables() -> Vec<u8> {
+    use crate::fse::table_builder::serialize_fse_table_description as describe;
+    let mut out = describe(&OF_DEFAULT_DIST, OF_DEFAULT_ACCURACY);
+    out.extend_from_slice(&describe(&ML_DEFAULT_DIST, ML_DEFAULT_ACCURACY));
+    out.extend_from_slice(&describe(&LL_DEFAULT_DIST, LL_DEFAULT_ACCURACY));
+    out
 }
 
 /// Shortest match the literal count takes, as at levels 3 and 4.
@@ -236,16 +252,41 @@ mod tests {
 
     #[test]
     fn repeat_offsets_stay_inside_the_kept_content() {
-        // A 512-byte dictionary keeps 256 bytes of content. The sample
-        // matches 600 bytes before the content's end, outside of them.
+        // A 512-byte dictionary keeps less than 512 bytes of content. The
+        // sample matches 600 bytes before the content's end, outside of them.
         let content: Vec<u8> = (0..2048u32)
             .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
             .collect();
         let sample = &content[2048 - 600..2048 - 500];
         let dict = finalize_dictionary(&content, &[sample], 512);
         let parsed = crate::dict::Dictionary::from_bytes(&dict).expect("valid dictionary");
-        assert_eq!(parsed.content().len(), 256);
+        assert_eq!(dict.len(), 512);
+        assert!(parsed.content().len() < 512);
         assert_eq!(*parsed.rep_offsets(), [1, 4, 8]);
+    }
+
+    #[test]
+    fn dictionaries_fill_the_size_asked_for() {
+        // As C zstd: the content takes what the header and tables leave.
+        // Sizes under the least count as the least.
+        let content: Vec<u8> = (0..65536u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
+            .collect();
+        let samples = [&content[1000..1300], &content[40_000..40_200]];
+        for size in [0, 1, 16, 64, 127, 255, 256, 257, 300, 1024, 16384] {
+            let dict = finalize_dictionary(&content, &samples, size);
+            assert_eq!(dict.len(), size.max(MIN_DICT_SIZE), "size {size}");
+            let parsed = crate::dict::Dictionary::from_bytes(&dict).expect("valid dictionary");
+            assert!(content.ends_with(parsed.content()), "size {size}");
+        }
+    }
+
+    #[test]
+    fn the_largest_tables_fit_the_least_size() {
+        // A Huffman description takes at most 128 bytes: one header byte
+        // below 128, then that many bytes.
+        let largest = FIXED_HEADER + default_fse_tables().len() + 128;
+        assert!(largest + MIN_CONTENT <= MIN_DICT_SIZE, "{largest}");
     }
 
     #[test]

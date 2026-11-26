@@ -227,6 +227,9 @@ let dict = train_dict_fastcover(&samples, 16384, FastCoverParams::default());
 // Use with compress_with_dict() / decompress_with_dict()
 ```
 
+The size counts the dictionary header and tables, as in C zstd. Sizes under
+256 bytes (`zrip::dict::MIN_DICT_SIZE`) count as 256.
+
 ### Adaptive level
 
 `zrip::adaptive::AdaptiveLevel` picks the level at run time. The caller reports

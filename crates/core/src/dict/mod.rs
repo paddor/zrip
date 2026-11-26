@@ -29,6 +29,11 @@ use crate::huffman::weights::{build_huffman_decode_table, parse_huffman_weights}
 /// Magic number at the start of a zstd dictionary.
 pub const DICT_MAGIC: u32 = 0xEC30_A437;
 
+/// Least dictionary size, in bytes, that training builds: smaller sizes
+/// count as this one. C zstd's `ZDICT_DICTSIZE_MIN`, which rejects them.
+#[cfg(feature = "dict_builder")]
+pub const MIN_DICT_SIZE: usize = 256;
+
 /// A pre-trained zstd dictionary for improved compression of small data.
 ///
 /// Load from raw bytes with [`Dictionary::from_bytes`], or train with
@@ -276,6 +281,10 @@ mod tests {
 
 #[cfg(feature = "dict_builder")]
 /// Trains a dictionary from sample data using the FastCOVER algorithm.
+///
+/// `dict_size` is the size of the dictionary in bytes, header and tables
+/// included. The dictionary fills it unless the samples are too few. Sizes
+/// under [`MIN_DICT_SIZE`] count as `MIN_DICT_SIZE`.
 pub fn train_dict_fastcover(
     samples: &[&[u8]],
     dict_size: usize,
