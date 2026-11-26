@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- `finalize_dictionary` fills `dict_size`: the content takes what the
+  header and tables leave, as in C zstd, not `dict_size - 256` bytes.
+  `finalize_dictionary` and `select_segments` count sizes under the new
+  `MIN_DICT_SIZE` (256) as `MIN_DICT_SIZE`.
+
 ## [0.14.3] - 2026-11-26
 
 - `build_huffman_decode_tables_into` builds a Huffman decode table and, if

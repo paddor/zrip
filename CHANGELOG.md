@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Trained dictionaries fill the size asked for, header and tables
+  included, as C zstd does. They came out 110-150 bytes short, because
+  256 bytes were kept for a header that takes about 110, and a 256-byte
+  dictionary held no content. Sizes under 256 bytes
+  (`zrip::dict::MIN_DICT_SIZE`), which C zstd rejects, give a 256-byte
+  dictionary; they gave a 127-byte one of padding.
+
 ## [0.8.28] - 2026-11-26
 
 ### Fixed
