@@ -75,6 +75,6 @@ fn push_decoder_reads_c_long_distance_updates_from_megabytes_back() {
     }
     let mut out = Vec::new();
     dec.decode_to_vec(&end, &mut out).unwrap();
-    assert!(out.is_empty());
+    assert_eq!(out, b"");
     dec.finish().unwrap();
 }
