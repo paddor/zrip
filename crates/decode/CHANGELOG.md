@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.21] - 2026-11-26
+
 - A new Huffman table gets its fast-loop rows from the table build instead
   of a second pass over the table, and only for 4-stream sections. On x86
   the fast loop reads table entries again, as in 0.8.19. One-shot decoding
@@ -12,6 +14,7 @@
   room for the messages it decodes, not for a whole block: a new
   `PushDecoder` per stream of 19 small flushed messages on a 64 KiB window
   decodes 17x faster, in a quarter of C zstd's time.
+- Depends on zrip-core 0.14.3.
 
 ## [0.8.20] - 2026-11-25
 

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.28] - 2026-11-26
+
 ### Fixed
 
 - zrip depends on the exact zrip-core, zrip-decode and zrip-encode versions

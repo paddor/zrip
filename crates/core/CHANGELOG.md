@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-11-26
+
 - `build_huffman_decode_tables_into` builds a Huffman decode table and, if
   asked, its 16-bit fast-loop rows in the same stores, without the second
   pass over the table that `build_row_table` makes.

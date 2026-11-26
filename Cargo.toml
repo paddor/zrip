@@ -4,7 +4,7 @@ exclude = ["fuzz", "bench", "jsr", "npm"]
 
 [package]
 name = "zrip"
-version = "0.8.27"
+version = "0.8.28"
 edition = "2024"
 rust-version = "1.89"
 description = "Fast, memory-safe Rust implementation of Zstandard compression (levels -7..4)"
@@ -32,9 +32,9 @@ paranoid = ["zrip-core/paranoid", "zrip-encode/paranoid", "zrip-decode/paranoid"
 # Exact versions: a sub-crate release that moves to a new zrip-core must never pair with an
 # older zrip (0.8.0 to 0.8.23 no longer build since zrip-decode 0.8.20 took zrip-core 0.14).
 # release-plz moves the pins with each release.
-zrip-core = { version = "=0.14.2", path = "crates/core", default-features = false }
-zrip-encode = { version = "=0.10.4", path = "crates/encode", default-features = false }
-zrip-decode = { version = "=0.8.20", path = "crates/decode", default-features = false }
+zrip-core = { version = "=0.14.3", path = "crates/core", default-features = false }
+zrip-encode = { version = "=0.10.5", path = "crates/encode", default-features = false }
+zrip-decode = { version = "=0.8.21", path = "crates/decode", default-features = false }
 
 [lints]
 workspace = true
