@@ -244,7 +244,9 @@ fn encoder_pair(
             } else {
                 rng.range(10, 22) as u32
             };
-            let opts = Options::default().window_log(log).ldm(rng.chance(30));
+            let opts = Options::default().window_log(log);
+            #[cfg(feature = "ldm")]
+            let opts = opts.ldm(rng.chance(30));
             (
                 PushEncoder::with_options(level, &opts).unwrap(),
                 PushEncoder::with_options(level, &opts).unwrap(),

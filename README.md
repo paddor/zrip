@@ -243,7 +243,7 @@ It settles on the best measured level, which the caller applies with
 | `alloc`        | yes     | `no_std` + heap via `alloc` crate; includes `CompressContext`, `DecompressContext` |
 | `ldm`          | yes     | Long distance matching for large-window compression |
 | `dict_builder` | no      | FastCOVER dictionary training                  |
-| `simd`         | yes     | [`fearless_simd`](https://crates.io/crates/fearless_simd) runtime dispatch (AVX2+BMI2, NEON, SIMD128) |
+| `simd`         | yes     | [`fearless_simd`](https://crates.io/crates/fearless_simd) runtime dispatch (AVX2+BMI2, NEON, SIMD128); implies `std` |
 | `paranoid`     | no      | Keeps any future `unsafe` out; no effect today  |
 | `nightly`      | no      | `#[optimize]` attributes on hot functions      |
 
