@@ -689,3 +689,26 @@ fn set_level_prepares_the_dictionary_again() {
         }
     }
 }
+
+#[cfg(feature = "dict_builder")]
+#[test]
+fn small_dict_sizes_train_the_least_dictionary() {
+    // As bindings train: select the content, then finalize it.
+    use zrip::dict::fastcover::{FastCoverParams, select_segments};
+    use zrip::dict::{MIN_DICT_SIZE, finalize::finalize_dictionary, train_dict_fastcover};
+    let samples: Vec<Vec<u8>> = (0..64).map(|i| events(7 + i, 512)).collect();
+    let refs: Vec<&[u8]> = samples.iter().map(Vec::as_slice).collect();
+    let least = train_dict_fastcover(&refs, MIN_DICT_SIZE, FastCoverParams::default());
+    for size in [0, 16, 64, MIN_DICT_SIZE - 1, MIN_DICT_SIZE] {
+        let content = select_segments(&refs, size, &FastCoverParams::default());
+        let dict = finalize_dictionary(&content, &refs, size);
+        assert_eq!(dict.len(), MIN_DICT_SIZE, "size {size}");
+        let trained = train_dict_fastcover(&refs, size, FastCoverParams::default());
+        assert_eq!(trained.content(), least.content(), "size {size}");
+        let frame = zrip::compress_with_dict(&samples[3], 3, &trained).unwrap();
+        assert_eq!(
+            zrip::decompress_with_dict(&frame, &trained).unwrap(),
+            samples[3]
+        );
+    }
+}
