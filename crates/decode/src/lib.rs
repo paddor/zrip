@@ -910,6 +910,15 @@ mod tests {
         assert!(ws.huf_last_weights_valid);
         assert_eq!(ws.huf_last_weights, [1, 2, 3]);
     }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn stream_decoders_are_small_to_move() {
+        // Callers move decoders into readers, enums and results, and each
+        // move copies the whole value.
+        assert!(core::mem::size_of::<streaming::FrameDecoder<&[u8]>>() <= 128);
+        assert!(core::mem::size_of::<push::PushDecoder>() <= 128);
+    }
 }
 
 #[cfg(test)]

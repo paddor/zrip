@@ -62,7 +62,7 @@ pub struct FrameDecoder<R: Read> {
     /// is not read yet.
     output_pos: usize,
     output_end: usize,
-    frame: FrameState,
+    frame: Box<FrameState>,
 }
 
 impl<R: Read> FrameDecoder<R> {
@@ -86,7 +86,7 @@ impl<R: Read> FrameDecoder<R> {
         Self::from_state(reader, FrameState::new(Some(dict), max_output))
     }
 
-    fn from_state(reader: R, frame: FrameState) -> Self {
+    fn from_state(reader: R, frame: Box<FrameState>) -> Self {
         Self {
             inner: reader,
             state: State::FrameHeader,
