@@ -86,6 +86,8 @@ let original   = zrip::decompress(&compressed)?;
 // One-shot into caller buffer
 let n = zrip::compress_into(input, &mut output_buf, 1)?;
 zrip::decompress_into(&compressed, &mut output_vec)?;
+// Into a buffer of the decoded size: fails if the output does not fit.
+let len = zrip::decompress_to_slice(&compressed, &mut decoded_buf)?;
 
 // Reusable context (amortizes table allocation across calls)
 let mut ctx = zrip::CompressContext::new(1)?;
@@ -99,6 +101,7 @@ let mut frame = vec![0u8; zrip::compress_bound(input.len())];
 let n = ctx.compress_into(input, &mut frame)?;
 let mut owned = Vec::new();
 dec.decompress_into(&frame[..n], &mut owned)?;
+let len = dec.decompress_to_slice(&frame[..n], &mut decoded_buf)?;
 
 // Decode only the first frame and ignore what follows it (padding, more
 // frames). `consumed` is the input the frame took.

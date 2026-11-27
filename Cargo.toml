@@ -120,6 +120,10 @@ name = "zrip_decompress_capacity"
 path = "tests/decompress_capacity.rs"
 
 [[test]]
+name = "zrip_decompress_to_slice"
+path = "tests/decompress_to_slice.rs"
+
+[[test]]
 name = "zrip_differential"
 path = "tests/differential.rs"
 

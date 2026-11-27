@@ -211,6 +211,30 @@ pub fn decompress_frame_into(
     zrip_decode::decompress_frame_into(input, output, max_output)
 }
 
+/// [`decompress`] into `output`. Returns the number of bytes written to the
+/// start of `output`.
+///
+/// The output limit is `output.len()`: larger output fails with
+/// [`DecompressError::OutputTooSmall`], as C zstd's `ZSTD_decompress` (or
+/// the `zstd` crate's `decompress_to_buffer`) does. `output` needs no
+/// zeroing, and nothing is allocated for the output. Bytes past the returned
+/// length may be overwritten, and after an error `output` holds partial
+/// output. [`DecompressContext::decompress_to_slice`] also reuses the
+/// decoder's tables across calls.
+///
+/// ```
+/// let data = b"decode into a buffer of the known size".repeat(10);
+/// let frame = zrip::compress(&data, 1).unwrap();
+///
+/// let mut buf = vec![0u8; data.len()];
+/// assert_eq!(zrip::decompress_to_slice(&frame, &mut buf), Ok(data.len()));
+/// assert_eq!(buf, data);
+/// ```
+#[cfg(feature = "alloc")]
+pub fn decompress_to_slice(input: &[u8], output: &mut [u8]) -> Result<usize, DecompressError> {
+    zrip_decode::decompress_to_slice(input, output)
+}
+
 /// Compresses `input` into one frame at `level` (see [`MIN_LEVEL`] and
 /// [`MAX_LEVEL`]; 0 means [`DEFAULT_LEVEL`]).
 ///
