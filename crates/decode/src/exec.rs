@@ -262,6 +262,80 @@ pub(crate) fn decode_execute_sequences_room<const HAS_HISTORY: bool>(
     result
 }
 
+/// [`decode_execute_sequences`] into a caller's buffer: the block starts at
+/// `*len` in `output`, may write `scope.max_block_output` bytes, which fit
+/// in `output`, and gets no slack past them ([`SeqOut`] with `EXACT`).
+/// `*len` is set to where the output ends, also after an error. Nothing is
+/// zeroed, so a block with one sequence takes this loop too.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn decode_execute_sequences_slice<const HAS_HISTORY: bool>(
+    data: &[u8],
+    num_sequences: u32,
+    tables: &SequenceDecodeTables,
+    offsets: &mut [u32; 3],
+    literals: Literals<'_>,
+    output: &mut [u8],
+    len: &mut usize,
+    scope: SequenceOutputScope<'_>,
+) -> Result<(), DecompressError> {
+    if num_sequences == 0 {
+        return Ok(());
+    }
+    let bits = SeqBits::new(data).ok_or(DecompressError::CorruptSequences)?;
+    let state_bits = u32::from(tables.ll_accuracy)
+        + u32::from(tables.of_accuracy)
+        + u32::from(tables.ml_accuracy);
+    if bits.left < state_bits as usize {
+        return Err(DecompressError::InputExhausted);
+    }
+    // A short stream is read from a zero-padded copy.
+    let mut padded = [0u8; 8];
+    let data = if data.len() < 8 {
+        padded[..data.len()].copy_from_slice(data);
+        &padded[..]
+    } else {
+        data
+    };
+    let history = if HAS_HISTORY { scope.history } else { &[] };
+    let start = *len;
+    let base = scope.output_base.min(start);
+    let end = start
+        .saturating_add(scope.max_block_output)
+        .min(output.len());
+    let op = start - base;
+    // As in `decode_execute_sequences`.
+    let (result, op) = if u32::try_from(end).is_ok() {
+        let mut out = SeqOut::<true, true>::new(&mut output[base..end], op);
+        let result = run_sequences(
+            bits,
+            data,
+            num_sequences,
+            tables,
+            offsets,
+            literals,
+            &mut out,
+            history,
+        );
+        (result, out.op())
+    } else {
+        let mut out = SeqOut::<false, true>::new(&mut output[base..end], op);
+        let result = run_sequences(
+            bits,
+            data,
+            num_sequences,
+            tables,
+            offsets,
+            literals,
+            &mut out,
+            history,
+        );
+        (result, out.op())
+    };
+    *len = base + op;
+    result
+}
+
 /// The decoding half of the sequence loop: the three FSE states and the
 /// repeat offsets.
 #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -352,14 +426,14 @@ impl SeqDecoder {
 #[cfg(not(target_arch = "aarch64"))]
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn run_sequences<const NARROW: bool>(
+fn run_sequences<const NARROW: bool, const EXACT: bool>(
     bits: SeqBits,
     data: &[u8],
     num_sequences: u32,
     tables: &SequenceDecodeTables,
     offsets: &mut [u32; 3],
     literals: Literals<'_>,
-    out: &mut SeqOut<'_, NARROW>,
+    out: &mut SeqOut<'_, NARROW, EXACT>,
     history: &[u8],
 ) -> Result<(), DecompressError> {
     if data.len() < 8 {

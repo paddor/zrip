@@ -67,7 +67,7 @@ use alloc::vec::Vec;
 
 use crate::exec::{
     SequenceOutputScope, decode_execute_sequences, decode_execute_sequences_room,
-    decode_execute_single_sequence,
+    decode_execute_sequences_slice, decode_execute_single_sequence,
 };
 use crate::fast_vec::{Literals, WILDCOPY_OVERLENGTH};
 use crate::literals::decode_literals_ws;
@@ -253,6 +253,208 @@ pub(crate) fn remaining_output_limit(
         .ok_or(DecompressError::OutputTooSmall)
 }
 
+/// Where one-shot frame decoding writes: a growing `Vec`, or a caller's
+/// buffer ([`SliceOutput`]). The frame decoder checks every write against
+/// its output limit first, and a buffer's limit is its free space, so the
+/// writes always fit.
+pub(crate) trait FrameOutput {
+    /// Bytes written so far.
+    fn len(&self) -> usize;
+    /// The output from `start` on.
+    fn tail(&self, start: usize) -> &[u8];
+    /// Makes room for a frame that declares `size` bytes.
+    fn reserve_frame(&mut self, size: usize);
+    /// Appends `bytes`.
+    fn push(&mut self, bytes: &[u8]);
+    /// Appends `count` copies of `byte`.
+    fn push_fill(&mut self, byte: u8, count: usize);
+    /// Cuts the output to `len` bytes.
+    fn truncate(&mut self, len: usize);
+    /// Room the sequence loop first takes for a block that may write
+    /// `max_block` bytes and likely writes at most `guess`.
+    fn first_room(guess: usize, max_block: usize) -> usize;
+    /// Decodes and executes a block's sequences onto the output.
+    fn decode_sequences(
+        &mut self,
+        seq_data: &[u8],
+        num_sequences: u32,
+        seq_tables: &mut SequenceDecodeTables,
+        rep_offsets: &mut [u32; 3],
+        literals: Literals<'_>,
+        scope: SequenceOutputScope<'_>,
+    ) -> Result<(), DecompressError>;
+}
+
+impl FrameOutput for Vec<u8> {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        Vec::len(self)
+    }
+
+    #[inline(always)]
+    fn tail(&self, start: usize) -> &[u8] {
+        &self[start..]
+    }
+
+    #[inline(always)]
+    fn reserve_frame(&mut self, size: usize) {
+        self.reserve(size + WILDCOPY_OVERLENGTH);
+    }
+
+    #[inline(always)]
+    fn push(&mut self, bytes: &[u8]) {
+        self.extend_from_slice(bytes);
+    }
+
+    #[inline(always)]
+    fn push_fill(&mut self, byte: u8, count: usize) {
+        self.resize(Vec::len(self) + count, byte);
+    }
+
+    #[inline(always)]
+    fn truncate(&mut self, len: usize) {
+        Vec::truncate(self, len);
+    }
+
+    /// The loop zeroes its room up front, so it starts at the guess.
+    #[inline(always)]
+    fn first_room(guess: usize, max_block: usize) -> usize {
+        guess.min(max_block)
+    }
+
+    #[inline(always)]
+    fn decode_sequences(
+        &mut self,
+        seq_data: &[u8],
+        num_sequences: u32,
+        seq_tables: &mut SequenceDecodeTables,
+        rep_offsets: &mut [u32; 3],
+        literals: Literals<'_>,
+        scope: SequenceOutputScope<'_>,
+    ) -> Result<(), DecompressError> {
+        decode_sequences_dispatch(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            literals,
+            self,
+            scope,
+        )
+    }
+}
+
+/// A caller's buffer and the bytes decoded into it so far. Bytes past
+/// `len` hold whatever the caller left there, or scratch from the copies.
+pub(crate) struct SliceOutput<'a> {
+    buf: &'a mut [u8],
+    len: usize,
+}
+
+impl<'a> SliceOutput<'a> {
+    pub(crate) fn new(buf: &'a mut [u8]) -> Self {
+        Self { buf, len: 0 }
+    }
+
+    /// Bytes still free.
+    pub(crate) fn free(&self) -> usize {
+        self.buf.len() - self.len
+    }
+}
+
+impl FrameOutput for SliceOutput<'_> {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    #[inline(always)]
+    fn tail(&self, start: usize) -> &[u8] {
+        &self.buf[start..self.len]
+    }
+
+    #[inline(always)]
+    fn reserve_frame(&mut self, _size: usize) {}
+
+    #[inline(always)]
+    fn push(&mut self, bytes: &[u8]) {
+        let end = self.len + bytes.len();
+        self.buf[self.len..end].copy_from_slice(bytes);
+        self.len = end;
+    }
+
+    #[inline(always)]
+    fn push_fill(&mut self, byte: u8, count: usize) {
+        let end = self.len + count;
+        self.buf[self.len..end].fill(byte);
+        self.len = end;
+    }
+
+    #[inline(always)]
+    fn truncate(&mut self, len: usize) {
+        self.len = self.len.min(len);
+    }
+
+    /// Nothing to zero: all the room is there at once.
+    #[inline(always)]
+    fn first_room(_guess: usize, max_block: usize) -> usize {
+        max_block
+    }
+
+    #[inline(always)]
+    fn decode_sequences(
+        &mut self,
+        seq_data: &[u8],
+        num_sequences: u32,
+        seq_tables: &mut SequenceDecodeTables,
+        rep_offsets: &mut [u32; 3],
+        literals: Literals<'_>,
+        scope: SequenceOutputScope<'_>,
+    ) -> Result<(), DecompressError> {
+        decode_sequences_dispatch_slice(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            literals,
+            self.buf,
+            &mut self.len,
+            scope,
+        )
+    }
+}
+
+/// Decompresses every frame in `input` into `output`, skipping skippable
+/// frames. Returns the number of bytes written.
+///
+/// Fails with [`DecompressError::OutputTooSmall`] if the output does not
+/// fit in `output`. Bytes past the returned length may be overwritten.
+pub fn decompress_to_slice(input: &[u8], output: &mut [u8]) -> Result<usize, DecompressError> {
+    let mut ws = Box::new(BlockDecodeWorkspace::new());
+    decompress_to_slice_with_workspace(input, output, None, &mut ws)
+}
+
+/// [`decompress_to_slice`] with a dictionary and a workspace.
+pub(crate) fn decompress_to_slice_with_workspace(
+    input: &[u8],
+    output: &mut [u8],
+    dict: Option<&zrip_core::dict::Dictionary>,
+    ws: &mut BlockDecodeWorkspace,
+) -> Result<usize, DecompressError> {
+    let mut out = SliceOutput::new(output);
+    let mut offset = 0;
+    while offset < input.len() {
+        let remaining = &input[offset..];
+        if let Some(skip_len) = skip_skippable_frame(remaining) {
+            offset += skip_len;
+            continue;
+        }
+        let frame_limit = out.free();
+        offset += decompress_frame(remaining, &mut out, frame_limit, dict, ws)?;
+    }
+    Ok(out.len)
+}
+
 /// Decompresses every frame in `input`, skipping skippable frames.
 ///
 /// The output size is unbounded
@@ -335,9 +537,9 @@ pub fn decompress_with_dict_and_limit(
 
 /// Decodes the frame at the start of `input`, magic included, and appends
 /// at most `max_output` bytes to `output`. Returns the input bytes consumed.
-pub(crate) fn decompress_frame(
+pub(crate) fn decompress_frame<O: FrameOutput>(
     input: &[u8],
-    output: &mut Vec<u8>,
+    output: &mut O,
     max_output: usize,
     dict: Option<&zrip_core::dict::Dictionary>,
     ws: &mut BlockDecodeWorkspace,
@@ -359,9 +561,9 @@ pub(crate) fn decompress_frame_after_magic(
     decompress_frame_with_header(input, output, max_output, dict, ws, header)
 }
 
-fn decompress_frame_with_header(
+fn decompress_frame_with_header<O: FrameOutput>(
     input: &[u8],
-    output: &mut Vec<u8>,
+    output: &mut O,
     max_output: usize,
     dict: Option<&zrip_core::dict::Dictionary>,
     ws: &mut BlockDecodeWorkspace,
@@ -394,7 +596,7 @@ fn decompress_frame_with_header(
             // Trust the declared size up to 128 MiB, so a forged header
             // cannot force a huge allocation.
             let hint = fcs.min(MAX_WINDOW_SIZE as usize);
-            output.reserve(hint + WILDCOPY_OVERLENGTH);
+            output.reserve_frame(hint);
             (fcs, DecompressError::FrameSizeMismatch)
         }
         None => (max_output, DecompressError::OutputTooSmall),
@@ -461,7 +663,7 @@ fn decompress_frame_with_header(
                 if output.len() - output_start + block_size > max_output {
                     return Err(overrun);
                 }
-                output.extend_from_slice(&input[offset..offset + block_size]);
+                output.push(&input[offset..offset + block_size]);
                 offset += block_size;
             }
             BlockType::Rle => {
@@ -472,7 +674,7 @@ fn decompress_frame_with_header(
                     return Err(overrun);
                 }
                 let byte = input[offset];
-                output.resize(output.len() + block_size, byte);
+                output.push_fill(byte, block_size);
                 offset += 1;
             }
             BlockType::Compressed => {
@@ -520,7 +722,7 @@ fn decompress_frame_with_header(
             return Err(DecompressError::BlockTooLarge);
         }
         if let Some(ref mut hasher) = hasher {
-            hasher.update(&output[block_output_start..]);
+            hasher.update(output.tail(block_output_start));
         }
 
         if block_header.last_block {
@@ -606,9 +808,9 @@ const ROOM_PER_SEQUENCE_BYTE: usize = 64;
 /// `BlockTooLarge` past `block_size_max`, the frame's `Block_Maximum_Size`,
 /// which also bounds the literals.
 #[allow(clippy::too_many_arguments)]
-fn decode_compressed_block(
+fn decode_compressed_block<O: FrameOutput>(
     data: &[u8],
-    output: &mut Vec<u8>,
+    output: &mut O,
     output_start: usize,
     max_output: usize,
     block_size_max: usize,
@@ -632,7 +834,7 @@ fn decode_compressed_block(
         if output.len() - output_start + lits.len() > max_output {
             return Err(DecompressError::OutputTooSmall);
         }
-        output.extend_from_slice(lits);
+        output.push(lits);
         return Ok(());
     }
 
@@ -651,24 +853,25 @@ fn decode_compressed_block(
     // when the frame does not tell its size. A block that writes more
     // starts over with all the room it may use.
     let first_rep_offsets = *rep_offsets;
-    let mut max_block_output = seq_data
-        .len()
-        .saturating_mul(ROOM_PER_SEQUENCE_BYTE)
-        .saturating_add(literals.len())
-        .min(max_block);
+    let mut max_block_output = O::first_room(
+        seq_data
+            .len()
+            .saturating_mul(ROOM_PER_SEQUENCE_BYTE)
+            .saturating_add(literals.len()),
+        max_block,
+    );
     loop {
         let scope = SequenceOutputScope {
             output_base: output_start,
             max_block_output,
             history: dict_history,
         };
-        let result = decode_sequences_dispatch(
+        let result = output.decode_sequences(
             seq_data,
             num_sequences,
             seq_tables,
             rep_offsets,
             literals,
-            output,
             scope,
         );
         match result {
@@ -775,6 +978,78 @@ pub(crate) fn decode_sequences_dispatch(
             rep_offsets,
             literals,
             output,
+            scope,
+        )
+    }
+}
+
+/// [`decode_sequences_dispatch`] into a caller's buffer: the block starts at
+/// `*len` in `output`, and `*len` is set to where the output ends
+/// ([`decode_execute_sequences_slice`]). Runs once per block.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn decode_sequences_dispatch_slice(
+    seq_data: &[u8],
+    num_sequences: u32,
+    seq_tables: &mut SequenceDecodeTables,
+    rep_offsets: &mut [u32; 3],
+    literals: Literals<'_>,
+    output: &mut [u8],
+    len: &mut usize,
+    scope: SequenceOutputScope<'_>,
+) -> Result<(), DecompressError> {
+    #[cfg(all(feature = "std", feature = "simd"))]
+    {
+        let level = fearless_simd::Level::new();
+        return fearless_simd::dispatch!(level, _simd => {
+            if scope.history.is_empty() {
+                decode_execute_sequences_slice::<false>(
+                    seq_data,
+                    num_sequences,
+                    seq_tables,
+                    rep_offsets,
+                    literals,
+                    output,
+                    len,
+                    scope,
+                )
+            } else {
+                decode_execute_sequences_slice::<true>(
+                    seq_data,
+                    num_sequences,
+                    seq_tables,
+                    rep_offsets,
+                    literals,
+                    output,
+                    len,
+                    scope,
+                )
+            }
+        });
+    }
+
+    // Scalar build: no `std` or no `simd`.
+    #[allow(unreachable_code)]
+    if scope.history.is_empty() {
+        decode_execute_sequences_slice::<false>(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            literals,
+            output,
+            len,
+            scope,
+        )
+    } else {
+        decode_execute_sequences_slice::<true>(
+            seq_data,
+            num_sequences,
+            seq_tables,
+            rep_offsets,
+            literals,
+            output,
+            len,
             scope,
         )
     }

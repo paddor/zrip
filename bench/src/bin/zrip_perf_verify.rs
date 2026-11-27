@@ -126,6 +126,9 @@ enum Op {
     DecompressContext,
     /// One reused `DecompressContext`, `decompress_into` a reused `Vec`.
     DecompressInto,
+    /// One reused `DecompressContext`, `decompress_to_slice` into a reused
+    /// buffer of the largest input's size.
+    DecompressSlice,
     /// `FrameDecoder` reading each frame to the end.
     DecodeStream,
     /// One reused `PushDecoder`, fed 16 KiB at a time.
@@ -147,6 +150,7 @@ impl Op {
             Op::Decompress
                 | Op::DecompressContext
                 | Op::DecompressInto
+                | Op::DecompressSlice
                 | Op::DecodeStream
                 | Op::DecodePush
                 | Op::DecodePushFlush
@@ -257,6 +261,9 @@ fn cases() -> Vec<Case> {
         case("dcontext", "1m_bin", DecompressContext, 1, Binary, MIB),
         case("dcontext", "2k_unsized", DecompressUnsized, 3, Text, 2 * KIB),
         case("dinto", "16k", DecompressInto, 3, Text, 16 * KIB),
+        case("dslice", "2k", DecompressSlice, 3, Text, 2 * KIB),
+        case("dslice", "16k", DecompressSlice, 3, Text, 16 * KIB),
+        case("dslice", "1m_bin", DecompressSlice, 1, Binary, MIB),
         case("dstream", "4m", DecodeStream, 3, Text, 4 * MIB),
         case("dpush", "4m", DecodePush, 3, Text, 4 * MIB),
         case("dpush", "256b_flush", DecodePushFlush, 3, Text, 256),
@@ -689,6 +696,20 @@ fn measure(
                 for f in &frames {
                     out.clear();
                     black_box(dec.decompress_into(black_box(f), &mut out).unwrap());
+                }
+            })
+        }
+        Op::DecompressSlice => {
+            let frames = frames(case, inputs);
+            let mut dec = DecompressContext::new();
+            let mut out = vec![0; inputs.iter().map(Vec::len).max().unwrap_or(0)];
+            for (f, i) in frames.iter().zip(inputs) {
+                let n = dec.decompress_to_slice(f, &mut out).unwrap();
+                assert_eq!(&out[..n], i.as_slice(), "{}", case.section);
+            }
+            time(settings, || {
+                for f in &frames {
+                    black_box(dec.decompress_to_slice(black_box(f), &mut out).unwrap());
                 }
             })
         }

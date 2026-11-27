@@ -2,9 +2,10 @@
 //! test and the `decode_differential` fuzz target.
 //!
 //! Every zrip decoder must accept exactly the inputs C zstd accepts, with the
-//! same output: zrip's one-shot calls against `ZSTD_decompressDCtx`, and
-//! `FrameDecoder` and `PushDecoder` against `ZSTD_decompressStream`. C zstd
-//! runs without legacy format support, which zrip does not have.
+//! same output: zrip's one-shot calls, into a `Vec` or a slice, against
+//! `ZSTD_decompressDCtx`, and `FrameDecoder` and `PushDecoder` against
+//! `ZSTD_decompressStream`. C zstd runs without legacy format support,
+//! which zrip does not have.
 
 use std::io::Read;
 use zstd::zstd_safe;
@@ -30,6 +31,19 @@ pub fn check(input: &[u8], dict: Option<&[u8]>) -> Result<(), String> {
     };
     let mut errors = Vec::new();
     errors.extend(compare("one-shot", &c, &z, lenient).err());
+
+    // `decompress_to_slice` matches `ZSTD_decompressDCtx` with the same
+    // capacity. A buffer of exactly the output's size takes the exact copies
+    // at its end, and one byte less must fail.
+    let z = slice_decoder(input, zdict.as_ref(), LIMIT);
+    errors.extend(compare("decompress_to_slice", &c, &z, lenient).err());
+    if let Ok(out) = &c {
+        let z = slice_decoder(input, zdict.as_ref(), out.len());
+        errors.extend(compare("decompress_to_slice, exact size", &c, &z, lenient).err());
+        if !out.is_empty() && slice_decoder(input, zdict.as_ref(), out.len() - 1).is_ok() {
+            errors.push("decompress_to_slice: accepts a buffer one byte short".into());
+        }
+    }
 
     let c = c_stream(input, dict);
     let z = frame_decoder(input, zdict.clone());
@@ -222,6 +236,25 @@ fn c_stream(input: &[u8], dict: Option<&[u8]>) -> Result<Vec<u8>, String> {
             return Err("truncated input".into());
         }
     }
+}
+
+/// `decompress_to_slice` into a `capacity`-byte buffer of non-zero bytes:
+/// the free function without a dictionary, a context with one.
+fn slice_decoder(
+    input: &[u8],
+    dict: Option<&zrip::Dictionary>,
+    capacity: usize,
+) -> Result<Vec<u8>, String> {
+    let mut out = vec![0xA5; capacity];
+    let n = match dict {
+        Some(d) => {
+            zrip::DecompressContext::with_dict(d.clone()).decompress_to_slice(input, &mut out)
+        }
+        None => zrip::decompress_to_slice(input, &mut out),
+    }
+    .map_err(|e| format!("{e:?}"))?;
+    out.truncate(n);
+    Ok(out)
 }
 
 fn frame_decoder(input: &[u8], dict: Option<zrip::Dictionary>) -> Result<Vec<u8>, String> {

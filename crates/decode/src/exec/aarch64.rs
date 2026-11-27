@@ -97,14 +97,14 @@ impl RowDecoder {
 /// next.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub(super) fn run_sequences<const NARROW: bool>(
+pub(super) fn run_sequences<const NARROW: bool, const EXACT: bool>(
     bits: SeqBits,
     data: &[u8],
     num_sequences: u32,
     tables: &SequenceDecodeTables,
     offsets: &mut [u32; 3],
     literals: Literals<'_>,
-    out: &mut SeqOut<'_, NARROW>,
+    out: &mut SeqOut<'_, NARROW, EXACT>,
     history: &[u8],
 ) -> Result<(), DecompressError> {
     if data.len() < 8 {

@@ -264,7 +264,11 @@ const SPREAD_SUB: [usize; 8] = [8, 8, 8, 7, 8, 9, 10, 11];
 /// overlength. The loop then keeps only the slice and the output position
 /// in registers. With `NARROW`, the slice ends below 4 GiB, and each
 /// sequence masks its positions to 32 bits ([`ix`]).
-pub(crate) struct SeqOut<'a, const NARROW: bool> {
+///
+/// With `EXACT`, the slice ends at the block's limit, with no slack: the
+/// output is a caller's buffer. Sequences that end within
+/// [`WILDCOPY_OVERLENGTH`] of the limit then take exact copies.
+pub(crate) struct SeqOut<'a, const NARROW: bool, const EXACT: bool = false> {
     buf: &'a mut [u8],
     /// Bytes of output; every byte below it is initialized.
     op: usize,
@@ -308,11 +312,12 @@ pub(crate) fn open_block_at(
     (frame_start, start - frame_start, end)
 }
 
-impl<'a, const NARROW: bool> SeqOut<'a, NARROW> {
+impl<'a, const NARROW: bool, const EXACT: bool> SeqOut<'a, NARROW, EXACT> {
     /// The output in `buf`, which [`open_block`] returned, at position `op`.
+    /// With `EXACT`, `buf` ends at the block's limit.
     #[inline(always)]
     pub(crate) fn new(buf: &'a mut [u8], op: usize) -> Self {
-        debug_assert!(op + WILDCOPY_OVERLENGTH <= buf.len());
+        debug_assert!(op + if EXACT { 0 } else { WILDCOPY_OVERLENGTH } <= buf.len());
         Self { buf, op }
     }
 
@@ -323,11 +328,15 @@ impl<'a, const NARROW: bool> SeqOut<'a, NARROW> {
     }
 }
 
-impl<const NARROW: bool> SeqOut<'_, NARROW> {
+impl<const NARROW: bool, const EXACT: bool> SeqOut<'_, NARROW, EXACT> {
     /// Largest `op` the block may reach.
     #[inline(always)]
     fn limit(&self) -> usize {
-        self.buf.len() - WILDCOPY_OVERLENGTH
+        if EXACT {
+            self.buf.len()
+        } else {
+            self.buf.len() - WILDCOPY_OVERLENGTH
+        }
     }
 
     /// Executes one sequence: `ll` literals from `lits[lp..]`, then `ml`
@@ -353,6 +362,9 @@ impl<const NARROW: bool> SeqOut<'_, NARROW> {
         let lit_end = op + ll;
         let match_end = lit_end + ml;
         if unlikely(match_end + WILDCOPY_OVERLENGTH > self.buf.len()) {
+            if EXACT {
+                return self.execute_end(lits, lp, ll, ml, offset, history);
+            }
             return Err(DecompressError::BlockTooLarge);
         }
         // `checked_sub` tells the compiler that the source is at most
@@ -367,10 +379,42 @@ impl<const NARROW: bool> SeqOut<'_, NARROW> {
             }
             _ => {
                 let span = Span { op, ll, ml };
-                self.op = execute_exact(Dst(self.buf), span, lits.as_slice(), lp, offset, history)?;
+                self.op = execute_exact::<true>(
+                    Dst(self.buf),
+                    span,
+                    lits.as_slice(),
+                    lp,
+                    offset,
+                    history,
+                )?;
                 Ok(())
             }
         }
+    }
+
+    /// A sequence of an `EXACT` output that ends within
+    /// [`WILDCOPY_OVERLENGTH`] of the block's limit, or past it: copies it
+    /// exactly, writing nothing past its end.
+    #[cold]
+    #[inline(never)]
+    fn execute_end(
+        &mut self,
+        lits: Literals<'_>,
+        lp: usize,
+        ll: usize,
+        ml: usize,
+        offset: usize,
+        history: &[u8],
+    ) -> Result<(), DecompressError> {
+        let op = self.op;
+        match op.checked_add(ll).and_then(|end| end.checked_add(ml)) {
+            Some(end) if end <= self.buf.len() => {}
+            _ => return Err(DecompressError::BlockTooLarge),
+        }
+        let span = Span { op, ll, ml };
+        self.op =
+            execute_exact::<false>(Dst(self.buf), span, lits.as_slice(), lp, offset, history)?;
+        Ok(())
     }
 
     /// Appends `lits[lp..lp + len]` exactly.
@@ -406,10 +450,11 @@ struct Span {
 
 /// A sequence near the end of the literals, or whose offset reaches before
 /// the frame or is invalid; returns the new output length. The caller
-/// checked that `span` ends within the block's limit.
+/// checked that `span` ends within the block's limit, and with `WILD` that
+/// [`WILDCOPY_OVERLENGTH`] bytes of slack follow it.
 #[cold]
 #[inline(never)]
-fn execute_exact(
+fn execute_exact<const WILD: bool>(
     mut dst: Dst<'_>,
     span: Span,
     lits: &[u8],
@@ -440,7 +485,11 @@ fn execute_exact(
     }
     if ml > done {
         let at = lit_end + done;
-        dst.wild_match(at, at - offset, offset, ml - done);
+        if WILD {
+            dst.wild_match(at, at - offset, offset, ml - done);
+        } else {
+            dst.exact_match(at, offset, ml - done);
+        }
     }
     Ok(lit_end + ml)
 }
@@ -527,6 +576,26 @@ impl Dst<'_> {
                 src += 8;
                 i += 8;
             }
+        }
+    }
+}
+
+impl Dst<'_> {
+    /// Copies a match of `len` bytes from `offset` bytes before `at`,
+    /// writing nothing past `at + len`. Requires `1 <= offset <= at` and
+    /// `at + len` within the slice.
+    fn exact_match(&mut self, at: usize, offset: usize, len: usize) {
+        debug_assert!(offset >= 1 && offset <= at);
+        let out = &mut *self.0;
+        // One period, then double the copied run: it stays a multiple of
+        // `offset`, so the pattern repeats, and no copy overlaps its source.
+        let first = offset.min(len);
+        out.copy_within(at - offset..at - offset + first, at);
+        let mut copied = first;
+        while copied < len {
+            let n = (len - copied).min(copied);
+            out.copy_within(at..at + n, at + copied);
+            copied += n;
         }
     }
 }
@@ -626,7 +695,64 @@ mod tests {
         let narrow = seq_out_run_as::<true>(prefix, lits, slack, ml, offset, history);
         let wide = seq_out_run_as::<false>(prefix, lits, slack, ml, offset, history);
         assert_eq!(narrow, wide);
+        // A caller's buffer that ends where the sequence does takes the
+        // exact copies, with the same result.
+        for exact in [
+            seq_out_run_exact::<true>(prefix, lits, slack, ml, offset, history),
+            seq_out_run_exact::<false>(prefix, lits, slack, ml, offset, history),
+        ] {
+            assert_eq!(exact, narrow, "EXACT output");
+        }
         narrow
+    }
+
+    /// `seq_out_run_as` into an `EXACT` buffer of non-zero bytes that ends
+    /// where the sequence does.
+    fn seq_out_run_exact<const NARROW: bool>(
+        prefix: &[u8],
+        lits: &[u8],
+        slack: usize,
+        ml: usize,
+        offset: usize,
+        history: &[u8],
+    ) -> Result<Vec<u8>, DecompressError> {
+        let mut buf = lits.to_vec();
+        buf.resize(lits.len() + slack, 0xAA);
+        let mut v = prefix.to_vec();
+        v.resize(prefix.len() + lits.len() + ml, 0x55);
+        let mut out = SeqOut::<NARROW, true>::new(&mut v, prefix.len());
+        let result = out.execute(
+            Literals::new(&buf, lits.len()),
+            0,
+            lits.len(),
+            ml,
+            offset,
+            history,
+        );
+        let end = out.op();
+        v.truncate(end);
+        result.map(|()| v)
+    }
+
+    #[test]
+    fn exact_seq_out_stops_at_its_end() {
+        let lits = [b'x'; 8 + LITERAL_OVERREAD];
+        let mut v = b"abcd".to_vec();
+        v.resize(4 + 8 + 20, 0x55);
+        let mut out = SeqOut::<true, true>::new(&mut v, 4);
+        let lits = Literals::new(&lits, 8);
+        assert_eq!(
+            out.execute(lits, 0, 8, 21, 3, &[]),
+            Err(DecompressError::BlockTooLarge)
+        );
+        assert_eq!(out.execute(lits, 0, 8, 20, 3, &[]), Ok(()));
+        assert_eq!(out.op(), 32);
+        assert_eq!(
+            out.extend_literals(lits, 0, 1),
+            Err(DecompressError::BlockTooLarge)
+        );
+        assert_eq!(&v[..12], b"abcdxxxxxxxx");
+        assert_eq!(&v[12..], b"xxxxxxxxxxxxxxxxxxxx");
     }
 
     fn seq_out_run_as<const NARROW: bool>(

@@ -114,6 +114,41 @@ impl DecompressContext {
         decompress_into_with_workspace(input, output, max_output, self.dict.as_ref(), &mut self.ws)
     }
 
+    /// Decompresses every frame in `input` into `output`, reusing this
+    /// context's tables, workspace and dictionary. Returns the number of
+    /// bytes written to the start of `output`.
+    ///
+    /// The output limit is `output.len()`: larger output fails with
+    /// [`DecompressError::OutputTooSmall`], as C zstd's
+    /// `ZSTD_decompressDCtx` fails with `dstSize_tooSmall`. Nothing is
+    /// allocated for the output and `output` needs no zeroing, so a buffer
+    /// of the known decoded size is decoded into directly. Bytes past the
+    /// returned length may be overwritten, and after an error `output`
+    /// holds partial output.
+    ///
+    /// ```
+    /// let data = b"decode into a buffer of the known size".repeat(10);
+    /// let frame = zrip::compress(&data, 1).unwrap();
+    ///
+    /// let mut ctx = zrip::DecompressContext::new();
+    /// let mut buf = vec![0u8; data.len()];
+    /// assert_eq!(ctx.decompress_to_slice(&frame, &mut buf), Ok(data.len()));
+    /// assert_eq!(buf, data);
+    ///
+    /// let mut short = vec![0u8; data.len() - 1];
+    /// assert_eq!(
+    ///     ctx.decompress_to_slice(&frame, &mut short),
+    ///     Err(zrip::DecompressError::OutputTooSmall)
+    /// );
+    /// ```
+    pub fn decompress_to_slice(
+        &mut self,
+        input: &[u8],
+        output: &mut [u8],
+    ) -> Result<usize, DecompressError> {
+        super::decompress_to_slice_with_workspace(input, output, self.dict.as_ref(), &mut self.ws)
+    }
+
     /// Decompresses one zstd frame whose 4-byte magic number is stored out of band.
     ///
     /// OpenZL stores zstd payloads this way inside transform streams.
