@@ -54,7 +54,7 @@ and window logs to the input size, so tables stay cheap to clear.
 | -5 | Fast | 32 KiB | 512 KiB | 8 | 4 | 4 |
 | -4 | Fast | 32 KiB | 512 KiB | 8 | 2 | 4 |
 | -3 | Fast | 64 KiB | 512 KiB | 8 | 2 | 4 |
-| -2 | Fast | 64 KiB | 512 KiB | 7 | 2 | 4 |
+| -2 | Fast | 64 KiB | 512 KiB | 8 | 2 | 4 |
 | -1 | Fast | 64 KiB | 512 KiB | 7 | 2 | 5 |
 | 1 | Fast | 64 KiB | 512 KiB | 7 | 1 | 4 |
 | 2 | Fast | 128 KiB | 1 MiB | 7 | 1 | 4 |
@@ -69,12 +69,21 @@ and window logs to the input size, so tables stay cheap to clear.
   its only compression, so it grows its step slower than C's negative
   levels. A 64 KiB table gained as much ratio, but missed the cache so often
   that L-6 encoded highly compressible data faster.
-- **L-6 to L-3** hash 8 bytes at shorter steps than C's negative levels.
+- **L-6 to L-2** hash 8 bytes at shorter steps than C's negative levels.
   Longer matches leave fewer bytes to Huffman coding, the costly part. L-3
-  searches as L-4 does, in a table twice the size.
-- **L-2 to L2** grow their step faster than C, so long literal runs cost
+  searches as L-4 does, in a table twice the size, and L-2 as L-3.
+- **L-2 and L-1** Huffman-code denser literals than L-6 to L-3: up to 6.37
+  bits per byte, and 6.64 and 6.48 in blocks with matches. Their
+  steps in ratio and speed from L-3 to L1 then come out about even on text,
+  binary and highly compressible data.
+- **L-1 to L2** grow their step faster than C, so long literal runs cost
   fewer probes. Frequent matches keep the initial step and most of the ratio.
-  L1 and L2 hash seven bytes to favor longer matches.
+  L-1, L1 and L2 hash seven bytes to favor longer matches.
+- **Small inputs.** As C zstd picks parameters by input size, L1 and L2
+  hash fewer bytes on inputs of up to 16 KiB: L1 six, L2 five (C's L1).
+  Seven-byte hashes missed the short repeats of such inputs: L1 wrote 11.5%
+  more than C on 4 KiB blocks of metric points. With both tables clamped
+  to the input, L2 ran L1's search there.
 - **L3 and L4** list the search strength for inputs above 256 KiB. L3 grows
   its step after each unsuccessful probe. One-shot calls and `CompressContext`
   use 4 (L3) and 6 (L4) for inputs up to 256 KiB, not counting a dictionary,
@@ -109,7 +118,8 @@ also tries the long table at the next position.
   with under 64 sequences use predefined tables.
 - **Literals.** Huffman with treeless reuse of the previous table, four
   streams from 1 KiB up. Literals stay raw when Huffman cannot win: order-0
-  entropy above 7.97 bits per byte, or above 6.25 at L-6 to L-1. Faster
+  entropy above 7.97 bits per byte, above 6.25 at L-6 to L-3, or above
+  6.37 to 6.64 at L-2 and L-1. Faster
   levels leave more literals, and Huffman literals decode slower than
   matches, so in blocks with matches over an eighth or more L-6 to L-3
   keep literals raw above 5.1, 5.25, 5.4 and 6 bits per byte. Each level

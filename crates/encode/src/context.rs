@@ -148,13 +148,16 @@ impl PreparedDict {
         }
     }
 
-    /// Whether `params` use the table sizes the snapshots are built for.
+    /// Whether `params` use the table sizes and minimum match the snapshots
+    /// are built for.
     fn snapshot_matches(&self, params: &LevelParams) -> bool {
         let p = &self.params;
-        match params.strategy {
-            Strategy::Fast => params.hash_log == p.hash_log,
-            Strategy::DFast => params.chain_log == p.chain_log && params.hash_log == p.hash_log,
-        }
+        // The snapshot hashes `min_match` bytes, which the size tiers change.
+        params.min_match == p.min_match
+            && match params.strategy {
+                Strategy::Fast => params.hash_log == p.hash_log,
+                Strategy::DFast => params.chain_log == p.chain_log && params.hash_log == p.hash_log,
+            }
     }
 
     /// The tables prefilled with the dictionary, built on first use.

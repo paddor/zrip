@@ -56,15 +56,17 @@ pub struct LevelParams {
     pub hash_log: u32,
     /// DFast short table log. Same as hashLog for Fast strategy.
     pub chain_log: u32,
-    /// C zstd's `searchLog`. The Fast and DFast finders ignore it.
+    /// C zstd's `searchLog`. The Fast and DFast finders ignore it, but at
+    /// 1 with `min_match` 8 and `target_length` 2 or 3 it selects L-2's
+    /// literal limits (see `block_policy`).
     pub search_log: u32,
     /// Bytes the Fast table hashes, 4 to 8, or the DFast short table, 4 or
     /// 5. A Fast match needs 8 equal bytes at 8, else 4.
     pub min_match: u32,
     /// Fast only: the search step starts at `target_length + 1` bytes, at
     /// least 2, as in C zstd. Above 1, with `min_match` 5 or more, it also
-    /// keeps dense literals raw: over 6.25 bits per byte, and over 5 to 6
-    /// bits in blocks with matches at L-6 to L-3 (see `block_policy`).
+    /// keeps dense literals raw: over 6.25 to 6.37 bits per byte, and over 5
+    /// to 6 bits in blocks with matches at L-6 to L-3 (see `block_policy`).
     pub target_length: u32,
     /// The search step grows by one every 2^`search_strength` bytes
     /// without a match. C zstd fixes it at 8. A DFast block after one that
@@ -118,13 +120,15 @@ pub fn level_params(level: i32) -> Option<LevelParams> {
 
 /// Returns the compression parameters for a given level, sized for `src_len`.
 ///
-/// Uses fixed parameters per level with log values clamped down for small inputs.
-/// L3 and L4 search more sparsely through 256 KiB.
+/// Uses fixed parameters per level with log values clamped down for small
+/// inputs. L1 and L2 hash fewer bytes up to 16 KiB, and L3 and L4 search
+/// more sparsely through 256 KiB (see `short_input_search`).
 ///
 /// Level 0 is treated as "library default" and maps to level 1.
 pub fn level_params_for_size(level: i32, src_len: usize) -> Option<LevelParams> {
     let mut params = level_params_inner(level)?;
-    if let Some(search_strength) = short_input_search_strength(level, src_len) {
+    if let Some((min_match, search_strength)) = short_input_search(level, src_len) {
+        params.min_match = min_match;
         params.search_strength = search_strength;
     }
     params.hash_log = params.hash_log.clamp(HASH_LOG_MIN, HASH_LOG_MAX);
@@ -153,36 +157,56 @@ pub(crate) fn src_log(src_len: usize) -> u32 {
 }
 
 /// Returns the compression parameters for `input_len` bytes after a
-/// `prefix_len`-byte dictionary. The tables and window cover both, while the
-/// search density follows the input alone, as in a frame without a dictionary.
+/// `prefix_len`-byte dictionary. The tables, window and minimum match cover
+/// both, while the search density follows the input alone, as in a frame
+/// without a dictionary.
 pub(crate) fn level_params_with_prefix(
     level: i32,
     prefix_len: usize,
     input_len: usize,
 ) -> Option<LevelParams> {
     let mut params = level_params_for_size(level, prefix_len.saturating_add(input_len))?;
-    if let Some(search_strength) = short_input_search_strength(level, input_len) {
+    if let Some((_, search_strength)) = short_input_search(level, input_len) {
         params.search_strength = search_strength;
     }
     Some(params)
 }
 
-/// Largest input L3 and L4 search with `short_input_search_strength`, two
-/// blocks.
+/// Largest input of the small tier, C zstd's smallest parameter table.
+const SMALL_INPUT_LIMIT: usize = 16 * 1024;
+
+/// Largest input of the short tier, two blocks.
 const SHORT_INPUT_LIMIT: usize = 256 * 1024;
 
-/// Search strength for inputs of up to two blocks at L3 and L4. At C zstd's
-/// 8, zrip's DFast search runs at 0.7-0.8x C's speed on them; these keep
-/// about C's speed at L3 for 4-9% more output.
-fn short_input_search_strength(level: i32, input_len: usize) -> Option<u32> {
-    if input_len > SHORT_INPUT_LIMIT {
-        return None;
+/// Search at L1 to L4 for inputs of up to [`SMALL_INPUT_LIMIT`] and
+/// [`SHORT_INPUT_LIMIT`] bytes, as `(min_match, search_strength)`, as C zstd
+/// picks its parameters by input size. `None` for larger inputs, which take
+/// the level's own.
+///
+/// Short inputs hold few long repeats, so seven-byte hashes miss many of
+/// their matches: L1 wrote 11.5% more than C zstd on 4 KiB blocks of metric
+/// points, where C hashes five bytes. Up to 16 KiB, L1 hashes six bytes and
+/// L2 five, as C's L1, so L2 sits between L1 and L3 there instead of
+/// matching L1. Through 256 KiB, L3 and L4 search sparser than on large
+/// inputs: at C zstd's search strength of 8, zrip's DFast search ran at
+/// 0.7-0.8x C's speed there; these keep about C's speed at L3 for 4-9% more
+/// output.
+fn short_input_search(level: i32, input_len: usize) -> Option<(u32, u32)> {
+    if input_len <= SMALL_INPUT_LIMIT {
+        match level {
+            1 => return Some((6, 4)),
+            2 => return Some((5, 4)),
+            _ => {}
+        }
     }
-    match level {
-        3 => Some(4),
-        4 => Some(6),
-        _ => None,
+    if input_len <= SHORT_INPUT_LIMIT {
+        return Some(match level {
+            3 => (5, 4),
+            4 => (5, 6),
+            _ => return None,
+        });
     }
+    None
 }
 
 /// Smallest hash or chain log, a 64-entry table.
@@ -218,15 +242,18 @@ pub(crate) fn raw_literals_limit(level: i32) -> Option<usize> {
 ///
 /// Without Huffman literals, matches are the only compression, so the
 /// negative levels search more densely on these inputs than on large ones.
-/// L-7 keeps its own search, which always runs on raw literals. L-4 shares
-/// its step with L-3 and L-2 but grows it faster through regions without
-/// matches.
+/// L-7 keeps its own search, which always runs on raw literals. L-6 to L-3
+/// hash six bytes, L-2 and L-1 five. From L-6 to L-1 the step shrinks or
+/// grows slower through regions without matches, so each level is slower
+/// than the one below at every size and finds more matches; the steps came
+/// out about even on Silesia slices of 512 B to 8 KiB.
 fn small_input_search(level: i32) -> Option<(u32, u32, u32)> {
     Some(match level {
-        -6 => (4, 5, 6),
-        -5 => (3, 5, 6),
-        -4 => (2, 5, 6),
-        -3 | -2 => (2, 5, 7),
+        -6 => (3, 6, 4),
+        -5 => (2, 6, 4),
+        -4 => (2, 6, 5),
+        -3 => (2, 6, 7),
+        -2 => (2, 5, 7),
         -1 => (1, 5, 7),
         _ => return None,
     })
@@ -273,23 +300,33 @@ impl BlockPolicy {
 ///
 /// The fast negative levels skip Huffman coding for dense literals: on
 /// low-compressibility data it costs more time than it saves space. L-6 to
-/// L-1 keep literals above 6.25 bits per byte raw. Small inputs keep all
-/// literals raw (see `raw_literals_limit`), and L-7 keeps them raw always.
+/// L-3 keep literals above 6.25 bits per byte raw, L-2 and L-1 above 6.37,
+/// and in blocks with matches above 6.64 and 6.48: they then take part of
+/// L1's ratio on binary data, and the steps in ratio and speed from L-3 to
+/// L1 even out. Small inputs keep all literals raw (see
+/// `raw_literals_limit`), and L-7 keeps them raw always.
 ///
 /// The faster a level searches, the more literals it leaves, and Huffman
 /// literals decode slower than matches. So in blocks with matches, L-6 to
 /// L-3 keep literals raw from a limit that rises with the level: 5.1, 5.25,
 /// 5.4 and 6 bits per byte. Each level then decodes faster than the next,
 /// at a few percent of ratio on text-like data. L-4 and L-3 search alike
-/// and differ in their table, which tells them apart here.
+/// and differ in their table, and L-2 differs from L-3 in `search_log`,
+/// which tells them apart here.
 pub(crate) fn block_policy(params: &LevelParams, input_len: usize) -> BlockPolicy {
     const DENSE: u32 = 6 * 256 + 64;
+    const L_MINUS_2_LITERALS: u32 = 6 * 256 + 94;
+    const L_MINUS_2_MATCHED: u32 = 6 * 256 + 164;
+    const L_MINUS_1_LITERALS: u32 = 6 * 256 + 94;
+    const L_MINUS_1_MATCHED: u32 = 6 * 256 + 124;
     let (max_literal_entropy_fp8, max_matched_literal_entropy_fp8) =
         if params.strategy == Strategy::Fast && params.min_match >= 5 {
             match params.target_length {
                 0 | 1 => (u32::MAX, u32::MAX),
-                // L-2 and L-1, which hash seven bytes.
-                _ if params.min_match < 8 => (DENSE, DENSE),
+                // L-1, which hashes seven bytes.
+                _ if params.min_match < 8 => (L_MINUS_1_LITERALS, L_MINUS_1_MATCHED),
+                // L-2, which searches as L-3 and sets `search_log`.
+                2 | 3 if params.search_log == 1 => (L_MINUS_2_LITERALS, L_MINUS_2_MATCHED),
                 2 | 3 if params.hash_log > 13 => (DENSE, 6 * 256),
                 2 | 3 => (DENSE, 5 * 256 + 102),
                 4 => (DENSE, 5 * 256 + 64),
@@ -397,16 +434,18 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
             #[cfg(feature = "ldm")]
             ldm_params: None,
         },
-        // L-2 and L-1 hash seven bytes. L-2 grows the step every 16 bytes
-        // without a match, L-1 every 32, so frequent matches keep the
-        // initial step while long literal runs need few probes.
+        // L-2 searches as L-3. It Huffman-codes denser literals (see
+        // `block_policy`), which `search_log` 1 tells apart; the Fast finder
+        // ignores it. L-1 hashes seven bytes and grows the step every 32
+        // bytes without a match, so frequent matches keep the initial step
+        // while long literal runs need few probes.
         -2 => LevelParams {
             strategy: Strategy::Fast,
             window_log: 19,
             hash_log: 14,
             chain_log: 14,
-            search_log: 0,
-            min_match: 7,
+            search_log: 1,
+            min_match: 8,
             target_length: 2,
             search_strength: 4,
             force_raw_literals: false,
@@ -499,7 +538,7 @@ fn level_params_inner(level: i32) -> Option<LevelParams> {
 /// next one searches as at `search_strength` 0, growing its step after every
 /// miss: a dense search costs time on low-compressibility data and finds
 /// little. Text, code and database blocks stay under 60%. Inputs of up to
-/// two blocks keep their search, which `short_input_search_strength` sets.
+/// two blocks keep their search, which `short_input_search` sets.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DfastSkip {
     enabled: bool,
