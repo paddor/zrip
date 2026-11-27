@@ -177,7 +177,7 @@ dickens
 <circle cx="657" cy="179" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
 <circle cx="718" cy="174" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
 <circle cx="778" cy="175" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<polyline fill="none" opacity="0.6" stroke="#F87171" stroke-width="1" points="112,212 172,194 233,191 293,189 354,184 415,181 475,176 536,174 596,172 657,172 718,173 778,174 "/>
+<polyline fill="none" opacity="0.6" stroke="#F87171" stroke-width="1" points="112,213 172,196 233,191 293,188 354,184 415,181 475,176 536,174 596,172 657,172 718,174 778,175 "/>
 <rect x="90" y="336" width="700" height="220" opacity="1" fill="#161B22" stroke="none"/>
 <text x="440" y="324" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="10.483870967741936" opacity="1" fill="#E6EDF3" font-weight="bold">
 nci
@@ -345,7 +345,7 @@ nci
 <circle cx="657" cy="401" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
 <circle cx="718" cy="396" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
 <circle cx="778" cy="396" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<polyline fill="none" opacity="0.6" stroke="#F87171" stroke-width="1" points="112,470 172,457 233,472 293,451 354,436 415,424 475,415 536,405 596,399 657,397 718,396 778,396 "/>
+<polyline fill="none" opacity="0.6" stroke="#F87171" stroke-width="1" points="112,469 172,458 233,473 293,451 354,437 415,424 475,415 536,406 596,399 657,397 718,396 778,396 "/>
 <rect x="90" y="606" width="700" height="220" opacity="1" fill="#161B22" stroke="none"/>
 <text x="440" y="594" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="10.483870967741936" opacity="1" fill="#E6EDF3" font-weight="bold">
 xml
@@ -513,7 +513,7 @@ xml
 <circle cx="657" cy="658" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
 <circle cx="718" cy="654" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
 <circle cx="778" cy="653" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<polyline fill="none" opacity="0.6" stroke="#F87171" stroke-width="1" points="112,747 172,720 233,712 293,706 354,684 415,680 475,672 536,656 596,656 657,655 718,654 778,652 "/>
+<polyline fill="none" opacity="0.6" stroke="#F87171" stroke-width="1" points="112,748 172,721 233,712 293,706 354,684 415,680 475,672 536,656 596,656 657,656 718,654 778,653 "/>
 <rect x="90" y="876" width="700" height="220" opacity="1" fill="#161B22" stroke="none"/>
 <text x="440" y="864" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="10.483870967741936" opacity="1" fill="#E6EDF3" font-weight="bold">
 x-ray
@@ -693,7 +693,7 @@ x-ray
 <circle cx="657" cy="1007" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
 <circle cx="718" cy="1003" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
 <circle cx="778" cy="1004" r="3" opacity="1" fill="#F87171" stroke="none" stroke-width="1"/>
-<polyline fill="none" opacity="0.6" stroke="#F87171" stroke-width="1" points="112,1041 172,1025 233,1012 293,1002 354,996 415,992 475,991 536,989 596,990 657,991 718,999 778,999 "/>
+<polyline fill="none" opacity="0.6" stroke="#F87171" stroke-width="1" points="112,1041 172,1025 233,1012 293,1002 354,996 415,992 475,991 536,990 596,990 657,991 718,999 778,999 "/>
 <text x="415" y="1227" dy="0.5ex" text-anchor="middle" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#7D8590">
 thick = decoding C zstd&apos;s frames, thin = decoding its own L3 output
 </text>
