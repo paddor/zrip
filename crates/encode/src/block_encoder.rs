@@ -1175,15 +1175,15 @@ fn encode_literals_section(
     // Dense literals stay raw. Long runs are judged by a sample, so they
     // skip the full histogram when they fail.
     let limit = policy.max_literal_entropy_fp8;
-    let sample = (limit != u32::MAX && lits.len() > DENSITY_SAMPLE)
-        .then(|| byte_histogram(&lits[..DENSITY_SAMPLE]));
-    if sample.is_some_and(|sample| histogram_too_dense(&sample, limit)) {
+    // Under a limit, a quick look at a few literals rules out most dense
+    // runs before any histogram.
+    if limit != u32::MAX && spread_sample_too_dense(lits, limit) {
         encode_raw_literals_header(lits.len(), output);
         return true;
     }
-    // Short runs under a limit: a quick look at a few of them rules out most
-    // dense literals before the full histogram.
-    if limit != u32::MAX && lits.len() <= DENSITY_SAMPLE && spread_sample_too_dense(lits, limit) {
+    let sample = (limit != u32::MAX && lits.len() > DENSITY_SAMPLE)
+        .then(|| byte_histogram(&lits[..DENSITY_SAMPLE]));
+    if sample.is_some_and(|sample| histogram_too_dense(&sample, limit)) {
         encode_raw_literals_header(lits.len(), output);
         return true;
     }
