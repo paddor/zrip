@@ -17,8 +17,8 @@ std = ["alloc"]
 alloc = []
 dict_builder = ["std"]
 nightly = []
-# No effect today: every build is safe Rust. Kept so existing feature lists
-# build, and to keep any future `unsafe` out of builds that enable it.
+# No effect in zrip-core, which has no SIMD paths and no `unsafe`. Kept to
+# keep any future `unsafe` out of builds that enable it.
 paranoid = []
 
 [dev-dependencies]
