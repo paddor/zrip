@@ -548,25 +548,38 @@ fn parse_sequence_tables_ws_impl(
 
     let consumed = 1 + reader.bytes_consumed();
     if cacheable {
-        // The first description a workspace parses only asks for the cache:
-        // allocating it copies a whole table set, which a one-shot call
-        // that decodes a single block would never read.
-        match &mut ws.seq_table_cache {
-            Some(cache) => cache.as_mut().clone_from(prev),
-            None if ws.seq_table_cache_wanted => {
-                ws.seq_table_cache = Some(Box::new(prev.clone()));
-            }
-            None => {
-                ws.seq_table_cache_wanted = true;
-                return Ok(consumed);
-            }
-        }
         ws.seq_table_header.clear();
         ws.seq_table_header.extend_from_slice(&data[..consumed]);
+        match &mut ws.seq_table_cache {
+            Some(cache) => cache.as_mut().clone_from(prev),
+            None => new_table_cache(
+                &mut ws.seq_table_cache,
+                &mut ws.seq_table_cache_wanted,
+                prev,
+            ),
+        }
         ws.seq_table_cache_tables_current = true;
     }
 
     Ok(consumed)
+}
+
+/// Fills an empty table cache with `tables`, from the second description a
+/// workspace parses: the first only sets `wanted`. Allocating the cache
+/// copies a whole table set, which a one-shot call that decodes a single
+/// block would never read. Out of line, like any first use.
+#[cold]
+#[inline(never)]
+fn new_table_cache(
+    cache: &mut Option<Box<SequenceDecodeTables>>,
+    wanted: &mut bool,
+    tables: &SequenceDecodeTables,
+) {
+    if *wanted {
+        *cache = Some(Box::new(tables.clone()));
+    } else {
+        *wanted = true;
+    }
 }
 
 #[cfg(test)]
