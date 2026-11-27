@@ -31,6 +31,8 @@ pub fn check(input: &[u8], dict: Option<&[u8]>) -> Result<(), String> {
     let mut errors = Vec::new();
     errors.extend(compare("one-shot", &c, &z, lenient).err());
 
+    errors.extend(single_frame(input, dict, zdict.as_ref()).err());
+
     let c = c_stream(input, dict);
     let z = frame_decoder(input, zdict.clone());
     errors.extend(compare("FrameDecoder", &c, &z, lenient).err());
@@ -41,6 +43,56 @@ pub fn check(input: &[u8], dict: Option<&[u8]>) -> Result<(), String> {
     } else {
         Err(errors.join("; "))
     }
+}
+
+/// `decompress_frame_into` against C zstd's one-shot decoder on the input
+/// through the first frame: the skippable frames before it, then
+/// `ZSTD_findFrameCompressedSize` bytes. Input without a frame fails.
+fn single_frame(
+    input: &[u8],
+    dict: Option<&[u8]>,
+    zdict: Option<&zrip::Dictionary>,
+) -> Result<(), String> {
+    let mut skip = 0;
+    while let [a, b, c, d, e, f, g, h, ..] = input[skip..] {
+        if u32::from_le_bytes([a, b, c, d]) & 0xFFFF_FFF0 != 0x184D_2A50 {
+            break;
+        }
+        let size = u32::from_le_bytes([e, f, g, h]) as usize;
+        match skip.checked_add(8 + size) {
+            Some(end) if end <= input.len() => skip = end,
+            _ => break,
+        }
+    }
+    let end = if skip == input.len() {
+        Err("no frame".to_string())
+    } else {
+        zstd_safe::find_frame_compressed_size(&input[skip..])
+            .map(|n| skip + n)
+            .map_err(|code| zstd_safe::get_error_name(code).to_string())
+    };
+    let c = end.clone().and_then(|end| c_one_shot(&input[..end], dict));
+    let lenient = end
+        .as_ref()
+        .is_ok_and(|&end| c_lenient_huffman(&input[..end]));
+
+    let mut ctx = match zdict {
+        Some(d) => zrip::DecompressContext::with_dict(d.clone()),
+        None => zrip::DecompressContext::new(),
+    };
+    let mut out = Vec::new();
+    let z = ctx.decompress_frame_into(input, &mut out, LIMIT);
+    if let (Ok(end), Ok(decoded)) = (&end, &z)
+        && (decoded.consumed != *end || decoded.produced != out.len())
+    {
+        return Err(format!(
+            "single frame: consumed {} of {} bytes, C's frame ends at {end}",
+            decoded.consumed,
+            input.len()
+        ));
+    }
+    let z = z.map(|_| out).map_err(|e| format!("{e:?}"));
+    compare("single frame", &c, &z, lenient)
 }
 
 fn compare(

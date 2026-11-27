@@ -655,6 +655,185 @@ fn decompress_into_preallocated() {
     assert_eq!(output, data);
 }
 
+// ===== decompress_frame_into =====
+
+fn single_frame_data() -> Vec<u8> {
+    (0..20_000u32)
+        .flat_map(|i| ((i * 7) % 251).to_le_bytes())
+        .collect()
+}
+
+#[test]
+fn decompress_frame_into_ignores_trailing_bytes() {
+    let data = single_frame_data();
+    let frame = zrip::compress(&data, 1).unwrap();
+    for tail in [&[0u8][..], b"garbage after the frame", &[0xFF; 3]] {
+        let input = [&frame[..], tail].concat();
+        assert!(zrip::decompress(&input).is_err());
+        let mut out = Vec::new();
+        let decoded = zrip::decompress_frame_into(&input, &mut out, usize::MAX).unwrap();
+        assert_eq!(
+            decoded,
+            zrip::DecodedFrame {
+                consumed: frame.len(),
+                produced: data.len()
+            }
+        );
+        assert_eq!(out, data);
+    }
+}
+
+#[test]
+fn decompress_frame_into_decodes_only_the_first_frame() {
+    let data = single_frame_data();
+    let first = zrip::compress(&data, 1).unwrap();
+    let second = zrip::compress(b"second frame", 3).unwrap();
+    let both = [&first[..], &second[..]].concat();
+    assert_eq!(
+        zrip::frame::find_frame_compressed_size(&both),
+        Ok(first.len())
+    );
+
+    let mut out = b"prefix".to_vec();
+    let decoded = zrip::decompress_frame_into(&both, &mut out, usize::MAX).unwrap();
+    assert_eq!(decoded.consumed, first.len());
+    assert_eq!(decoded.produced, data.len());
+    assert_eq!(&out[..6], b"prefix");
+    assert_eq!(&out[6..], &data[..]);
+
+    out.clear();
+    let decoded =
+        zrip::decompress_frame_into(&both[decoded.consumed..], &mut out, usize::MAX).unwrap();
+    assert_eq!(decoded.consumed, second.len());
+    assert_eq!(out, b"second frame");
+}
+
+#[test]
+fn decompress_frame_into_skips_leading_skippable_frames() {
+    let frame = zrip::compress(b"after the skippable frames", 1).unwrap();
+    let mut input = Vec::new();
+    for (magic, body) in [(0x184D_2A50u32, &b"meta"[..]), (0x184D_2A5F, &b""[..])] {
+        input.extend_from_slice(&magic.to_le_bytes());
+        input.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        input.extend_from_slice(body);
+    }
+    let skipped = input.len();
+    input.extend_from_slice(&frame);
+    input.extend_from_slice(&frame);
+
+    let mut out = Vec::new();
+    let decoded = zrip::decompress_frame_into(&input, &mut out, usize::MAX).unwrap();
+    assert_eq!(decoded.consumed, skipped + frame.len());
+    assert_eq!(out, b"after the skippable frames");
+
+    // Only skippable frames, or nothing: no frame to decode.
+    for input in [&input[..skipped], &[][..]] {
+        let mut out = b"kept".to_vec();
+        assert_eq!(
+            zrip::decompress_frame_into(input, &mut out, usize::MAX),
+            Err(zrip::DecompressError::InputExhausted)
+        );
+        assert_eq!(out, b"kept");
+    }
+}
+
+#[test]
+fn decompress_frame_into_checks_the_frame() {
+    let data = single_frame_data();
+    let frame = zrip::compress(&data, 1).unwrap();
+
+    // Wrong checksum, then trailing bytes: the checksum still fails it.
+    let mut bad = frame.clone();
+    let n = bad.len();
+    bad[n - 1] ^= 0xFF;
+    bad.push(0);
+    let mut out = b"kept".to_vec();
+    assert!(matches!(
+        zrip::decompress_frame_into(&bad, &mut out, usize::MAX),
+        Err(zrip::DecompressError::ChecksumMismatch { .. })
+    ));
+    assert_eq!(out, b"kept");
+
+    // A cut frame.
+    assert_eq!(
+        zrip::decompress_frame_into(&frame[..n - 1], &mut out, usize::MAX),
+        Err(zrip::DecompressError::InputExhausted)
+    );
+    assert_eq!(
+        zrip::decompress_frame_into(b"not a zstd frame", &mut out, usize::MAX),
+        Err(zrip::DecompressError::BadMagic)
+    );
+    assert_eq!(out, b"kept");
+}
+
+#[test]
+fn decompress_frame_into_limit() {
+    let data = single_frame_data();
+    let input = [&zrip::compress(&data, 1).unwrap()[..], &[0]].concat();
+    let mut out = b"existing".to_vec();
+    assert_eq!(
+        zrip::decompress_frame_into(&input, &mut out, data.len() - 1),
+        Err(zrip::DecompressError::OutputTooSmall)
+    );
+    assert_eq!(out, b"existing");
+    // The limit counts only this call's output.
+    let decoded = zrip::decompress_frame_into(&input, &mut out, data.len()).unwrap();
+    assert_eq!(decoded.produced, data.len());
+    assert_eq!(&out[8..], &data[..]);
+
+    // Without a content size the limit still holds: three raw blocks of
+    // 1000 bytes, a 128 KiB window, no checksum.
+    let mut input = 0xFD2F_B528u32.to_le_bytes().to_vec();
+    input.extend_from_slice(&[0x00, 7 << 3]);
+    for i in 0..3u32 {
+        let header = (1000 << 3) | u32::from(i == 2);
+        input.extend_from_slice(&header.to_le_bytes()[..3]);
+        input.extend_from_slice(&data[..1000]);
+    }
+    input.push(0);
+    out.clear();
+    assert_eq!(
+        zrip::decompress_frame_into(&input, &mut out, 2999),
+        Err(zrip::DecompressError::OutputTooSmall)
+    );
+    assert_eq!(out, b"");
+    let decoded = zrip::decompress_frame_into(&input, &mut out, 3000).unwrap();
+    assert_eq!(decoded.consumed, input.len() - 1);
+    assert_eq!(out, [&data[..1000]; 3].concat());
+}
+
+#[test]
+fn decompress_frame_into_context_with_dict() {
+    let records: Vec<Vec<u8>> = (0..300)
+        .map(|i| {
+            format!(r#"{{"id":{i},"name":"user_{i}","email":"user{i}@example.com","active":true}}"#)
+                .into_bytes()
+        })
+        .collect();
+    let dict_bytes = zstd::dict::from_samples(&records, 4096).unwrap();
+    let dict = zrip::Dictionary::from_bytes(&dict_bytes).unwrap();
+
+    let mut ctx = zrip::DecompressContext::with_dict(dict.clone());
+    let mut plain = zrip::DecompressContext::new();
+    for record in &records[..20] {
+        let frame = zrip::compress_with_dict(record, 1, &dict).unwrap();
+        let input = [&frame[..], b"trailing"].concat();
+        let mut out = Vec::new();
+        let decoded = ctx
+            .decompress_frame_into(&input, &mut out, 1 << 20)
+            .unwrap();
+        assert_eq!(decoded.consumed, frame.len());
+        assert_eq!(decoded.produced, record.len());
+        assert_eq!(&out, record);
+
+        // Frames that name a dictionary need it.
+        assert_eq!(
+            plain.decompress_frame_into(&input, &mut Vec::new(), 1 << 20),
+            Err(zrip::DecompressError::DictRequired)
+        );
+    }
+}
+
 // ===== Small-input decode path exercisers =====
 
 #[test]
