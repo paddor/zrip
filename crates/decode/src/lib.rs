@@ -133,6 +133,10 @@ pub(crate) struct BlockDecodeWorkspace {
     /// The live tables still equal `seq_table_cache`, so a cache hit copies
     /// only the repeat flags.
     pub seq_table_cache_tables_current: bool,
+    /// A table description was parsed since the workspace was made, so the
+    /// next one fills `seq_table_cache`. A one-shot call that decodes one
+    /// block then never allocates and copies the cache it would not read.
+    pub seq_table_cache_wanted: bool,
     /// The context dictionary's sequence tables, built once.
     pub cached_dict_tables: Option<Box<SequenceDecodeTables>>,
     /// The context dictionary's repeat offsets.
@@ -172,6 +176,7 @@ impl BlockDecodeWorkspace {
             seq_table_header: Vec::new(),
             seq_table_cache: None,
             seq_table_cache_tables_current: false,
+            seq_table_cache_wanted: false,
             cached_dict_tables: None,
             // RFC 8878's initial repeat offsets.
             cached_dict_rep: [1, 4, 8],
@@ -278,7 +283,8 @@ pub fn decompress_with_limit(
 /// Returns the number of bytes appended.
 pub fn decompress_into(input: &[u8], output: &mut Vec<u8>) -> Result<usize, DecompressError> {
     let max_output = zrip_core::DEFAULT_DECOMPRESS_LIMIT;
-    let mut ws = Box::new(BlockDecodeWorkspace::new());
+    // On the stack: a one-shot call saves the allocation.
+    let mut ws = BlockDecodeWorkspace::new();
     let start = output.len();
     let mut offset = 0;
     while offset < input.len() {
@@ -316,7 +322,8 @@ pub fn decompress_with_dict_and_limit(
     max_output_size: usize,
 ) -> Result<Vec<u8>, DecompressError> {
     let mut output = Vec::new();
-    let mut ws = Box::new(BlockDecodeWorkspace::new());
+    // On the stack: a one-shot call saves the allocation.
+    let mut ws = BlockDecodeWorkspace::new();
     let mut offset = 0;
 
     while offset < input.len() {
