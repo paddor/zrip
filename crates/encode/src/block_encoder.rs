@@ -785,6 +785,7 @@ fn encode_literals_only_block(
 /// levels' 6.25, so L-7 compresses such data a little, less than L-6.
 const LITERAL_HEAVY_POLICY: BlockPolicy = BlockPolicy {
     custom_tables: false,
+    huffman_literals: false,
     max_literal_entropy_fp8: 6 * 256 + 24,
     max_matched_literal_entropy_fp8: 6 * 256 + 24,
 };
@@ -1047,6 +1048,42 @@ fn huf_worth_trying(data: &[u8]) -> bool {
 /// from their full histogram.
 const DENSITY_SAMPLE: usize = 4096;
 
+/// Bytes [`spread_sample_too_dense`] looks at.
+const SPREAD_SAMPLE: usize = 32;
+
+/// Whether up to [`SPREAD_SAMPLE`] bytes spread over `lits` have an
+/// order-0 entropy above `limit_fp8` bits per byte. A sample this small
+/// underestimates the entropy of the whole, so it only rules out literals
+/// that are certainly too dense, at a fraction of a full histogram's cost.
+fn spread_sample_too_dense(lits: &[u8], limit_fp8: u32) -> bool {
+    let n = lits.len().min(SPREAD_SAMPLE);
+    if n == 0 {
+        return false;
+    }
+    let stride = lits.len() / n;
+    let mut counts = [0u8; 256];
+    let mut seen = [0u8; SPREAD_SAMPLE];
+    let mut distinct = 0;
+    for i in 0..n {
+        let b = lits[i * stride];
+        if counts[b as usize] == 0 {
+            seen[distinct] = b;
+            distinct += 1;
+        }
+        counts[b as usize] += 1;
+    }
+    let n = n as u32;
+    let log2_n = log2_fp8(n);
+    let bits: u64 = seen[..distinct]
+        .iter()
+        .map(|&b| {
+            let c = u32::from(counts[b as usize]);
+            u64::from(c) * u64::from(log2_n - log2_fp8(c))
+        })
+        .sum();
+    bits > u64::from(limit_fp8) * u64::from(n)
+}
+
 /// Whether bytes with these counts have an order-0 entropy above
 /// `limit_fp8` bits per byte (8.8 fixed point).
 fn histogram_too_dense(counts: &[u32; 256], limit_fp8: u32) -> bool {
@@ -1114,7 +1151,7 @@ fn encode_literals_section(
         return true;
     }
 
-    let try_huffman_literals = policy.custom_tables;
+    let try_huffman_literals = policy.huffman_literals;
 
     // Like C zstd: from 256 literals, four streams decode in parallel and
     // repay their 6-byte jump table.
@@ -1141,6 +1178,12 @@ fn encode_literals_section(
     let sample = (limit != u32::MAX && lits.len() > DENSITY_SAMPLE)
         .then(|| byte_histogram(&lits[..DENSITY_SAMPLE]));
     if sample.is_some_and(|sample| histogram_too_dense(&sample, limit)) {
+        encode_raw_literals_header(lits.len(), output);
+        return true;
+    }
+    // Short runs under a limit: a quick look at a few of them rules out most
+    // dense literals before the full histogram.
+    if limit != u32::MAX && lits.len() <= DENSITY_SAMPLE && spread_sample_too_dense(lits, limit) {
         encode_raw_literals_header(lits.len(), output);
         return true;
     }
@@ -2190,6 +2233,7 @@ mod tests {
     const KNUTH: u32 = 0x9E37_79B1;
     const POLICY: BlockPolicy = BlockPolicy {
         custom_tables: true,
+        huffman_literals: true,
         max_literal_entropy_fp8: u32::MAX,
         max_matched_literal_entropy_fp8: u32::MAX,
     };
@@ -2370,6 +2414,7 @@ mod tests {
             .collect();
         let limited = BlockPolicy {
             custom_tables: true,
+            huffman_literals: true,
             max_literal_entropy_fp8: 6 * 256,
             max_matched_literal_entropy_fp8: 6 * 256,
         };
@@ -2428,6 +2473,7 @@ mod tests {
         };
         let one_limit = BlockPolicy {
             custom_tables: true,
+            huffman_literals: true,
             max_literal_entropy_fp8: 6 * 256 + 64,
             max_matched_literal_entropy_fp8: 6 * 256 + 64,
         };

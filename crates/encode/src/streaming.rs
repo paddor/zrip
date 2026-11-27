@@ -51,7 +51,7 @@ impl<W: Write> FrameEncoder<W> {
     /// Creates a new streaming encoder at the given level (-7..=4; -8 runs as -7).
     pub fn new(writer: W, level: i32) -> Result<Self, CompressError> {
         let params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
-        Self::from_params(writer, params, None)
+        Self::from_params(writer, level, params, None)
     }
 
     /// Creates a new streaming encoder with [`Options`](strategy::Options):
@@ -63,7 +63,7 @@ impl<W: Write> FrameEncoder<W> {
     ) -> Result<Self, CompressError> {
         let mut params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
         strategy::apply_options(&mut params, opts);
-        let mut encoder = Self::from_params(writer, params, None)?;
+        let mut encoder = Self::from_params(writer, level, params, None)?;
         encoder.frame.set_content_checksum(opts.checksum());
         Ok(encoder)
     }
@@ -71,18 +71,19 @@ impl<W: Write> FrameEncoder<W> {
     /// Creates a new streaming encoder with a dictionary at the given level (-7..=4; -8 runs as -7).
     pub fn with_dict(writer: W, level: i32, dict: Dictionary) -> Result<Self, CompressError> {
         let params = strategy::level_params(level).ok_or(CompressError::InvalidLevel(level))?;
-        Self::from_params(writer, params, Some(dict))
+        Self::from_params(writer, level, params, Some(dict))
     }
 
     #[allow(clippy::unnecessary_wraps)]
     fn from_params(
         writer: W,
+        level: i32,
         params: LevelParams,
         dict: Option<Dictionary>,
     ) -> Result<Self, CompressError> {
         Ok(Self {
             inner: writer,
-            frame: EncodeState::new(params, dict),
+            frame: EncodeState::new(Some(level), params, dict),
             header_written: false,
             state: EncoderState::Ready,
             block_out: Vec::new(),

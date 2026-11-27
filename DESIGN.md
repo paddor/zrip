@@ -79,11 +79,14 @@ and window logs to the input size, so tables stay cheap to clear.
 - **L-1 to L2** grow their step faster than C, so long literal runs cost
   fewer probes. Frequent matches keep the initial step and most of the ratio.
   L-1, L1 and L2 hash seven bytes to favor longer matches.
-- **Small inputs.** As C zstd picks parameters by input size, L1 and L2
-  hash fewer bytes on inputs of up to 16 KiB: L1 six, L2 five (C's L1).
-  Seven-byte hashes missed the short repeats of such inputs: L1 wrote 11.5%
-  more than C on 4 KiB blocks of metric points. With both tables clamped
-  to the input, L2 ran L1's search there.
+- **Small inputs.** As C zstd picks parameters by input size, inputs of up
+  to 16 KiB search with their own settings. L-6 searches as L-7, and L-5
+  to L-1 hash six bytes at steps that shrink level by level. L1 hashes six
+  bytes and L2 five (C's L1): seven-byte hashes missed the short repeats
+  of such inputs, and L1 wrote 11.5% more than C on 4 KiB blocks of metric
+  points. Up to 2 KiB, L2 hashes six bytes in a table twice the input's
+  size and L3 searches denser up to 1 KiB, so L2 stays below L3. From 16
+  to 256 KiB, L2 grows its step slower than L1, which it matched there.
 - **L3 and L4** list the search strength for inputs above 256 KiB. L3 grows
   its step after each unsuccessful probe. One-shot calls and `CompressContext`
   use 4 (L3) and 6 (L4) for inputs up to 256 KiB, not counting a dictionary,
@@ -126,8 +129,14 @@ also tries the long table at the next position.
   then decodes faster than the next. Long literal runs are judged on
   samples, as in C zstd.
 - **Small inputs.** Building a Huffman table costs a few microseconds at any
-  size. So L-6 to L-1 keep literals raw up to a per-level size (2 KiB at L-1
-  to 12 KiB at L-6) and search denser to make up for it.
+  size, so up to 32 KiB L-6 to L-1 take Huffman literals only below an
+  entropy limit that rises with the input size (a quarter bit per doubling,
+  from 4.8 bits per byte at L-1 on 512 B) and drops 0.35 bits per level.
+  Text, markup and binary literals then switch to Huffman codes at
+  different levels, so the switch from raw literals at L-7 to Huffman
+  literals at L1 spreads over the negative levels at every size. A sample
+  of 32 literals rules out dense ones before the full histogram. These
+  inputs keep the predefined sequence tables.
 - **Fallback.** A block that does not shrink goes out raw, and the rep
   offsets roll back.
 
