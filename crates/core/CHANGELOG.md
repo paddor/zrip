@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.14.5] - 2026-11-27
+
+- No code change. The `paranoid` feature's description says it has no
+  effect in zrip-core, which has no SIMD paths and no `unsafe`.
+
 ## [0.14.4] - 2026-11-26
 
 - `finalize_dictionary` fills `dict_size`: the content takes what the

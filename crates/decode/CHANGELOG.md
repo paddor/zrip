@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.8.23] - 2026-11-27
+
+- `decompress_frame_into` and `DecompressContext::decompress_frame_into`
+  decode the first zstd frame and report the bytes consumed and produced.
+- `decompress_to_slice` and `DecompressContext::decompress_to_slice` decode
+  into a caller's buffer, whose length is the limit.
+- `FrameDecoder` and `PushDecoder` keep their frame state in a `Box` (80 and
+  96 bytes instead of 12.8 KB), and the predefined sequence tables are one
+  static built at compile time.
+- One-shot decoding fills the sequence table cache only at a workspace's
+  second table description, and the one-shot calls keep their workspace on
+  the stack.
+- `paranoid` turns off the `fearless_simd` dispatch, also with `simd`.
+- Large frames decode 1-3% slower: the one-shot frame decoder is generic
+  over its output.
+- Depends on zrip-core 0.14.5.
+
 ## [0.8.22] - 2026-11-26
 
 - The `simd` feature implies `std`, as in `zrip-encode`. Without `std` the

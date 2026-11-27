@@ -2,6 +2,59 @@
 
 ## [Unreleased]
 
+## [0.8.30] - 2026-11-27
+
+### Added
+
+- `decompress_frame_into(input, &mut Vec<u8>, max_output)` and
+  `DecompressContext::decompress_frame_into`: skip leading skippable frames,
+  decode the first zstd frame with its checksum, and return a
+  `DecodedFrame` with the bytes `consumed` and `produced`. Bytes after the
+  frame are not read, so padding or further frames do not fail the call, as
+  in ruzstd and libtiff; unlike ruzstd, a bad checksum still fails. On error
+  the output keeps its old length.
+- `decompress_to_slice(input, &mut [u8])` and
+  `DecompressContext::decompress_to_slice`: decode every frame into a
+  caller's buffer and return the length, as C zstd's `ZSTD_decompressDCtx`
+  does. The buffer's length is the limit, output that does not fit fails
+  with `OutputTooSmall`, and the buffer needs no zeroing. lsm-tree's block
+  reads, which decoded into a `Vec` and copied, take 1-4% less time.
+
+### Changed
+
+- `FrameDecoder` and `PushDecoder` keep their frame state in a `Box`: they
+  take 80 and 96 bytes instead of 12.8 KB, which every move copied. The
+  predefined sequence tables are built at compile time into one static, as
+  in C zstd. mysql_common binlog transactions of 376 B-1.5 KB decode 13-18%
+  faster, and a fresh `FrameDecoder` on 376 B went from 16% slower than C
+  zstd to 6% faster. A new stream decoder makes two allocations instead of
+  one.
+- One-shot decoding no longer fills the 12 KB sequence table cache for a
+  frame of one block, and `decompress_into` and
+  `decompress_with_dict_and_limit` keep their workspace on the stack. 1 KiB
+  messages decode 41% faster through `decompress`; lsm-tree's 4 KiB block
+  reads take 7-8% less time, with 10 allocations instead of 13.
+- Huffman literals and compressed blocks must save C zstd's minimum gain
+  (`ZSTD_minGain`) at the fast strategies, or they stay raw, and the size
+  estimates use the same bound. lsm-tree blocks of random values read 9x
+  faster (6.71 to 0.73 µs per 4 KiB, as C zstd) for 0.36% more bytes, and
+  64-256 B Silesia slices decode 12-42% faster. Small near-incompressible
+  slices take up to 1.1% more bytes, whole Silesia files at most 0.04%.
+- L1 to L4 search inputs of up to 16 KiB with their own settings, and L2 to
+  L4 those of up to 256 KiB, as C zstd picks its parameters by input size.
+  Up to 16 KiB, L1 hashes six bytes and L2 five, and L3 searches denser up
+  to 1 KiB. L1 and L2 write 1-3% less on 512 B-16 KiB inputs and run 3-21%
+  slower there, and lsm-tree's 4 KiB metric blocks went from 11.5% to 2.4%
+  larger than C zstd's at L1. The negative levels and inputs over
+  256 KiB do not change.
+- `paranoid` turns off the `fearless_simd` dispatch in the encoder and the
+  decoder, so a `paranoid` build runs no `unsafe` code even when another
+  crate enables `simd`. `SAFETY.md` lists which builds contain or run
+  `unsafe`.
+- Large frames decode 1-3% slower (L3 and L4 Silesia files 2-3%): the
+  one-shot frame decoder is generic over its output since
+  `decompress_to_slice`, and the sequence loop compiles with more spills.
+
 ## [0.8.29] - 2026-11-26
 
 ### Fixed
