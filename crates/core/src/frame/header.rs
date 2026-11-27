@@ -10,7 +10,8 @@ use crate::frame::ZSTD_MAGIC;
 pub struct FrameHeader {
     /// Window size in bytes. Single-segment frames use the content size.
     pub window_size: u64,
-    /// Decompressed size, when the header gives it.
+    /// Decompressed size, when the header gives it. An 8-byte field of
+    /// `u64::MAX` gives none, as C zstd reads it as `ZSTD_CONTENTSIZE_UNKNOWN`.
     pub frame_content_size: Option<u64>,
     /// Dictionary ID, when present and nonzero.
     pub dict_id: Option<u32>,
@@ -176,6 +177,10 @@ pub fn parse_frame_header_after_magic(
     } else {
         window_size
     };
+    // C zstd reads `u64::MAX` as its `ZSTD_CONTENTSIZE_UNKNOWN`: the frame
+    // decodes as one without a content size. A single-segment frame keeps
+    // it as its window, as there.
+    let frame_content_size = frame_content_size.filter(|&fcs| fcs != u64::MAX);
 
     Ok(FrameHeader {
         window_size: final_window_size,
@@ -208,6 +213,26 @@ mod tests {
             parse_frame_header(&data),
             Err(DecompressError::BadMagic)
         ));
+    }
+
+    #[test]
+    fn max_content_size_is_unknown() {
+        let mut data = vec![0x28, 0xB5, 0x2F, 0xFD, 0xC0, 0x00];
+        data.extend_from_slice(&u64::MAX.to_le_bytes());
+        let hdr = parse_frame_header(&data).unwrap();
+        assert_eq!(hdr.frame_content_size, None);
+        assert_eq!(hdr.window_size, 1024);
+        assert_eq!(hdr.header_size, 14);
+
+        data.remove(5);
+        data[4] = 0xE0;
+        let hdr = parse_frame_header(&data).unwrap();
+        assert_eq!(hdr.frame_content_size, None);
+        assert_eq!(hdr.window_size, u64::MAX);
+
+        data[5] = 0xFE;
+        let hdr = parse_frame_header(&data).unwrap();
+        assert_eq!(hdr.frame_content_size, Some(u64::MAX - 1));
     }
 
     #[test]

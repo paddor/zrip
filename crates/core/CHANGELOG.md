@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- `parse_frame_header` reads an 8-byte content size of `u64::MAX` as no
+  content size, as C zstd reads it as `ZSTD_CONTENTSIZE_UNKNOWN`. A
+  single-segment frame keeps it as its window.
+
 ## [0.14.4] - 2026-11-26
 
 - `finalize_dictionary` fills `dict_size`: the content takes what the

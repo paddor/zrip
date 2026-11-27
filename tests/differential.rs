@@ -587,6 +587,27 @@ fn frame_headers_agree() {
         }
         failures.check(&f, None, &format!("descriptor {fhd:#04x}"));
     }
+    // C zstd reads an 8-byte content size of `u64::MAX` as unknown.
+    let empty = block(true, 0, 0, b"");
+    for fcs in [u64::MAX, u64::MAX - 1] {
+        for fhd in [0xC0u8, 0xC4, 0xE0, 0xE4] {
+            for blocks in [&raw1, &empty] {
+                let mut fields = Vec::new();
+                if fhd & 0x20 == 0 {
+                    fields.push(0x00);
+                }
+                fields.extend_from_slice(&fcs.to_le_bytes());
+                let mut f = frame(fhd, &fields, blocks);
+                if fhd & 4 != 0 {
+                    let content: &[u8] = if blocks == &raw1 { b"x" } else { b"" };
+                    let h = zrip_core::xxhash::xxh64(content, 0) as u32;
+                    f.extend_from_slice(&h.to_le_bytes());
+                }
+                let what = format!("content size {fcs:#x}, descriptor {fhd:#04x}");
+                failures.check(&f, None, &what);
+            }
+        }
+    }
 }
 
 #[test]

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Frames whose 8-byte content size is `u64::MAX` decode as frames without
+  a content size, as in C zstd. They failed with `OutputTooSmall`, or in
+  the streaming decoders with `FrameSizeMismatch`.
+
 ## [0.8.22] - 2026-11-26
 
 - The `simd` feature implies `std`, as in `zrip-encode`. Without `std` the

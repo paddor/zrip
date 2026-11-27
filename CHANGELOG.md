@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Frames whose 8-byte content size is `u64::MAX` decode as frames without
+  a content size, as in C zstd, which reads that value as
+  `ZSTD_CONTENTSIZE_UNKNOWN`. Every decoder rejected them.
+
 ## [0.8.29] - 2026-11-26
 
 ### Fixed
