@@ -63,7 +63,7 @@ const BUILDS: &[Build] = &[
     },
     Build {
         name: "paranoid",
-        about: "native with the `paranoid` feature: no unsafe primitives",
+        about: "native with the `paranoid` feature: scalar paths, no `fearless_simd`",
         rustflags: None,
         lto: false,
         features: "paranoid",

@@ -24,8 +24,10 @@ frame = ["std", "zrip-encode/frame", "zrip-decode/frame"]
 ldm = ["std", "zrip-encode/ldm"]
 dict_builder = ["std", "zrip-core/dict_builder"]
 nightly = ["zrip-core/nightly", "zrip-encode/nightly", "zrip-decode/nightly"]
-# No effect today: every build is safe Rust. Kept so existing feature lists
-# build, and to keep any future `unsafe` out of builds that enable it.
+# Takes the scalar paths even with `simd`, so no `fearless_simd` code runs
+# (it uses `unsafe` inside). zrip's own crates have no `unsafe` in any build.
+# Features only add, so this cannot drop the dependency: only
+# `default-features = false` without `simd` gives a tree with no `unsafe`.
 paranoid = ["zrip-core/paranoid", "zrip-encode/paranoid", "zrip-decode/paranoid"]
 
 [dependencies]

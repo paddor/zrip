@@ -84,9 +84,13 @@ pub(crate) enum AfterBlock {
 
 /// Decoder state for a stream of frames: tables, repeat offsets, limits,
 /// the checksum, and the window history the blocks decode into.
+///
+/// Decoders keep it boxed ([`FrameState::new`]), and it keeps its 12 KB of
+/// sequence tables boxed, so moving a decoder copies a pointer, and
+/// building one fills the tables in place, not on the stack first.
 pub(crate) struct FrameState {
-    ws: Box<BlockDecodeWorkspace>,
-    seq_tables: SequenceDecodeTables,
+    ws: BlockDecodeWorkspace,
+    seq_tables: Box<SequenceDecodeTables>,
     rep_offsets: [u32; 3],
     hasher: Option<Xxh64State>,
     /// Output limit for the whole stream, in bytes.
@@ -114,12 +118,12 @@ pub(crate) struct FrameState {
 }
 
 impl FrameState {
-    /// A state for a stream of at most `max_output` output bytes, with an
-    /// optional dictionary for every frame.
-    pub(crate) fn new(dict: Option<Dictionary>, max_output: usize) -> Self {
-        Self {
-            ws: Box::new(BlockDecodeWorkspace::new()),
-            seq_tables: SequenceDecodeTables::new_default(),
+    /// A boxed state for a stream of at most `max_output` output bytes,
+    /// with an optional dictionary for every frame.
+    pub(crate) fn new(dict: Option<Dictionary>, max_output: usize) -> Box<Self> {
+        Box::new(Self {
+            ws: BlockDecodeWorkspace::new(),
+            seq_tables: Box::new(SequenceDecodeTables::new_default()),
             // RFC 8878's initial repeat offsets.
             rep_offsets: [1, 4, 8],
             hasher: None,
@@ -134,7 +138,7 @@ impl FrameState {
             block_start: 0,
             window_size: 0,
             full_room: false,
-        }
+        })
     }
 
     /// Sets the largest window to accept, replacing the default cap.
@@ -452,7 +456,7 @@ impl FrameState {
             let result = decode_sequences_dispatch_room(
                 seq_data,
                 num_sequences,
-                &mut self.seq_tables,
+                self.seq_tables.for_block(),
                 &mut self.rep_offsets,
                 lits_at.resolve(block_data, &self.ws.literal_buf),
                 &mut self.history,

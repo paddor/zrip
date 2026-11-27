@@ -84,9 +84,12 @@
 //! - **`frame`** (default): frame header parsing/writing; implies `std`.
 //! - **`ldm`** (default): long distance matching for large-window compression.
 //! - **`dict_builder`**: FastCOVER dictionary training.
-//! - **`simd`** (default): runtime SIMD dispatch (AVX2+BMI2, NEON, SIMD128);
-//!   implies `std`.
-//! - **`paranoid`**: keeps any future `unsafe` out; no effect today.
+//! - **`simd`** (default): runtime SIMD dispatch (AVX2+BMI2, NEON, SIMD128)
+//!   through `fearless_simd`, which uses `unsafe` inside; implies `std`.
+//! - **`paranoid`**: takes the scalar paths even with `simd`, so no
+//!   `fearless_simd` code runs. Features only add, so it cannot drop the
+//!   dependency; only `default-features = false` without `simd` builds a
+//!   tree with no `unsafe`. Scalar decoding is slower in portable builds.
 //! - **`nightly`**: `#[optimize]` attributes for hot paths.
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -166,6 +169,46 @@ pub fn decompress_into(
     output: &mut alloc::vec::Vec<u8>,
 ) -> Result<usize, DecompressError> {
     zrip_decode::decompress_into(input, output)
+}
+
+/// Decodes the first zstd frame in `input`, appending at most `max_output`
+/// bytes to `output`. Returns the input bytes the frame took and the output
+/// bytes appended ([`DecodedFrame`]).
+///
+/// Skippable frames before the frame are skipped. Bytes after it are not
+/// read, so trailing padding or further frames do not fail the call, as in
+/// ruzstd and libtiff. [`decompress`] decodes every frame instead and fails
+/// on trailing bytes. [`frame::find_frame_compressed_size`] gives a frame's
+/// size without decoding it.
+///
+/// Fails with [`DecompressError::InputExhausted`] if `input` holds no zstd
+/// frame (it is empty or has only skippable frames), with
+/// [`DecompressError::OutputTooSmall`] past `max_output`, and as
+/// [`decompress`] does on a malformed frame or a wrong checksum. On error,
+/// `output` keeps its old length. [`DecompressContext::decompress_frame_into`]
+/// reuses its workspace and takes a dictionary.
+///
+/// ```
+/// let a = zrip::compress(b"first", 1).unwrap();
+/// let b = zrip::compress(b"second", 1).unwrap();
+/// let both = [&a[..], &b[..]].concat();
+///
+/// let mut out = Vec::new();
+/// let decoded = zrip::decompress_frame_into(&both, &mut out, 1 << 20).unwrap();
+/// assert_eq!(out, b"first");
+/// assert_eq!(decoded.consumed, a.len());
+///
+/// let decoded = zrip::decompress_frame_into(&both[decoded.consumed..], &mut out, 1 << 20).unwrap();
+/// assert_eq!(out, b"firstsecond");
+/// assert_eq!(decoded.produced, 6);
+/// ```
+#[cfg(feature = "alloc")]
+pub fn decompress_frame_into(
+    input: &[u8],
+    output: &mut alloc::vec::Vec<u8>,
+    max_output: usize,
+) -> Result<DecodedFrame, DecompressError> {
+    zrip_decode::decompress_frame_into(input, output, max_output)
 }
 
 /// [`decompress`] into `output`. Returns the number of bytes written to the
@@ -262,6 +305,7 @@ pub mod push {
     pub use zrip_encode::push::{EndOp, PushEncoder};
 }
 
+pub use zrip_decode::DecodedFrame;
 #[cfg(feature = "alloc")]
 pub use zrip_decode::context::DecompressContext;
 #[cfg(feature = "std")]
