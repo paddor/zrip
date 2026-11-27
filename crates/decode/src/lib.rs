@@ -14,10 +14,12 @@ extern crate alloc;
 /// Use it as a whole function body around a call to an `#[inline(always)]`
 /// implementation, so the implementation is duplicated into both contexts.
 /// `fearless_simd` selects the level at runtime and provides the safe
-/// target-feature entry point.
+/// target-feature entry point. Without `simd`, or with `paranoid`, `$body`
+/// runs as compiled for the build target.
 #[cfg(all(
     feature = "std",
     feature = "simd",
+    not(feature = "paranoid"),
     target_arch = "x86_64",
     not(target_feature = "avx2")
 ))]
@@ -37,6 +39,7 @@ macro_rules! simd_body {
 #[cfg(not(all(
     feature = "std",
     feature = "simd",
+    not(feature = "paranoid"),
     target_arch = "x86_64",
     not(target_feature = "avx2")
 )))]
@@ -133,6 +136,10 @@ pub(crate) struct BlockDecodeWorkspace {
     /// The live tables still equal `seq_table_cache`, so a cache hit copies
     /// only the repeat flags.
     pub seq_table_cache_tables_current: bool,
+    /// A table description was parsed since the workspace was made, so the
+    /// next one fills `seq_table_cache`. A one-shot call that decodes one
+    /// block then never allocates and copies the cache it would not read.
+    pub seq_table_cache_wanted: bool,
     /// The context dictionary's sequence tables, built once.
     pub cached_dict_tables: Option<Box<SequenceDecodeTables>>,
     /// The context dictionary's repeat offsets.
@@ -172,6 +179,7 @@ impl BlockDecodeWorkspace {
             seq_table_header: Vec::new(),
             seq_table_cache: None,
             seq_table_cache_tables_current: false,
+            seq_table_cache_wanted: false,
             cached_dict_tables: None,
             // RFC 8878's initial repeat offsets.
             cached_dict_rep: [1, 4, 8],
@@ -209,9 +217,9 @@ impl BlockDecodeWorkspace {
     /// for every frame that uses it.
     #[cfg(feature = "alloc")]
     pub(crate) fn cache_dict(&mut self, dict: &zrip_core::dict::Dictionary) {
-        let mut st = SequenceDecodeTables::new_default();
+        let mut st = Box::new(SequenceDecodeTables::new_default());
         st.load_dict(dict);
-        self.cached_dict_tables = Some(Box::new(st));
+        self.cached_dict_tables = Some(st);
         self.cached_dict_rep = *dict.rep_offsets();
         if let Some((t, l)) = dict.huf_table() {
             self.cached_dict_huf = Some((t.to_vec(), l));
@@ -278,7 +286,8 @@ pub fn decompress_with_limit(
 /// Returns the number of bytes appended.
 pub fn decompress_into(input: &[u8], output: &mut Vec<u8>) -> Result<usize, DecompressError> {
     let max_output = zrip_core::DEFAULT_DECOMPRESS_LIMIT;
-    let mut ws = Box::new(BlockDecodeWorkspace::new());
+    // On the stack: a one-shot call saves the allocation.
+    let mut ws = BlockDecodeWorkspace::new();
     let start = output.len();
     let mut offset = 0;
     while offset < input.len() {
@@ -292,6 +301,69 @@ pub fn decompress_into(input: &[u8], output: &mut Vec<u8>) -> Result<usize, Deco
         offset += consumed;
     }
     Ok(output.len() - start)
+}
+
+/// What a single-frame decode used and wrote
+/// ([`decompress_frame_into`], [`DecompressContext::decompress_frame_into`](crate::context::DecompressContext::decompress_frame_into)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecodedFrame {
+    /// Input bytes the frame took, skippable frames before it included.
+    /// The rest of the input was not read.
+    pub consumed: usize,
+    /// Output bytes appended.
+    pub produced: usize,
+}
+
+/// Decodes the first zstd frame in `input` and appends at most
+/// `max_output` bytes of its output to `output`. Skippable frames before
+/// it are skipped. Bytes after the frame are not read, so trailing padding
+/// or further frames do not fail the call, as in ruzstd and libtiff.
+///
+/// [`decompress`] decodes every frame instead, and fails on bytes after the
+/// last one. To split a buffer without decoding,
+/// [`find_frame_compressed_size`](zrip_core::frame::find_frame_compressed_size)
+/// gives the size of its first frame.
+///
+/// Fails with [`DecompressError::InputExhausted`] if `input` holds no zstd
+/// frame (it is empty or has only skippable frames), with
+/// [`DecompressError::OutputTooSmall`] past `max_output`, and as
+/// [`decompress`] does on a malformed frame or a wrong checksum. On error,
+/// `output` keeps its old length.
+pub fn decompress_frame_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: usize,
+) -> Result<DecodedFrame, DecompressError> {
+    let mut ws = Box::new(BlockDecodeWorkspace::new());
+    decompress_first_frame(input, output, max_output, None, &mut ws)
+}
+
+/// [`decompress_frame_into`] with a dictionary and a workspace.
+pub(crate) fn decompress_first_frame(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: usize,
+    dict: Option<&zrip_core::dict::Dictionary>,
+    ws: &mut BlockDecodeWorkspace,
+) -> Result<DecodedFrame, DecompressError> {
+    let mut offset = 0;
+    while let Some(skip_len) = skip_skippable_frame(&input[offset..]) {
+        offset += skip_len;
+    }
+    if offset == input.len() {
+        return Err(DecompressError::InputExhausted);
+    }
+    let start = output.len();
+    match decompress_frame(&input[offset..], output, max_output, dict, ws) {
+        Ok(consumed) => Ok(DecodedFrame {
+            consumed: offset + consumed,
+            produced: output.len() - start,
+        }),
+        Err(err) => {
+            output.truncate(start);
+            Err(err)
+        }
+    }
 }
 
 /// Like [`decompress`], with an optional dictionary.
@@ -316,7 +388,8 @@ pub fn decompress_with_dict_and_limit(
     max_output_size: usize,
 ) -> Result<Vec<u8>, DecompressError> {
     let mut output = Vec::new();
-    let mut ws = Box::new(BlockDecodeWorkspace::new());
+    // On the stack: a one-shot call saves the allocation.
+    let mut ws = BlockDecodeWorkspace::new();
     let mut offset = 0;
 
     while offset < input.len() {
@@ -638,6 +711,7 @@ fn decode_compressed_block(
 
     let table_data = &remaining[seq_count_size..];
     let tables_consumed = parse_sequence_tables_ws(table_data, seq_tables, ws)?;
+    let seq_tables = seq_tables.for_block();
 
     let seq_data = &table_data[tables_consumed..];
 
@@ -696,7 +770,7 @@ fn decode_compressed_block(
 pub(crate) fn decode_sequences_dispatch(
     seq_data: &[u8],
     num_sequences: u32,
-    seq_tables: &mut SequenceDecodeTables,
+    seq_tables: &SequenceDecodeTables,
     rep_offsets: &mut [u32; 3],
     literals: Literals<'_>,
     output: &mut Vec<u8>,
@@ -727,7 +801,7 @@ pub(crate) fn decode_sequences_dispatch(
         });
     }
 
-    #[cfg(all(feature = "std", feature = "simd"))]
+    #[cfg(all(feature = "std", feature = "simd", not(feature = "paranoid")))]
     {
         let level = fearless_simd::Level::new();
         return fearless_simd::dispatch!(level, _simd => {
@@ -755,7 +829,7 @@ pub(crate) fn decode_sequences_dispatch(
         });
     }
 
-    // Scalar build: no `std` or no `simd`.
+    // Scalar build: no `std`, no `simd`, or `paranoid`.
     #[allow(unreachable_code)]
     if scope.history.is_empty() {
         decode_execute_sequences::<false>(
@@ -789,7 +863,7 @@ pub(crate) fn decode_sequences_dispatch(
 pub(crate) fn decode_sequences_dispatch_room(
     seq_data: &[u8],
     num_sequences: u32,
-    seq_tables: &mut SequenceDecodeTables,
+    seq_tables: &SequenceDecodeTables,
     rep_offsets: &mut [u32; 3],
     literals: Literals<'_>,
     output: &mut Vec<u8>,
@@ -812,7 +886,7 @@ pub(crate) fn decode_sequences_dispatch_room(
         return result;
     }
 
-    #[cfg(all(feature = "std", feature = "simd"))]
+    #[cfg(all(feature = "std", feature = "simd", not(feature = "paranoid")))]
     {
         let level = fearless_simd::Level::new();
         return fearless_simd::dispatch!(level, _simd => {
@@ -842,7 +916,7 @@ pub(crate) fn decode_sequences_dispatch_room(
         });
     }
 
-    // Scalar build: no `std` or no `simd`.
+    // Scalar build: no `std`, no `simd`, or `paranoid`.
     #[allow(unreachable_code)]
     if scope.history.is_empty() {
         decode_execute_sequences_room::<false>(
@@ -909,6 +983,15 @@ mod tests {
         assert!(!ws.huf_valid);
         assert!(ws.huf_last_weights_valid);
         assert_eq!(ws.huf_last_weights, [1, 2, 3]);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn stream_decoders_are_small_to_move() {
+        // Callers move decoders into readers, enums and results, and each
+        // move copies the whole value.
+        assert!(core::mem::size_of::<streaming::FrameDecoder<&[u8]>>() <= 128);
+        assert!(core::mem::size_of::<push::PushDecoder>() <= 128);
     }
 }
 

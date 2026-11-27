@@ -19,8 +19,8 @@ frame = ["std"]
 ldm = ["std"]
 simd = ["std", "dep:fearless_simd"]
 nightly = ["zrip-core/nightly"]
-# No effect today: every build is safe Rust. Kept so existing feature lists
-# build, and to keep any future `unsafe` out of builds that enable it.
+# Scalar paths even with `simd`: no `fearless_simd` code runs. It cannot
+# drop the dependency; build without `simd` for a tree with no `unsafe`.
 paranoid = ["zrip-core/paranoid"]
 
 [dependencies]

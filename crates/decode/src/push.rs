@@ -2,6 +2,7 @@
 //! output into its own buffers.
 #![forbid(unsafe_code)]
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 
@@ -91,7 +92,7 @@ enum Unit {
 /// assert_eq!(out, data);
 /// ```
 pub struct PushDecoder {
-    frame: FrameState,
+    frame: Box<FrameState>,
     unit: Unit,
     /// Bytes of a unit that arrived split across calls.
     stage: Vec<u8>,
@@ -211,7 +212,7 @@ impl PushDecoder {
         Self::from_state(FrameState::new(Some(dict), max_output))
     }
 
-    fn from_state(frame: FrameState) -> Self {
+    fn from_state(frame: Box<FrameState>) -> Self {
         Self {
             frame,
             unit: Unit::Magic,

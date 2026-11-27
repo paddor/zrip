@@ -141,6 +141,11 @@ fn seed_frames(dict: &[u8]) -> Vec<(Vec<u8>, bool)> {
     multi.extend_from_slice(&[0x50, 0x2A, 0x4D, 0x18, 3, 0, 0, 0, 1, 2, 3]);
     multi.extend(zrip::compress(&text(700, 5), 1).unwrap());
     frames.push((multi, false));
+    // A skippable frame first, then two frames.
+    let mut multi = vec![0x5E, 0x2A, 0x4D, 0x18, 2, 0, 0, 0, 9, 9];
+    multi.extend(zrip::compress(&text(300, 6), 3).unwrap());
+    multi.extend(c_frame(b"second", 1, false, true, None));
+    frames.push((multi, false));
     frames
 }
 

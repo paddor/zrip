@@ -151,6 +151,7 @@ impl LiteralsAt {
     all(
         feature = "std",
         feature = "simd",
+        not(feature = "paranoid"),
         target_arch = "x86_64",
         not(target_feature = "avx2")
     ),

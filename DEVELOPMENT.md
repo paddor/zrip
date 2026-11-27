@@ -251,7 +251,7 @@ ways and runs each, serially:
 | `native` | the repository's `.cargo/config.toml`: `target-cpu=native` |
 | `portable` | no rustflags, as dependent crates build: runtime SIMD dispatch |
 | `portable-lto` | portable with fat LTO and one codegen unit |
-| `paranoid` | native with the `paranoid` feature |
+| `paranoid` | native with the `paranoid` feature: scalar paths, no `fearless_simd` |
 
 Without `--builds`, the gate runs as built, which is `native` from the
 repository root. Most users get `portable`. A regression can show in only

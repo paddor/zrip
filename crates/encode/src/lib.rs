@@ -17,8 +17,14 @@ extern crate alloc;
 /// Use it as a whole function body around a call to an `#[inline(always)]`
 /// implementation, so the implementation is duplicated into both contexts.
 /// `fearless_simd` selects the level at runtime and provides the safe
-/// target-feature entry point.
-#[cfg(all(feature = "simd", target_arch = "x86_64", not(target_feature = "avx2")))]
+/// target-feature entry point. Without `simd`, or with `paranoid`, `$body`
+/// runs as compiled for the build target.
+#[cfg(all(
+    feature = "simd",
+    not(feature = "paranoid"),
+    target_arch = "x86_64",
+    not(target_feature = "avx2")
+))]
 macro_rules! simd_body {
     ($body:expr) => {
         match fearless_simd::Level::new().as_avx2() {
@@ -32,7 +38,12 @@ macro_rules! simd_body {
     };
 }
 
-#[cfg(not(all(feature = "simd", target_arch = "x86_64", not(target_feature = "avx2"))))]
+#[cfg(not(all(
+    feature = "simd",
+    not(feature = "paranoid"),
+    target_arch = "x86_64",
+    not(target_feature = "avx2")
+)))]
 macro_rules! simd_body {
     ($body:expr) => {
         $body

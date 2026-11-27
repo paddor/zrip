@@ -114,6 +114,38 @@ impl DecompressContext {
         decompress_into_with_workspace(input, output, max_output, self.dict.as_ref(), &mut self.ws)
     }
 
+    /// Decodes the first zstd frame in `input` into `output` while reusing
+    /// this context's workspace and dictionary. Appends at most `max_output`
+    /// bytes and returns the input bytes the frame took and the output bytes
+    /// appended.
+    ///
+    /// Skippable frames before the frame are skipped. Bytes after it are not
+    /// read, so trailing padding or further frames do not fail the call;
+    /// [`Self::decompress_into`] decodes every frame and fails on trailing
+    /// bytes. See [`decompress_frame_into`](crate::decompress_frame_into) for
+    /// the errors. On error, `output` keeps its old length.
+    ///
+    /// ```
+    /// let frame = zrip::compress(b"tile data", 1).unwrap();
+    /// let mut padded = frame.clone();
+    /// padded.extend_from_slice(&[0, 0, 0]);
+    ///
+    /// let mut ctx = zrip::DecompressContext::new();
+    /// let mut out = Vec::new();
+    /// let decoded = ctx.decompress_frame_into(&padded, &mut out, 1 << 20).unwrap();
+    /// assert_eq!(out, b"tile data");
+    /// assert_eq!(decoded.consumed, frame.len());
+    /// assert_eq!(decoded.produced, out.len());
+    /// ```
+    pub fn decompress_frame_into(
+        &mut self,
+        input: &[u8],
+        output: &mut Vec<u8>,
+        max_output: usize,
+    ) -> Result<crate::DecodedFrame, DecompressError> {
+        super::decompress_first_frame(input, output, max_output, self.dict.as_ref(), &mut self.ws)
+    }
+
     /// Decompresses one zstd frame whose 4-byte magic number is stored out of band.
     ///
     /// OpenZL stores zstd payloads this way inside transform streams.
