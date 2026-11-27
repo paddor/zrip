@@ -72,7 +72,7 @@ fn single_frame(
             break;
         }
         let size = u32::from_le_bytes([e, f, g, h]) as usize;
-        match skip.checked_add(8 + size) {
+        match size.checked_add(8).and_then(|n| skip.checked_add(n)) {
             Some(end) if end <= input.len() => skip = end,
             _ => break,
         }
