@@ -14,10 +14,12 @@ extern crate alloc;
 /// Use it as a whole function body around a call to an `#[inline(always)]`
 /// implementation, so the implementation is duplicated into both contexts.
 /// `fearless_simd` selects the level at runtime and provides the safe
-/// target-feature entry point.
+/// target-feature entry point. Without `simd`, or with `paranoid`, `$body`
+/// runs as compiled for the build target.
 #[cfg(all(
     feature = "std",
     feature = "simd",
+    not(feature = "paranoid"),
     target_arch = "x86_64",
     not(target_feature = "avx2")
 ))]
@@ -37,6 +39,7 @@ macro_rules! simd_body {
 #[cfg(not(all(
     feature = "std",
     feature = "simd",
+    not(feature = "paranoid"),
     target_arch = "x86_64",
     not(target_feature = "avx2")
 )))]
@@ -727,7 +730,7 @@ pub(crate) fn decode_sequences_dispatch(
         });
     }
 
-    #[cfg(all(feature = "std", feature = "simd"))]
+    #[cfg(all(feature = "std", feature = "simd", not(feature = "paranoid")))]
     {
         let level = fearless_simd::Level::new();
         return fearless_simd::dispatch!(level, _simd => {
@@ -755,7 +758,7 @@ pub(crate) fn decode_sequences_dispatch(
         });
     }
 
-    // Scalar build: no `std` or no `simd`.
+    // Scalar build: no `std`, no `simd`, or `paranoid`.
     #[allow(unreachable_code)]
     if scope.history.is_empty() {
         decode_execute_sequences::<false>(
@@ -812,7 +815,7 @@ pub(crate) fn decode_sequences_dispatch_room(
         return result;
     }
 
-    #[cfg(all(feature = "std", feature = "simd"))]
+    #[cfg(all(feature = "std", feature = "simd", not(feature = "paranoid")))]
     {
         let level = fearless_simd::Level::new();
         return fearless_simd::dispatch!(level, _simd => {
@@ -842,7 +845,7 @@ pub(crate) fn decode_sequences_dispatch_room(
         });
     }
 
-    // Scalar build: no `std` or no `simd`.
+    // Scalar build: no `std`, no `simd`, or `paranoid`.
     #[allow(unreachable_code)]
     if scope.history.is_empty() {
         decode_execute_sequences_room::<false>(

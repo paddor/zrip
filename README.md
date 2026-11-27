@@ -11,8 +11,10 @@ produced at any zstd compression level. The encoder supports levels -7 through
 - **Small inputs.** Tuned for hot loops of small messages. On 512 B to 8 KiB
   inputs, round trips beat C zstd at every level. See
   [Performance](#performance).
-- **No `unsafe`.** Every crate is `#![forbid(unsafe_code)]`. See
-  [SAFETY.md](SAFETY.md).
+- **No `unsafe`.** Every zrip crate is `#![forbid(unsafe_code)]`. The
+  default `simd` feature adds `fearless_simd`, which uses `unsafe` inside;
+  `default-features = false` without `simd` builds with no `unsafe` at all.
+  See [SAFETY.md](SAFETY.md).
 - **Small.** About 15k lines of Rust. No levels above 4; their extra ratio
   matters for storage, not transfers.
 - **Dictionaries.** Built-in FastCOVER training.
@@ -246,8 +248,8 @@ It settles on the best measured level, which the caller applies with
 | `alloc`        | yes     | `no_std` + heap via `alloc` crate; includes `CompressContext`, `DecompressContext` |
 | `ldm`          | yes     | Long distance matching for large-window compression |
 | `dict_builder` | no      | FastCOVER dictionary training                  |
-| `simd`         | yes     | [`fearless_simd`](https://crates.io/crates/fearless_simd) runtime dispatch (AVX2+BMI2, NEON, SIMD128); implies `std` |
-| `paranoid`     | no      | Keeps any future `unsafe` out; no effect today  |
+| `simd`         | yes     | [`fearless_simd`](https://crates.io/crates/fearless_simd) runtime dispatch (AVX2+BMI2, NEON, SIMD128), `unsafe` inside `fearless_simd`; implies `std` |
+| `paranoid`     | no      | Scalar paths even with `simd`: no `fearless_simd` code runs, but the dependency stays (see [SAFETY.md](SAFETY.md)) |
 | `nightly`      | no      | `#[optimize]` attributes on hot functions      |
 
 ## Safety

@@ -2,17 +2,34 @@
 
 ## No unsafe
 
-All four crates are `#![forbid(unsafe_code)]`. SIMD dispatch goes through
-[`fearless_simd`](https://crates.io/crates/fearless_simd), which keeps the
-`#[target_feature]` calls inside that crate.
+All four crates are `#![forbid(unsafe_code)]` in every build. SIMD dispatch
+goes through [`fearless_simd`](https://crates.io/crates/fearless_simd), which
+keeps the `#[target_feature]` calls inside that crate. It needs `unsafe` for
+them (113 lines in 1.3.0), so a build with `simd`, a default feature, runs
+`unsafe` code from that crate.
+
+| Build | `unsafe` that runs | `unsafe` in the dependency tree |
+|-------|--------------------|---------------------------------|
+| default (`simd`) | `fearless_simd`'s | `fearless_simd` |
+| `simd` and `paranoid` | none | `fearless_simd`, never called |
+| `default-features = false`, without `simd` | none | none |
+
+Cargo features only add, so `paranoid` cannot drop `fearless_simd` when any
+crate in the build enables `simd`. It makes zrip take its scalar paths
+instead. Only a build without `simd` leaves `fearless_simd` out.
+
+The scalar paths cost speed in portable builds, which have no
+`-C target-cpu`: on lsm-tree's 4 and 16 KiB data blocks, reads took 19-36%
+longer and writes up to 7% longer (i7-8700B). `paranoid` with `simd` runs
+as fast as a build without `simd`.
 
 Hot loops avoid bounds checks by construction: exact-size hash tables, reads
 clamped to limits the compiler can prove, and zeroed decoder output room. A
 broken match finder invariant reads wrong input bytes instead of panicking;
 debug builds assert the invariants.
 
-The `paranoid` feature has no effect today. If a later release adds `unsafe`
-for speed, builds with `paranoid` leave it out.
+If a later release adds `unsafe` to zrip for speed, builds with `paranoid`
+leave it out too.
 
 ## Why Rust matters here
 

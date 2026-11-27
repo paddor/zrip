@@ -240,9 +240,10 @@ The encoder wraps hot per-block functions in `simd_body!`, which runs them
 through [`fearless_simd`](https://crates.io/crates/fearless_simd)'s AVX2 path
 when the CPU has it. The decoder's sequence loop uses
 `fearless_simd::dispatch!` (AVX2 + BMI2 on x86_64, NEON on aarch64, SIMD128 on
-wasm32). Without `simd`, the scalar build runs. `simd` implies `std`, which the
-runtime CPU detection needs.
-No crate has `unsafe`; `fearless_simd` keeps the `#[target_feature]` calls.
+wasm32). Without `simd`, or with `paranoid`, the scalar build runs. `simd`
+implies `std`, which the runtime CPU detection needs.
+No zrip crate has `unsafe`; `fearless_simd` keeps the `#[target_feature]`
+calls, which need `unsafe` inside it ([SAFETY.md](SAFETY.md)).
 
 ## Out of scope
 

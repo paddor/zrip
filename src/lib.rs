@@ -84,9 +84,12 @@
 //! - **`frame`** (default): frame header parsing/writing; implies `std`.
 //! - **`ldm`** (default): long distance matching for large-window compression.
 //! - **`dict_builder`**: FastCOVER dictionary training.
-//! - **`simd`** (default): runtime SIMD dispatch (AVX2+BMI2, NEON, SIMD128);
-//!   implies `std`.
-//! - **`paranoid`**: keeps any future `unsafe` out; no effect today.
+//! - **`simd`** (default): runtime SIMD dispatch (AVX2+BMI2, NEON, SIMD128)
+//!   through `fearless_simd`, which uses `unsafe` inside; implies `std`.
+//! - **`paranoid`**: takes the scalar paths even with `simd`, so no
+//!   `fearless_simd` code runs. Features only add, so it cannot drop the
+//!   dependency; only `default-features = false` without `simd` builds a
+//!   tree with no `unsafe`. Scalar decoding is slower in portable builds.
 //! - **`nightly`**: `#[optimize]` attributes for hot paths.
 
 #![cfg_attr(not(feature = "std"), no_std)]
