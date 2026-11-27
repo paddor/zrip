@@ -12,6 +12,11 @@ use zrip_core::hint::{likely, unlikely};
 /// at most 32 bytes past a sequence's end.
 pub(crate) const WILDCOPY_OVERLENGTH: usize = 64;
 
+/// Bytes past a sequence's end that its wild copies write: a 32-byte
+/// chunk that starts before the end. An `EXACT` [`SeqOut`] takes the exact
+/// copies only for sequences that end closer than this to its limit.
+const WILD_WRITE_PAST_END: usize = 32;
+
 /// A block's output for the single-sequence path, appended to `vec`.
 pub(crate) struct BlockOutput<'a> {
     vec: &'a mut Vec<u8>,
@@ -267,7 +272,7 @@ const SPREAD_SUB: [usize; 8] = [8, 8, 8, 7, 8, 9, 10, 11];
 ///
 /// With `EXACT`, the slice ends at the block's limit, with no slack: the
 /// output is a caller's buffer. Sequences that end within
-/// [`WILDCOPY_OVERLENGTH`] of the limit then take exact copies.
+/// [`WILD_WRITE_PAST_END`] bytes of the limit then take exact copies.
 pub(crate) struct SeqOut<'a, const NARROW: bool, const EXACT: bool = false> {
     buf: &'a mut [u8],
     /// Bytes of output; every byte below it is initialized.
@@ -361,7 +366,12 @@ impl<const NARROW: bool, const EXACT: bool> SeqOut<'_, NARROW, EXACT> {
         let (op, lp) = (ix::<NARROW>(self.op), ix::<NARROW>(lp));
         let lit_end = op + ll;
         let match_end = lit_end + ml;
-        if unlikely(match_end + WILDCOPY_OVERLENGTH > self.buf.len()) {
+        let slack = if EXACT {
+            WILD_WRITE_PAST_END
+        } else {
+            WILDCOPY_OVERLENGTH
+        };
+        if unlikely(match_end + slack > self.buf.len()) {
             if EXACT {
                 return self.execute_end(lits, lp, ll, ml, offset, history);
             }
@@ -393,8 +403,8 @@ impl<const NARROW: bool, const EXACT: bool> SeqOut<'_, NARROW, EXACT> {
     }
 
     /// A sequence of an `EXACT` output that ends within
-    /// [`WILDCOPY_OVERLENGTH`] of the block's limit, or past it: copies it
-    /// exactly, writing nothing past its end.
+    /// [`WILD_WRITE_PAST_END`] bytes of the block's limit, or past it:
+    /// copies it exactly, writing nothing past its end.
     #[cold]
     #[inline(never)]
     fn execute_end(
@@ -695,19 +705,22 @@ mod tests {
         let narrow = seq_out_run_as::<true>(prefix, lits, slack, ml, offset, history);
         let wide = seq_out_run_as::<false>(prefix, lits, slack, ml, offset, history);
         assert_eq!(narrow, wide);
-        // A caller's buffer that ends where the sequence does takes the
-        // exact copies, with the same result.
-        for exact in [
-            seq_out_run_exact::<true>(prefix, lits, slack, ml, offset, history),
-            seq_out_run_exact::<false>(prefix, lits, slack, ml, offset, history),
-        ] {
-            assert_eq!(exact, narrow, "EXACT output");
+        // A caller's buffer that ends where the sequence does, or up to
+        // `WILD_WRITE_PAST_END` bytes later, takes the exact copies; one
+        // that ends that far past it takes the wild ones. Same result.
+        for extra in [0, WILD_WRITE_PAST_END - 1, WILD_WRITE_PAST_END] {
+            for exact in [
+                seq_out_run_exact::<true>(prefix, lits, slack, ml, offset, history, extra),
+                seq_out_run_exact::<false>(prefix, lits, slack, ml, offset, history, extra),
+            ] {
+                assert_eq!(exact, narrow, "EXACT output, {extra} bytes past");
+            }
         }
         narrow
     }
 
     /// `seq_out_run_as` into an `EXACT` buffer of non-zero bytes that ends
-    /// where the sequence does.
+    /// `extra` bytes after the sequence.
     fn seq_out_run_exact<const NARROW: bool>(
         prefix: &[u8],
         lits: &[u8],
@@ -715,11 +728,12 @@ mod tests {
         ml: usize,
         offset: usize,
         history: &[u8],
+        extra: usize,
     ) -> Result<Vec<u8>, DecompressError> {
         let mut buf = lits.to_vec();
         buf.resize(lits.len() + slack, 0xAA);
         let mut v = prefix.to_vec();
-        v.resize(prefix.len() + lits.len() + ml, 0x55);
+        v.resize(prefix.len() + lits.len() + ml + extra, 0x55);
         let mut out = SeqOut::<NARROW, true>::new(&mut v, prefix.len());
         let result = out.execute(
             Literals::new(&buf, lits.len()),
