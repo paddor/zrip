@@ -469,10 +469,71 @@ fn parse_sequence_tables_ws_impl(
         ws.seq_table_header.extend_from_slice(&data[..consumed]);
         match &mut ws.seq_table_cache {
             Some(cache) => cache.as_mut().clone_from(prev),
-            None => ws.seq_table_cache = Some(Box::new(prev.clone())),
+            None => new_table_cache(
+                &mut ws.seq_table_cache,
+                &mut ws.seq_table_cache_wanted,
+                prev,
+            ),
         }
         ws.seq_table_cache_tables_current = true;
     }
 
     Ok(consumed)
+}
+
+/// Fills an empty table cache with `tables`, from the second description a
+/// workspace parses: the first only sets `wanted`. Allocating the cache
+/// copies a whole table set, which a one-shot call that decodes a single
+/// block would never read. Out of line, like any first use.
+#[cold]
+#[inline(never)]
+fn new_table_cache(
+    cache: &mut Option<Box<SequenceDecodeTables>>,
+    wanted: &mut bool,
+    tables: &SequenceDecodeTables,
+) {
+    if *wanted {
+        *cache = Some(Box::new(tables.clone()));
+    } else {
+        *wanted = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn table_cache_is_allocated_from_the_second_description() {
+        let mut ws = BlockDecodeWorkspace::new();
+        let mut tables = SequenceDecodeTables::new_default();
+        // RLE literal lengths (code 3), predefined offsets and match lengths.
+        let description = [0x40, 3];
+
+        assert_eq!(
+            parse_sequence_tables_ws(&description, &mut tables, &mut ws),
+            Ok(2)
+        );
+        assert!(ws.seq_table_cache.is_none());
+        assert_eq!(tables.ll_accuracy, 0);
+
+        tables = SequenceDecodeTables::new_default();
+        assert_eq!(
+            parse_sequence_tables_ws(&description, &mut tables, &mut ws),
+            Ok(2)
+        );
+        assert!(ws.seq_table_cache.is_some());
+        assert_eq!(ws.seq_table_header, description);
+
+        // A hit restores the cached tables into replaced ones.
+        tables = SequenceDecodeTables::new_default();
+        ws.seq_tables_replaced();
+        assert_eq!(
+            parse_sequence_tables_ws(&description, &mut tables, &mut ws),
+            Ok(2)
+        );
+        assert_eq!(tables.ll_accuracy, 0);
+        assert_eq!(tables.ll_table.get(0).baseline_value, LL_BASELINE_TABLE[3]);
+        assert!(tables.ll_set && tables.of_set && tables.ml_set);
+    }
 }
