@@ -114,7 +114,9 @@ also tries the long table at the next position.
   matches, so in blocks with matches over an eighth or more L-6 to L-3
   keep literals raw above 5.1, 5.25, 5.4 and 6 bits per byte. Each level
   then decodes faster than the next. Long literal runs are judged on
-  samples, as in C zstd.
+  samples, as in C zstd. As C's `ZSTD_minGain`, Huffman must also save
+  1/64 of the literals plus two bytes: random values with a few repeated
+  bytes gained 0.5% and decoded 9x slower than raw.
 - **Small inputs.** Building a Huffman table costs a few microseconds at any
   size. So L-6 to L-1 keep literals raw up to a per-level size (2 KiB at L-1
   to 12 KiB at L-6) and search denser to make up for it.

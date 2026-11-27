@@ -46,6 +46,14 @@ macro_rules! add_extra_bits_macro {
     };
 }
 
+/// The least Huffman must save on a literals section, as C zstd's
+/// `ZSTD_minGain` at its fast strategies: 1/64 of its size plus two bytes.
+/// Smaller savings do not pay for decoding Huffman streams instead of
+/// copying raw bytes.
+fn min_gain(size: usize) -> usize {
+    (size >> 6) + 2
+}
+
 /// Bytes [`write_seq_count`] writes for `num_seq`.
 fn seq_count_len(num_seq: usize) -> usize {
     if num_seq < 128 {
@@ -1187,21 +1195,20 @@ fn encode_literals_section(
         None
     };
     let fresh_bits = fresh.as_ref().map_or(u64::MAX, |f| f.1);
-    // The estimates are lower bounds: when neither beats raw bytes, skip the
-    // encode.
-    if reuse_bits.unwrap_or(u64::MAX).min(fresh_bits) / 8 >= lits.len() as u64 {
+    // As C zstd, Huffman must save `min_gain`, table description included.
+    // That covers the longer Huffman header too. The estimates are lower
+    // bounds: when neither can, skip the encode.
+    let max_huf = lits.len() - min_gain(lits.len());
+    if reuse_bits.unwrap_or(u64::MAX).min(fresh_bits) / 8 >= max_huf as u64 {
         encode_raw_literals_header(lits.len(), output);
         return true;
     }
 
-    // Huffman pays only when it beats the raw section, headers included:
-    // tiny sections need the longer Huffman header.
-    let raw_size = raw_literals_header_len(lits.len()) + lits.len();
     if let Some(bits) = reuse_bits
         && bits <= fresh_bits
     {
         let len = encode(prev_huffman.unwrap(), huf_concat);
-        if huf_literals_header_len(lits.len(), len) + len < raw_size {
+        if len < max_huf {
             encode_treeless_literals_header(lits.len(), len, use_4_streams, output);
             output.extend_from_slice(&huf_concat[..len]);
             return false;
@@ -1210,7 +1217,7 @@ fn encode_literals_section(
         let len = encode(&table, huf_concat);
         let tree_desc = table.weights_description();
         let compressed_size = tree_desc.len() + len;
-        if huf_literals_header_len(lits.len(), compressed_size) + compressed_size < raw_size {
+        if compressed_size < max_huf {
             encode_compressed_literals_header(lits.len(), compressed_size, use_4_streams, output);
             output.extend_from_slice(tree_desc);
             output.extend_from_slice(&huf_concat[..len]);
@@ -1269,24 +1276,6 @@ fn encode_huf_literals_header(
         output.push((both >> 12) as u8);
         output.push((both >> 20) as u8);
         output.push((both >> 28) as u8);
-    }
-}
-
-/// Length of the header [`encode_raw_literals_header`] writes.
-fn raw_literals_header_len(size: usize) -> usize {
-    match size {
-        0..=31 => 1,
-        32..=4095 => 2,
-        _ => 3,
-    }
-}
-
-/// Length of the header [`encode_huf_literals_header`] writes.
-fn huf_literals_header_len(regen_size: usize, comp_size: usize) -> usize {
-    match regen_size.max(comp_size) {
-        0..=1023 => 3,
-        1024..=16383 => 4,
-        _ => 5,
     }
 }
 
@@ -2243,6 +2232,44 @@ mod tests {
         assert!(!last);
         assert_eq!(block_type, 0, "raw block");
         assert_eq!(size, src.len());
+        assert!(ws.prev_huffman().is_none());
+    }
+
+    /// Xorshift bytes with every `zero_every`th one zero, so a few percent
+    /// of them are zeros.
+    fn near_random(len: usize, zero_every: usize) -> Vec<u8> {
+        let mut x = 0x2545_F491_4F6C_DD1D_u64;
+        (0..len)
+            .map(|i| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                if i % zero_every == 0 {
+                    0
+                } else {
+                    (x >> 56) as u8
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn literals_that_save_under_min_gain_stay_raw() {
+        // Like a block of random values: Huffman would save a little, less
+        // than `min_gain`, so the block goes out raw and decodes as a copy.
+        let src = near_random(4096, 20);
+        let freqs = byte_histogram(&src);
+        let table = HuffmanEncodeTable::from_histogram(&freqs).unwrap();
+        let huf = table.estimate_bits(&freqs).unwrap().div_ceil(8) as usize
+            + table.weights_description().len();
+        assert!(huf < src.len(), "Huffman saves something: {huf} bytes");
+        assert!(huf + min_gain(src.len()) > src.len(), "{huf} bytes");
+
+        let mut out = Vec::new();
+        let mut ws = BlockEncodeWorkspace::new();
+        encode_compressed_block(&src, &[], &mut [1, 4, 8], true, &mut out, &mut ws, POLICY)
+            .unwrap();
+        assert_eq!(block_header(&out), (true, 0, src.len()), "raw block");
         assert!(ws.prev_huffman().is_none());
     }
 
