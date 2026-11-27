@@ -1,6 +1,6 @@
 //! Block encoder: turns a block's sequences into a literals section and an
-//! FSE-coded sequences section, or writes the block raw when that is not
-//! smaller.
+//! FSE-coded sequences section, or writes the block raw when that does not
+//! save [`min_gain`].
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "alloc")]
@@ -46,10 +46,10 @@ macro_rules! add_extra_bits_macro {
     };
 }
 
-/// The least Huffman must save on a literals section, as C zstd's
-/// `ZSTD_minGain` at its fast strategies: 1/64 of its size plus two bytes.
-/// Smaller savings do not pay for decoding Huffman streams instead of
-/// copying raw bytes.
+/// The least a literals section or a block must save to be coded, as C
+/// zstd's `ZSTD_minGain` at its fast strategies: 1/64 of its size plus two
+/// bytes. Smaller savings do not pay for decoding Huffman streams or
+/// sequences instead of copying raw bytes.
 fn min_gain(size: usize) -> usize {
     (size >> 6) + 2
 }
@@ -573,9 +573,10 @@ pub fn encode_raw_block(
     output.extend_from_slice(data)
 }
 
-/// Writes `src` as one block coded from `sequences`, or raw if that is not
-/// smaller. The sequences cover `src` from its start; bytes past the last
-/// one are literals. `rep_offsets` advances unless the block goes out raw.
+/// Writes `src` as one block coded from `sequences`, or raw if that does not
+/// save [`min_gain`]. The sequences cover `src` from its start; bytes past
+/// the last one are literals. `rep_offsets` advances unless the block goes
+/// out raw.
 pub(crate) fn encode_compressed_block(
     src: &[u8],
     sequences: &[Sequence],
@@ -722,7 +723,7 @@ fn encode_compressed_block_impl(
     let literal_section_len =
         workspace.lit_section.len() + if raw_literals { workspace.lit_len } else { 0 };
     let block_len = literal_section_len + seq_data.len();
-    if block_len >= src.len() {
+    if block_len + min_gain(src.len()) >= src.len() {
         *rep_offsets = saved_rep;
         // The decoder never sees this block's table and keeps the previous one.
         workspace.huffman[1 - workspace.huffman_prev] = None;
@@ -752,7 +753,8 @@ fn commit_fresh_huffman(huffman: &mut [Option<HuffmanEncodeTable>; 2], prev: &mu
 }
 
 /// Encodes a block without sequences: Huffman-coded literals and an empty
-/// sequence section. Falls back to a raw block when that is not smaller.
+/// sequence section. Falls back to a raw block when that does not save
+/// [`min_gain`].
 fn encode_literals_only_block(
     src: &[u8],
     last: bool,
@@ -773,7 +775,7 @@ fn encode_literals_only_block(
     );
     // One byte for the empty sequence section (Number_of_Sequences = 0).
     let block_len = workspace.lit_section.len() + 1;
-    if raw_literals || block_len >= src.len() {
+    if raw_literals || block_len + min_gain(src.len()) >= src.len() {
         // The decoder never sees this block's table and keeps the previous one.
         workspace.huffman[1 - workspace.huffman_prev] = None;
         return encode_raw_block(src, last, output);
@@ -874,7 +876,7 @@ fn encode_compressed_block_raw_impl(
     );
 
     let block_len = workspace.lit_section.len() + workspace.lit_len + workspace.pred_seq.len();
-    if block_len >= src.len() {
+    if block_len + min_gain(src.len()) >= src.len() {
         *rep_offsets = saved_rep;
         return encode_raw_block(src, last, output);
     }
@@ -2271,6 +2273,33 @@ mod tests {
             .unwrap();
         assert_eq!(block_header(&out), (true, 0, src.len()), "raw block");
         assert!(ws.prev_huffman().is_none());
+    }
+
+    #[test]
+    fn block_that_saves_under_min_gain_goes_out_raw() {
+        // Dense literals and one match: a 48-byte match saves less than
+        // `min_gain` (66 bytes of 4 KiB), a 200-byte one more.
+        for (match_length, block_type) in [(48, 0), (200, 2)] {
+            let mut src = near_random(4096, usize::MAX);
+            src.copy_within(1000..1000 + match_length, 3000);
+            let sequences = [Sequence {
+                literal_length: 3000,
+                offset: 2000,
+                match_length: match_length as u32,
+            }];
+            let mut out = Vec::new();
+            let mut ws = BlockEncodeWorkspace::new();
+            let mut rep = [1, 4, 8];
+            encode_compressed_block_raw(&src, &sequences, &mut rep, true, &mut out, &mut ws)
+                .unwrap();
+            assert_eq!(block_header(&out).1, block_type, "match of {match_length}");
+            let coded = block_type == 2;
+            assert_eq!(
+                rep == [1, 4, 8],
+                !coded,
+                "rep offsets advance only when coded"
+            );
+        }
     }
 
     #[test]

@@ -30,7 +30,7 @@ same code as WebAssembly.
 compress -> level_params_for_size -> per 128 KiB block:
   Fast or DFast match finder -> sequences
   -> block encoder: literals (raw or Huffman) + sequences (FSE)
-  -> compressed block, or raw block if not smaller
+  -> compressed block, or raw block if it saves under 1/64
 ```
 
 `CompressContext` owns the hash tables, sequence buffer and block workspace,
@@ -120,8 +120,8 @@ also tries the long table at the next position.
 - **Small inputs.** Building a Huffman table costs a few microseconds at any
   size. So L-6 to L-1 keep literals raw up to a per-level size (2 KiB at L-1
   to 12 KiB at L-6) and search denser to make up for it.
-- **Fallback.** A block that does not shrink goes out raw, and the rep
-  offsets roll back.
+- **Fallback.** A block that saves under 1/64 of its size plus two bytes
+  goes out raw, as in C zstd, and the rep offsets roll back.
 
 ### Dictionaries
 
