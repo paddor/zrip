@@ -143,7 +143,7 @@ impl PushEncoder {
         dict: Option<Dictionary>,
     ) -> Self {
         Self {
-            frame: EncodeState::new(Some(level), params, dict),
+            frame: EncodeState::new(params, dict),
             level,
             opts,
             pending: Vec::new(),

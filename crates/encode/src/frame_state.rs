@@ -40,8 +40,6 @@ pub(crate) fn slot_clear_pays(window: usize, tables: usize, entries: usize) -> b
 
 /// Encoder state for one frame at a time, reused across frames.
 pub(crate) struct EncodeState {
-    /// The level the parameters come from, or `None` for custom ones.
-    level: Option<i32>,
     params: LevelParams,
     rep_offsets: [u32; 3],
     /// Frames carry a content checksum, hashed as input arrives.
@@ -76,7 +74,7 @@ pub(crate) struct EncodeState {
 }
 
 impl EncodeState {
-    pub(crate) fn new(level: Option<i32>, params: LevelParams, dict: Option<Dictionary>) -> Self {
+    pub(crate) fn new(params: LevelParams, dict: Option<Dictionary>) -> Self {
         let (rep_offsets, first_block) = match &dict {
             Some(d) => (*d.rep_offsets(), true),
             None => ([1, 4, 8], false),
@@ -89,7 +87,6 @@ impl EncodeState {
         #[cfg(feature = "ldm")]
         let ldm_state = params.ldm_params.as_ref().map(LdmState::new);
         Self {
-            level,
             params,
             rep_offsets,
             checksum: true,
@@ -129,7 +126,7 @@ impl EncodeState {
         };
         #[cfg(feature = "ldm")]
         if params.ldm_params.is_some() {
-            return crate::compress_frame(src, self.level, params, self.checksum, out);
+            return crate::compress_frame(src, params, self.checksum, out);
         }
         // Whole clears follow: the tables no longer hold just the last
         // window's positions.
@@ -155,7 +152,6 @@ impl EncodeState {
         };
         context::compress_core(
             src,
-            self.level,
             *params,
             dict_id,
             prefix,
@@ -337,7 +333,7 @@ impl EncodeState {
         let written = out.len();
         let raw = {
             let chunk = &self.window_buf[plen..];
-            crate::skip_match_search(&self.params, self.level, chunk.len(), chunk)
+            crate::skip_match_search(&self.params, chunk.len(), chunk)
         };
         if !raw && !self.tables_ready {
             self.ready_tables();
@@ -438,7 +434,7 @@ impl EncodeState {
                     last,
                     out,
                     &mut self.workspace,
-                    strategy::block_policy(&self.params, self.level, chunk.len()),
+                    strategy::block_policy(&self.params, chunk.len()),
                 )?;
             }
         }
