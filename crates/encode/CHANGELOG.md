@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.10.7] - 2026-11-27
+
+- Huffman literals and compressed blocks must save C zstd's minimum gain
+  (`ZSTD_minGain`) at the fast strategies, or they stay raw.
+- L1 to L4 search inputs of up to 16 KiB, and L2 to L4 those of up to
+  256 KiB, with their own minimum match and search strength, as C zstd
+  picks its parameters by input size. Dictionary snapshots check the
+  minimum match they were hashed with.
+- `paranoid` turns off the `fearless_simd` dispatch, also with `simd`.
+- Depends on zrip-core 0.14.5.
+
 ## [0.10.6] - 2026-11-26
 
 - Depends on zrip-core 0.14.4.
