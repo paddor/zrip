@@ -441,8 +441,9 @@ fn new_stream_decoders_reserve_what_small_messages_need() {
     c.write_all(&msg).unwrap();
     c.flush().unwrap();
     let stream = c.get_ref().clone();
-    // The decoders' workspaces take about 13 KiB.
-    let report = Report::new(4, 24 * 1024);
+    // The decoders' workspaces take about 13 KiB, and their boxed frame
+    // state with its sequence tables as much again.
+    let report = Report::new(4, 40 * 1024);
     report.check("frame decoder, 64 KiB window", 0, msg.len(), || {
         let mut out = vec![0; msg.len()];
         FrameDecoder::new(stream.as_slice())
