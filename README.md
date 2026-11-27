@@ -99,6 +99,11 @@ let mut frame = vec![0u8; zrip::compress_bound(input.len())];
 let n = ctx.compress_into(input, &mut frame)?;
 let mut owned = Vec::new();
 dec.decompress_into(&frame[..n], &mut owned)?;
+
+// Decode only the first frame and ignore what follows it (padding, more
+// frames). `consumed` is the input the frame took.
+let decoded = zrip::decompress_frame_into(&padded, &mut owned, max_output)?;
+let rest = &padded[decoded.consumed..];
 ```
 
 ### Streaming

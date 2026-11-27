@@ -297,6 +297,69 @@ pub fn decompress_into(input: &[u8], output: &mut Vec<u8>) -> Result<usize, Deco
     Ok(output.len() - start)
 }
 
+/// What a single-frame decode used and wrote
+/// ([`decompress_frame_into`], [`DecompressContext::decompress_frame_into`](crate::context::DecompressContext::decompress_frame_into)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecodedFrame {
+    /// Input bytes the frame took, skippable frames before it included.
+    /// The rest of the input was not read.
+    pub consumed: usize,
+    /// Output bytes appended.
+    pub produced: usize,
+}
+
+/// Decodes the first zstd frame in `input` and appends at most
+/// `max_output` bytes of its output to `output`. Skippable frames before
+/// it are skipped. Bytes after the frame are not read, so trailing padding
+/// or further frames do not fail the call, as in ruzstd and libtiff.
+///
+/// [`decompress`] decodes every frame instead, and fails on bytes after the
+/// last one. To split a buffer without decoding,
+/// [`find_frame_compressed_size`](zrip_core::frame::find_frame_compressed_size)
+/// gives the size of its first frame.
+///
+/// Fails with [`DecompressError::InputExhausted`] if `input` holds no zstd
+/// frame (it is empty or has only skippable frames), with
+/// [`DecompressError::OutputTooSmall`] past `max_output`, and as
+/// [`decompress`] does on a malformed frame or a wrong checksum. On error,
+/// `output` keeps its old length.
+pub fn decompress_frame_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: usize,
+) -> Result<DecodedFrame, DecompressError> {
+    let mut ws = Box::new(BlockDecodeWorkspace::new());
+    decompress_first_frame(input, output, max_output, None, &mut ws)
+}
+
+/// [`decompress_frame_into`] with a dictionary and a workspace.
+pub(crate) fn decompress_first_frame(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: usize,
+    dict: Option<&zrip_core::dict::Dictionary>,
+    ws: &mut BlockDecodeWorkspace,
+) -> Result<DecodedFrame, DecompressError> {
+    let mut offset = 0;
+    while let Some(skip_len) = skip_skippable_frame(&input[offset..]) {
+        offset += skip_len;
+    }
+    if offset == input.len() {
+        return Err(DecompressError::InputExhausted);
+    }
+    let start = output.len();
+    match decompress_frame(&input[offset..], output, max_output, dict, ws) {
+        Ok(consumed) => Ok(DecodedFrame {
+            consumed: offset + consumed,
+            produced: output.len() - start,
+        }),
+        Err(err) => {
+            output.truncate(start);
+            Err(err)
+        }
+    }
+}
+
 /// Like [`decompress`], with an optional dictionary.
 ///
 /// A frame that names a dictionary ID fails with
