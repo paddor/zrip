@@ -230,17 +230,12 @@ fn window_descriptor_for_log(window_log: u32) -> u8 {
 ///
 /// Inputs that keep raw literals skip the sampling: it costs about as much as
 /// their match search, and a block without matches is stored raw anyway.
-/// So do the small inputs of L-6 to L-1 (see
-/// [`strategy::small_negative_input`]).
 pub(crate) fn skip_match_search(
     params: &strategy::LevelParams,
-    level: Option<i32>,
     input_len: usize,
     data: &[u8],
 ) -> bool {
-    !strategy::keeps_raw_literals(params, input_len)
-        && !strategy::small_negative_input(level, input_len)
-        && block_looks_incompressible(data)
+    !strategy::keeps_raw_literals(params, input_len) && block_looks_incompressible(data)
 }
 
 /// Whether `data` looks as flat as random bytes.
@@ -310,7 +305,7 @@ pub fn compress_with_params(
 ) -> Result<Vec<u8>, CompressError> {
     let mut params = *params;
     clamp_params_to_src_size(&mut params, input.len());
-    compress_inner(input, None, &params, true)
+    compress_inner(input, &params, true)
 }
 
 /// Compresses `input` into one frame at `level` (-7..=4; -8 runs as -7,
@@ -319,7 +314,7 @@ pub fn compress_with_params(
 pub fn compress(input: &[u8], level: i32) -> Result<Vec<u8>, CompressError> {
     let params = strategy::level_params_for_size(level, input.len())
         .ok_or(CompressError::InvalidLevel(level))?;
-    compress_inner(input, Some(level), &params, true)
+    compress_inner(input, &params, true)
 }
 
 /// [`compress`] with [`strategy::Options`]: a larger window, long distance
@@ -330,7 +325,7 @@ pub fn compress_opts(
     opts: &strategy::Options,
 ) -> Result<Vec<u8>, CompressError> {
     let params = params_with_options(level, input.len(), opts)?;
-    compress_inner(input, Some(level), &params, opts.checksum())
+    compress_inner(input, &params, opts.checksum())
 }
 
 /// Returns the parameters for a one-shot frame of `input_len` bytes.
@@ -357,20 +352,18 @@ pub(crate) fn params_with_options(
 #[allow(clippy::unnecessary_wraps)]
 fn compress_inner(
     input: &[u8],
-    level: Option<i32>,
     params: &strategy::LevelParams,
     checksum: bool,
 ) -> Result<Vec<u8>, CompressError> {
     let mut output = Vec::with_capacity(input.len() + 32);
-    compress_frame(input, level, params, checksum, &mut output)?;
+    compress_frame(input, params, checksum, &mut output)?;
     Ok(output)
 }
 
 /// Writes one frame for `input` at `params`, without a dictionary, and with
-/// a content checksum if `checksum`. `level` is `None` for custom parameters.
+/// a content checksum if `checksum`.
 pub(crate) fn compress_frame(
     input: &[u8],
-    level: Option<i32>,
     params: &strategy::LevelParams,
     checksum: bool,
     output: &mut impl OutputSink,
@@ -414,7 +407,7 @@ pub(crate) fn compress_frame(
                     let src = &input[base..];
                     let (start, end) = (offset - base, block_end - base);
 
-                    if skip_match_search(params, level, input.len(), block) {
+                    if skip_match_search(params, input.len(), block) {
                         block_encoder::encode_raw_block(block, is_last, output)?;
                     } else {
                         #[cfg(feature = "ldm")]
@@ -467,7 +460,7 @@ pub(crate) fn compress_frame(
                                 is_last,
                                 output,
                                 &mut workspace,
-                                strategy::block_policy(params, level, input.len()),
+                                strategy::block_policy(params, input.len()),
                             )?;
                         }
                     }
@@ -499,7 +492,7 @@ pub(crate) fn compress_frame(
                     let (start, end) = (offset - base, block_end - base);
 
                     let written = output.written();
-                    if skip_match_search(params, level, input.len(), block) {
+                    if skip_match_search(params, input.len(), block) {
                         block_encoder::encode_raw_block(block, is_last, output)?;
                     } else {
                         let block_params = skip.params(params);
@@ -542,7 +535,7 @@ pub(crate) fn compress_frame(
                             is_last,
                             output,
                             &mut workspace,
-                            strategy::block_policy(params, level, input.len()),
+                            strategy::block_policy(params, input.len()),
                         )?;
                     }
                     skip.record(chunk_size, output.written() - written);
@@ -632,7 +625,7 @@ pub(crate) fn compress_with_dict_to(
                     true,
                     output,
                     &mut workspace,
-                    strategy::block_policy(&params, Some(level), input.len()),
+                    strategy::block_policy(&params, input.len()),
                 )?;
             }
         } else {
@@ -689,7 +682,7 @@ pub(crate) fn compress_with_dict_to(
                                 is_last,
                                 output,
                                 &mut workspace,
-                                strategy::block_policy(&params, Some(level), input.len()),
+                                strategy::block_policy(&params, input.len()),
                             )?;
                         }
                         offset += chunk_size;
@@ -739,7 +732,7 @@ pub(crate) fn compress_with_dict_to(
                             is_last,
                             output,
                             &mut workspace,
-                            strategy::block_policy(&params, Some(level), input.len()),
+                            strategy::block_policy(&params, input.len()),
                         )?;
                         skip.record(chunk_size, output.len() - written);
                         offset += chunk_size;
@@ -764,7 +757,7 @@ pub fn compress_into(input: &[u8], output: &mut [u8], level: i32) -> Result<usiz
     let params = strategy::level_params_for_size(level, input.len())
         .ok_or(CompressError::InvalidLevel(level))?;
     let mut sink = SliceSink::new(output);
-    compress_frame(input, Some(level), &params, true, &mut sink)?;
+    compress_frame(input, &params, true, &mut sink)?;
     Ok(sink.pos())
 }
 
@@ -938,18 +931,13 @@ mod tests {
     }
 
     #[test]
-    fn faster_levels_take_huffman_literals_later_on_tiny_inputs() {
-        // No usable matches: only Huffman could shrink these bytes, which
-        // L-7 keeps raw, L-1 Huffman-codes, and the levels between switch
-        // over in order.
+    fn negative_levels_skip_huffman_on_tiny_inputs() {
+        // No usable matches: only Huffman could shrink these bytes.
         let data = skewed_bytes(2048);
-        let sizes: Vec<usize> = (-7..=-1)
-            .map(|level| compress(&data, level).unwrap().len())
-            .collect();
-        assert!(sizes[0] > data.len(), "{sizes:?}");
-        assert!(sizes[1] > data.len(), "{sizes:?}");
-        assert!(sizes[6] * 5 < data.len() * 4, "{sizes:?}");
-        assert!(sizes.windows(2).all(|w| w[0] >= w[1]), "{sizes:?}");
+        for level in -7..=-1 {
+            let out = compress(&data, level).unwrap();
+            assert!(out.len() > data.len(), "L{level}: {} compressed", out.len());
+        }
         for level in 1..=4 {
             let out = compress(&data, level).unwrap();
             assert!(out.len() * 5 < data.len() * 4, "L{level}: {}", out.len());
@@ -962,19 +950,19 @@ mod tests {
         let sizes: Vec<usize> = (-7..=-1)
             .map(|level| compress(&data, level).unwrap().len())
             .collect();
-        // L-5 to L-1 at least 10% smaller; L-7, and L-6 on small inputs,
-        // take only matches of eight bytes or more, which these short words
-        // seldom repeat. No smaller output at a faster level.
+        // L-6 to L-1 at least 10% smaller; L-7 takes only matches of eight
+        // bytes or more, which these short words seldom repeat. No smaller
+        // output at a faster level.
         assert!(
-            sizes[2..].iter().all(|&n| n * 11 < data.len() * 10),
+            sizes[1..].iter().all(|&n| n * 11 < data.len() * 10),
             "{sizes:?}"
         );
         assert!(sizes.windows(2).all(|w| w[0] >= w[1]), "{sizes:?}");
     }
 
     #[test]
-    fn negative_levels_huffman_code_larger_inputs() {
-        let data = skewed_bytes(64 * 1024);
+    fn negative_levels_huffman_code_above_their_raw_limit() {
+        let data = skewed_bytes(32 * 1024);
         for level in -6..=-1 {
             let out = compress(&data, level).unwrap();
             assert!(out.len() * 5 < data.len() * 4, "L{level}: {}", out.len());
@@ -993,6 +981,17 @@ mod tests {
     fn level_minus_8_runs_as_level_minus_7() {
         let data = wordy_bytes(64 * 1024);
         assert_eq!(compress(&data, -8).unwrap(), compress(&data, -7).unwrap());
+    }
+
+    #[test]
+    fn faster_levels_keep_raw_literals_longer() {
+        let limits: Vec<usize> = (-6..=-1)
+            .map(|level| strategy::raw_literals_limit(level).unwrap())
+            .collect();
+        assert_eq!(limits.last(), Some(&2048));
+        assert!(limits.windows(2).all(|w| w[0] > w[1]), "{limits:?}");
+        assert_eq!(strategy::raw_literals_limit(-7), None);
+        assert_eq!(strategy::raw_literals_limit(1), None);
     }
 
     #[test]

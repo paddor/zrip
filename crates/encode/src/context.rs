@@ -102,7 +102,7 @@ impl PreparedDict {
         let mut attached: Vec<Attached> = Vec::new();
         // Small inputs at negative levels search with a shorter match.
         for size in [1, ATTACH_THRESHOLD, MAX_BLOCK_SIZE] {
-            let min_match = strategy::level_params_with_prefix(level, prefix_len, size)
+            let min_match = strategy::level_params_for_size(level, prefix_len + size)
                 .expect("level validated by the caller")
                 .min_match;
             if attached.iter().all(|a| a.min_match != min_match) {
@@ -427,7 +427,6 @@ impl CompressContext {
             .expect("level validated at construction");
         compress_core(
             input,
-            Some(self.level),
             params,
             None,
             &[],
@@ -468,7 +467,6 @@ impl CompressContext {
         self.output.clear();
         compress_core(
             input,
-            Some(self.level),
             params,
             Some(dict.id()),
             dict.content(),
@@ -639,7 +637,7 @@ impl CompressContext {
                     true,
                     output,
                     &mut self.workspace,
-                    strategy::block_policy(&params, Some(self.level), input.len()),
+                    strategy::block_policy(&params, input.len()),
                 )?;
             }
         } else {
@@ -689,7 +687,7 @@ impl CompressContext {
                         true,
                         output,
                         &mut self.workspace,
-                        strategy::block_policy(&params, Some(self.level), input.len()),
+                        strategy::block_policy(&params, input.len()),
                     )?;
                 }
             } else {
@@ -749,7 +747,7 @@ impl CompressContext {
                             is_last,
                             output,
                             &mut self.workspace,
-                            strategy::block_policy(&params, Some(self.level), input.len()),
+                            strategy::block_policy(&params, input.len()),
                         )?;
                     }
                     skip.record(chunk_size, output.written() - written);
@@ -786,7 +784,6 @@ impl CompressContext {
         self.workspace.prev_ml = prep.ml_table.clone();
         compress_core(
             input,
-            Some(self.level),
             params,
             Some(dict_id),
             prefix,
@@ -817,7 +814,6 @@ impl CompressContext {
 #[allow(clippy::too_many_arguments, clippy::unnecessary_wraps)]
 pub(crate) fn compress_core<S: OutputSink>(
     input: &[u8],
-    level: Option<i32>,
     params: LevelParams,
     dict_id: Option<u32>,
     prefix: &[u8],
@@ -896,7 +892,7 @@ pub(crate) fn compress_core<S: OutputSink>(
                             true,
                             output,
                             workspace,
-                            strategy::block_policy(&params, level, input.len()),
+                            strategy::block_policy(&params, input.len()),
                         )?;
                     }
                 } else if has_prefix {
@@ -947,7 +943,7 @@ pub(crate) fn compress_core<S: OutputSink>(
                                 is_last,
                                 output,
                                 workspace,
-                                strategy::block_policy(&params, level, input.len()),
+                                strategy::block_policy(&params, input.len()),
                             )?;
                         }
                         offset += chunk_size;
@@ -963,7 +959,7 @@ pub(crate) fn compress_core<S: OutputSink>(
                         if let Some(shift) = positions.advance(offset, block_end) {
                             rebase::reduce_hash_table(hash_table, shift);
                         }
-                        if skip_match_search(&params, level, input.len(), block) {
+                        if skip_match_search(&params, input.len(), block) {
                             block_encoder::encode_raw_block(block, is_last, output)?;
                         } else {
                             let base = positions.base();
@@ -993,7 +989,7 @@ pub(crate) fn compress_core<S: OutputSink>(
                                     is_last,
                                     output,
                                     workspace,
-                                    strategy::block_policy(&params, level, input.len()),
+                                    strategy::block_policy(&params, input.len()),
                                 )?;
                             }
                         }
@@ -1024,7 +1020,7 @@ pub(crate) fn compress_core<S: OutputSink>(
                         true,
                         output,
                         workspace,
-                        strategy::block_policy(&params, level, input.len()),
+                        strategy::block_policy(&params, input.len()),
                     )?;
                 } else if has_prefix {
                     combined.clear();
@@ -1070,7 +1066,7 @@ pub(crate) fn compress_core<S: OutputSink>(
                             is_last,
                             output,
                             workspace,
-                            strategy::block_policy(&params, level, input.len()),
+                            strategy::block_policy(&params, input.len()),
                         )?;
                         skip.record(chunk_size, output.written() - written);
                         offset += chunk_size;
@@ -1090,7 +1086,7 @@ pub(crate) fn compress_core<S: OutputSink>(
                             rebase::reduce_hash_table(hash_long, shift);
                         }
                         let written = output.written();
-                        if skip_match_search(&params, level, input.len(), block) {
+                        if skip_match_search(&params, input.len(), block) {
                             block_encoder::encode_raw_block(block, is_last, output)?;
                         } else {
                             let base = positions.base();
@@ -1111,7 +1107,7 @@ pub(crate) fn compress_core<S: OutputSink>(
                                 is_last,
                                 output,
                                 workspace,
-                                strategy::block_policy(&params, level, input.len()),
+                                strategy::block_policy(&params, input.len()),
                             )?;
                         }
                         skip.record(chunk_size, output.written() - written);
