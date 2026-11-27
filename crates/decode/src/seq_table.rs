@@ -5,7 +5,8 @@ use zrip_core::error::DecompressError;
 use zrip_core::fse::table_builder::build_decode_rows;
 use zrip_core::fse::{
     FSE_SEQ_TABLE_CAPACITY, FseDecodeEntry, FseSeqDecodeEntry, LL_BASELINE_TABLE, LL_BITS_TABLE,
-    ML_BASELINE_TABLE, ML_BITS_TABLE,
+    LL_DEFAULT_ACCURACY, LL_DEFAULT_DIST, ML_BASELINE_TABLE, ML_BITS_TABLE, ML_DEFAULT_ACCURACY,
+    ML_DEFAULT_DIST, OF_DEFAULT_ACCURACY, OF_DEFAULT_DIST,
 };
 
 /// A bit count below 32. Every sequence field and state transition reads
@@ -155,14 +156,107 @@ impl Clone for SeqTable {
     }
 }
 
+/// Where a predefined table's codes get their extra bits and baselines.
+#[derive(Clone, Copy)]
+enum Extra {
+    /// From per-code tables: literal and match lengths.
+    Tables(&'static [u8], &'static [u32]),
+    /// Offset code `n` reads `n` extra bits onto a baseline of `1 << n`.
+    Offset,
+}
+
 impl SeqTable {
     /// A table of zeroed rows, the first `initialized` of them counted as
     /// in use.
-    fn empty(initialized: usize) -> Self {
+    pub(crate) const fn empty(initialized: usize) -> Self {
         Self {
             initialized,
             data: [SeqEntry::new(0, 0, 0, 0); FSE_SEQ_TABLE_CAPACITY],
         }
+    }
+
+    /// The RFC 8878 predefined literal length table.
+    pub(crate) const fn predefined_ll() -> Self {
+        Self::predefined(
+            &LL_DEFAULT_DIST,
+            LL_DEFAULT_ACCURACY,
+            Extra::Tables(&LL_BITS_TABLE, &LL_BASELINE_TABLE),
+        )
+    }
+
+    /// The RFC 8878 predefined match length table.
+    pub(crate) const fn predefined_ml() -> Self {
+        Self::predefined(
+            &ML_DEFAULT_DIST,
+            ML_DEFAULT_ACCURACY,
+            Extra::Tables(&ML_BITS_TABLE, &ML_BASELINE_TABLE),
+        )
+    }
+
+    /// The RFC 8878 predefined offset code table.
+    pub(crate) const fn predefined_of() -> Self {
+        Self::predefined(&OF_DEFAULT_DIST, OF_DEFAULT_ACCURACY, Extra::Offset)
+    }
+
+    /// Builds a predefined table at compile time, as
+    /// [`build_decode_rows`] builds one at run time. Every predefined
+    /// distribution has "less than one" (-1) symbols, so this is its
+    /// general spread: those symbols take the last cells, and the walk
+    /// skips them.
+    const fn predefined(distribution: &[i16], accuracy_log: u8, extra: Extra) -> Self {
+        let size = 1usize << accuracy_log;
+        let mask = size - 1;
+        // C zstd's spread step. It is odd, so the walk visits every cell once.
+        let step = (size >> 1) + (size >> 3) + 3;
+        let mut cells = [0u8; FSE_SEQ_TABLE_CAPACITY];
+        let mut next = [0u16; 256];
+        let mut high_threshold = mask;
+        let mut s = 0;
+        while s < distribution.len() {
+            if distribution[s] == -1 {
+                cells[high_threshold] = s as u8;
+                high_threshold -= 1;
+                next[s] = 1;
+            } else {
+                next[s] = distribution[s] as u16;
+            }
+            s += 1;
+        }
+        let mut position = 0;
+        s = 0;
+        while s < distribution.len() {
+            let mut k = 0;
+            while k < distribution[s] {
+                cells[position] = s as u8;
+                position = (position + step) & mask;
+                while position > high_threshold {
+                    position = (position + step) & mask;
+                }
+                k += 1;
+            }
+            s += 1;
+        }
+        assert!(position == 0, "a predefined distribution fills its table");
+
+        // The k-th cell of a symbol with probability p gets state p + k; it
+        // reads `nb` bits so `(p + k) << nb` lands in `size..2 * size`.
+        let mut table = Self::empty(size);
+        let mut cell = 0;
+        while cell < size {
+            let symbol = cells[cell] as usize;
+            let state = next[symbol] as u32;
+            next[symbol] += 1;
+            let nb = accuracy_log as u32 - (31 - state.leading_zeros());
+            let base_line = (state << nb) - size as u32;
+            let (extra_bits, baseline_value) = match extra {
+                Extra::Tables(bits, baselines) => (bits[symbol], baselines[symbol]),
+                Extra::Offset => (symbol as u8, 1u32 << symbol),
+            };
+            table.data[cell] =
+                SeqEntry::new(base_line as u16, nb as u8, extra_bits, baseline_value);
+            cell += 1;
+        }
+        table
     }
 
     #[inline(always)]
@@ -281,25 +375,19 @@ impl SeqTable {
         self.build(distribution, accuracy_log, of_extra)
     }
 
-    fn promote(fse: &[FseDecodeEntry], extra: impl Fn(u8) -> (u8, u32)) -> Self {
-        let mut table = Self::empty(0);
-        table.fill(fse, extra);
-        table
+    /// Rewrites the table in place from literal length FSE rows.
+    pub(crate) fn load_ll(&mut self, fse: &[FseDecodeEntry]) {
+        self.fill(fse, ll_extra);
     }
 
-    /// A new table from literal length FSE rows.
-    pub(crate) fn promote_ll(fse: &[FseDecodeEntry]) -> Self {
-        Self::promote(fse, ll_extra)
+    /// Rewrites the table in place from match length FSE rows.
+    pub(crate) fn load_ml(&mut self, fse: &[FseDecodeEntry]) {
+        self.fill(fse, ml_extra);
     }
 
-    /// A new table from match length FSE rows.
-    pub(crate) fn promote_ml(fse: &[FseDecodeEntry]) -> Self {
-        Self::promote(fse, ml_extra)
-    }
-
-    /// A new table from offset code FSE rows.
-    pub(crate) fn promote_of(fse: &[FseDecodeEntry]) -> Self {
-        Self::promote(fse, of_extra)
+    /// Rewrites the table in place from offset code FSE rows.
+    pub(crate) fn load_of(&mut self, fse: &[FseDecodeEntry]) {
+        self.fill(fse, of_extra);
     }
 }
 
@@ -342,7 +430,8 @@ mod tests {
             num_bits: 0,
             symbol: 0,
         }];
-        let mut table = SeqTable::promote_ll(&fse);
+        let mut table = SeqTable::empty(0);
+        table.load_ll(&fse);
         table.set_single(seq_entry(17));
 
         assert_eq!(table.get(0).baseline_value, 17);
@@ -372,11 +461,49 @@ mod tests {
                 symbol: 3,
             },
         ];
-        let table = SeqTable::promote_of(&fse);
+        let mut table = SeqTable::empty(0);
+        table.load_of(&fse);
 
         assert_eq!(table.get(0).baseline_value, 1);
         assert_eq!(table.get(1).baseline_value, 2);
         assert_eq!(table.get(3).extra_bits.get(), 3);
+    }
+
+    #[test]
+    fn predefined_tables_match_the_runtime_builder() {
+        use zrip_core::fse::table_builder::build_decode_table_from_default;
+        let cases = [
+            (
+                SeqTable::predefined_ll(),
+                &LL_DEFAULT_DIST[..],
+                LL_DEFAULT_ACCURACY,
+                ll_extra as fn(u8) -> (u8, u32),
+            ),
+            (
+                SeqTable::predefined_ml(),
+                &ML_DEFAULT_DIST[..],
+                ML_DEFAULT_ACCURACY,
+                ml_extra,
+            ),
+            (
+                SeqTable::predefined_of(),
+                &OF_DEFAULT_DIST[..],
+                OF_DEFAULT_ACCURACY,
+                of_extra,
+            ),
+        ];
+        for (table, dist, accuracy, extra) in cases {
+            let mut built = SeqTable::empty(0);
+            built.fill(&build_decode_table_from_default(dist, accuracy), extra);
+            assert_eq!(table.initialized, 1 << accuracy);
+            assert_eq!(table.initialized, built.initialized);
+            for (a, b) in table.data.iter().zip(&built.data) {
+                assert_eq!(
+                    (a.base_line, a.num_bits, a.extra_bits, a.baseline_value),
+                    (b.base_line, b.num_bits, b.extra_bits, b.baseline_value)
+                );
+            }
+        }
     }
 
     #[test]

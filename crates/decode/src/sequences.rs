@@ -10,75 +10,71 @@ use crate::BlockDecodeWorkspace;
 use crate::seq_table::SeqTable;
 use zrip_core::bitstream::reader::BitReader;
 use zrip_core::error::DecompressError;
-use zrip_core::fse::table_builder::{
-    build_decode_table_from_default, parse_fse_table_description_into,
-};
+use zrip_core::fse::table_builder::parse_fse_table_description_into;
 use zrip_core::fse::{
-    FseSeqDecodeEntry, LL_BASELINE_TABLE, LL_BITS_TABLE, LL_DEFAULT_ACCURACY, LL_DEFAULT_DIST,
-    LL_MAX_ACCURACY_LOG, ML_BASELINE_TABLE, ML_BITS_TABLE, ML_DEFAULT_ACCURACY, ML_DEFAULT_DIST,
-    ML_MAX_ACCURACY_LOG, OF_DEFAULT_ACCURACY, OF_DEFAULT_DIST, OF_MAX_ACCURACY_LOG,
+    FseSeqDecodeEntry, LL_BASELINE_TABLE, LL_BITS_TABLE, LL_DEFAULT_ACCURACY, LL_MAX_ACCURACY_LOG,
+    ML_BASELINE_TABLE, ML_BITS_TABLE, ML_DEFAULT_ACCURACY, ML_MAX_ACCURACY_LOG,
+    OF_DEFAULT_ACCURACY, OF_MAX_ACCURACY_LOG,
 };
 use zrip_core::hint::likely;
 
 /// The literal length, offset and match length tables, kept across blocks
 /// for repeat mode.
+///
+/// A predefined table is not copied in: blocks read it from [`PREDEFINED`]
+/// (see [`for_block`](Self::for_block)), so a new decoder fills no tables.
 pub(crate) struct SequenceDecodeTables {
-    /// Literal length table.
+    /// Literal length table, unless `ll_kind` is `Shared`.
     pub(crate) ll_table: SeqTable,
-    /// Accuracy log of `ll_table`: 0 in RLE mode, at most 9.
+    /// Accuracy log of the literal length table: 0 in RLE mode, at most 9.
     pub(crate) ll_accuracy: u8,
-    /// Whether `ll_table` is the predefined table, so predefined mode can
-    /// skip the copy.
+    /// Which literal length table is in use, and where it is.
     pub(crate) ll_kind: SequenceTableKind,
-    /// Offset code table.
+    /// Offset code table, unless `of_kind` is `Shared`.
     pub(crate) of_table: SeqTable,
-    /// Accuracy log of `of_table`: 0 in RLE mode, at most 8.
+    /// Accuracy log of the offset code table: 0 in RLE mode, at most 8.
     pub(crate) of_accuracy: u8,
-    /// As `ll_kind`, for `of_table`.
+    /// As `ll_kind`, for offsets.
     pub(crate) of_kind: SequenceTableKind,
-    /// Match length table.
+    /// Match length table, unless `ml_kind` is `Shared`.
     pub(crate) ml_table: SeqTable,
-    /// Accuracy log of `ml_table`: 0 in RLE mode, at most 9.
+    /// Accuracy log of the match length table: 0 in RLE mode, at most 9.
     pub(crate) ml_accuracy: u8,
-    /// As `ll_kind`, for `ml_table`.
+    /// As `ll_kind`, for match lengths.
     pub(crate) ml_kind: SequenceTableKind,
-    /// `ll_table` was set in this frame or by its dictionary, so repeat
-    /// mode may use it.
+    /// The literal length table was set in this frame or by its
+    /// dictionary, so repeat mode may use it.
     pub(crate) ll_set: bool,
-    /// As `ll_set`, for `of_table`.
+    /// As `ll_set`, for offsets.
     pub(crate) of_set: bool,
-    /// As `ll_set`, for `ml_table`.
+    /// As `ll_set`, for match lengths.
     pub(crate) ml_set: bool,
 }
 
 impl Clone for SequenceDecodeTables {
     fn clone(&self) -> Self {
-        Self {
-            ll_table: self.ll_table.clone(),
-            ll_accuracy: self.ll_accuracy,
-            ll_kind: self.ll_kind,
-            of_table: self.of_table.clone(),
-            of_accuracy: self.of_accuracy,
-            of_kind: self.of_kind,
-            ml_table: self.ml_table.clone(),
-            ml_accuracy: self.ml_accuracy,
-            ml_kind: self.ml_kind,
-            ll_set: self.ll_set,
-            of_set: self.of_set,
-            ml_set: self.ml_set,
-        }
+        let mut tables = Self::new_default();
+        tables.clone_from(self);
+        tables
     }
 
-    /// Copies the tables in place through `SeqTable::clone_from`. The
-    /// derived version would build a full temporary copy first.
+    /// Copies the tables in place through `SeqTable::clone_from`, which
+    /// copies only the rows in use, and skips shared predefined tables.
+    /// The derived version would build a full temporary copy first.
     fn clone_from(&mut self, source: &Self) {
-        self.ll_table.clone_from(&source.ll_table);
+        if source.ll_kind != SequenceTableKind::Shared {
+            self.ll_table.clone_from(&source.ll_table);
+        }
         self.ll_accuracy = source.ll_accuracy;
         self.ll_kind = source.ll_kind;
-        self.of_table.clone_from(&source.of_table);
+        if source.of_kind != SequenceTableKind::Shared {
+            self.of_table.clone_from(&source.of_table);
+        }
         self.of_accuracy = source.of_accuracy;
         self.of_kind = source.of_kind;
-        self.ml_table.clone_from(&source.ml_table);
+        if source.ml_kind != SequenceTableKind::Shared {
+            self.ml_table.clone_from(&source.ml_table);
+        }
         self.ml_accuracy = source.ml_accuracy;
         self.ml_kind = source.ml_kind;
         self.ll_set = source.ll_set;
@@ -90,111 +86,63 @@ impl Clone for SequenceDecodeTables {
 /// What a sequence table holds.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SequenceTableKind {
-    /// The RFC 8878 predefined distribution.
+    /// The RFC 8878 predefined table, read from [`PREDEFINED`]. The own
+    /// table holds something else.
+    Shared,
+    /// The predefined table, copied into the own table for a block that
+    /// mixes it with other tables.
     Predefined,
     /// An RLE, FSE-compressed or dictionary table.
     Other,
 }
 
+/// The RFC 8878 predefined tables, built at compile time and shared by
+/// every decoder.
+pub(crate) static PREDEFINED: SequenceDecodeTables = SequenceDecodeTables {
+    ll_table: SeqTable::predefined_ll(),
+    ll_accuracy: LL_DEFAULT_ACCURACY,
+    ll_kind: SequenceTableKind::Predefined,
+    of_table: SeqTable::predefined_of(),
+    of_accuracy: OF_DEFAULT_ACCURACY,
+    of_kind: SequenceTableKind::Predefined,
+    ml_table: SeqTable::predefined_ml(),
+    ml_accuracy: ML_DEFAULT_ACCURACY,
+    ml_kind: SequenceTableKind::Predefined,
+    ll_set: true,
+    of_set: true,
+    ml_set: true,
+};
+
 impl SequenceDecodeTables {
-    /// Predefined tables, none set for repeat mode.
-    pub(crate) fn new_default() -> Self {
-        #[cfg(feature = "std")]
-        {
-            Self {
-                ll_table: LL_PREDEFINED.clone(),
-                ll_accuracy: LL_DEFAULT_ACCURACY,
-                ll_kind: SequenceTableKind::Predefined,
-                of_table: OF_PREDEFINED.clone(),
-                of_accuracy: OF_DEFAULT_ACCURACY,
-                of_kind: SequenceTableKind::Predefined,
-                ml_table: ML_PREDEFINED.clone(),
-                ml_accuracy: ML_DEFAULT_ACCURACY,
-                ml_kind: SequenceTableKind::Predefined,
-                ll_set: false,
-                of_set: false,
-                ml_set: false,
-            }
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            Self {
-                ll_table: SeqTable::promote_ll(&build_decode_table_from_default(
-                    &LL_DEFAULT_DIST,
-                    LL_DEFAULT_ACCURACY,
-                )),
-                ll_accuracy: LL_DEFAULT_ACCURACY,
-                ll_kind: SequenceTableKind::Predefined,
-                of_table: SeqTable::promote_of(&build_decode_table_from_default(
-                    &OF_DEFAULT_DIST,
-                    OF_DEFAULT_ACCURACY,
-                )),
-                of_accuracy: OF_DEFAULT_ACCURACY,
-                of_kind: SequenceTableKind::Predefined,
-                ml_table: SeqTable::promote_ml(&build_decode_table_from_default(
-                    &ML_DEFAULT_DIST,
-                    ML_DEFAULT_ACCURACY,
-                )),
-                ml_accuracy: ML_DEFAULT_ACCURACY,
-                ml_kind: SequenceTableKind::Predefined,
-                ll_set: false,
-                of_set: false,
-                ml_set: false,
-            }
+    /// Predefined tables, none set for repeat mode. Their rows stay in
+    /// [`PREDEFINED`]; the own tables start zeroed.
+    pub(crate) const fn new_default() -> Self {
+        Self {
+            ll_table: SeqTable::empty(0),
+            ll_accuracy: LL_DEFAULT_ACCURACY,
+            ll_kind: SequenceTableKind::Shared,
+            of_table: SeqTable::empty(0),
+            of_accuracy: OF_DEFAULT_ACCURACY,
+            of_kind: SequenceTableKind::Shared,
+            ml_table: SeqTable::empty(0),
+            ml_accuracy: ML_DEFAULT_ACCURACY,
+            ml_kind: SequenceTableKind::Shared,
+            ll_set: false,
+            of_set: false,
+            ml_set: false,
         }
     }
 
-    /// Restores the predefined tables, copying only those that changed, and
-    /// clears the repeat flags.
+    /// Restores the predefined tables and clears the repeat flags. Copies
+    /// nothing.
     pub(crate) fn reset_default(&mut self) {
-        if self.ll_kind != SequenceTableKind::Predefined {
-            #[cfg(feature = "std")]
-            {
-                self.ll_table.clone_from(&LL_PREDEFINED);
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                self.ll_table = SeqTable::promote_ll(&build_decode_table_from_default(
-                    &LL_DEFAULT_DIST,
-                    LL_DEFAULT_ACCURACY,
-                ));
-            }
-            self.ll_kind = SequenceTableKind::Predefined;
-        }
+        self.ll_kind = predefined_kind(self.ll_kind);
         self.ll_accuracy = LL_DEFAULT_ACCURACY;
         self.ll_set = false;
-
-        if self.of_kind != SequenceTableKind::Predefined {
-            #[cfg(feature = "std")]
-            {
-                self.of_table.clone_from(&OF_PREDEFINED);
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                self.of_table = SeqTable::promote_of(&build_decode_table_from_default(
-                    &OF_DEFAULT_DIST,
-                    OF_DEFAULT_ACCURACY,
-                ));
-            }
-            self.of_kind = SequenceTableKind::Predefined;
-        }
+        self.of_kind = predefined_kind(self.of_kind);
         self.of_accuracy = OF_DEFAULT_ACCURACY;
         self.of_set = false;
-
-        if self.ml_kind != SequenceTableKind::Predefined {
-            #[cfg(feature = "std")]
-            {
-                self.ml_table.clone_from(&ML_PREDEFINED);
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                self.ml_table = SeqTable::promote_ml(&build_decode_table_from_default(
-                    &ML_DEFAULT_DIST,
-                    ML_DEFAULT_ACCURACY,
-                ));
-            }
-            self.ml_kind = SequenceTableKind::Predefined;
-        }
+        self.ml_kind = predefined_kind(self.ml_kind);
         self.ml_accuracy = ML_DEFAULT_ACCURACY;
         self.ml_set = false;
     }
@@ -208,26 +156,59 @@ impl SequenceDecodeTables {
     }
 
     /// Installs the sequence tables `dict` carries. Marks them as not
-    /// predefined, so Predefined_Mode reloads the predefined table.
+    /// predefined, so Predefined_Mode switches back to the shared table.
     pub(crate) fn load_dict(&mut self, dict: &zrip_core::dict::Dictionary) {
         if let Some((t, l)) = dict.of_table() {
-            self.of_table = SeqTable::promote_of(t);
+            self.of_table.load_of(t);
             self.of_accuracy = l;
             self.of_kind = SequenceTableKind::Other;
             self.of_set = true;
         }
         if let Some((t, l)) = dict.ml_table() {
-            self.ml_table = SeqTable::promote_ml(t);
+            self.ml_table.load_ml(t);
             self.ml_accuracy = l;
             self.ml_kind = SequenceTableKind::Other;
             self.ml_set = true;
         }
         if let Some((t, l)) = dict.ll_table() {
-            self.ll_table = SeqTable::promote_ll(t);
+            self.ll_table.load_ll(t);
             self.ll_accuracy = l;
             self.ll_kind = SequenceTableKind::Other;
             self.ll_set = true;
         }
+    }
+
+    /// The tables a block decodes with. With only predefined tables, the
+    /// shared [`PREDEFINED`]; otherwise these, after copying in the rows
+    /// of any shared predefined table, 64 at most.
+    #[inline]
+    pub(crate) fn for_block(&mut self) -> &Self {
+        use SequenceTableKind::{Other, Predefined, Shared};
+        if self.ll_kind != Other && self.of_kind != Other && self.ml_kind != Other {
+            return &PREDEFINED;
+        }
+        if self.ll_kind == Shared {
+            self.ll_table.clone_from(&PREDEFINED.ll_table);
+            self.ll_kind = Predefined;
+        }
+        if self.of_kind == Shared {
+            self.of_table.clone_from(&PREDEFINED.of_table);
+            self.of_kind = Predefined;
+        }
+        if self.ml_kind == Shared {
+            self.ml_table.clone_from(&PREDEFINED.ml_table);
+            self.ml_kind = Predefined;
+        }
+        self
+    }
+}
+
+/// The kind a table takes in Predefined_Mode: a copied predefined table
+/// stays, anything else switches to the shared one.
+fn predefined_kind(kind: SequenceTableKind) -> SequenceTableKind {
+    match kind {
+        SequenceTableKind::Other => SequenceTableKind::Shared,
+        kept => kept,
     }
 }
 
@@ -289,32 +270,6 @@ pub(crate) fn compute_offset(
         offset
     }
 }
-
-// Predefined tables, built once per process. `no_std` builds rebuild them
-// when needed.
-#[cfg(feature = "std")]
-static LL_PREDEFINED: std::sync::LazyLock<SeqTable> = std::sync::LazyLock::new(|| {
-    SeqTable::promote_ll(&build_decode_table_from_default(
-        &LL_DEFAULT_DIST,
-        LL_DEFAULT_ACCURACY,
-    ))
-});
-
-#[cfg(feature = "std")]
-static ML_PREDEFINED: std::sync::LazyLock<SeqTable> = std::sync::LazyLock::new(|| {
-    SeqTable::promote_ml(&build_decode_table_from_default(
-        &ML_DEFAULT_DIST,
-        ML_DEFAULT_ACCURACY,
-    ))
-});
-
-#[cfg(feature = "std")]
-static OF_PREDEFINED: std::sync::LazyLock<SeqTable> = std::sync::LazyLock::new(|| {
-    SeqTable::promote_of(&build_decode_table_from_default(
-        &OF_DEFAULT_DIST,
-        OF_DEFAULT_ACCURACY,
-    ))
-});
 
 /// Parses the compression modes byte and the table descriptions after it,
 /// updating `prev`. Returns the bytes consumed.
@@ -391,20 +346,7 @@ fn parse_sequence_tables_ws_impl(
 
     match ll_mode {
         0 => {
-            if prev.ll_kind != SequenceTableKind::Predefined {
-                #[cfg(feature = "std")]
-                {
-                    prev.ll_table.clone_from(&LL_PREDEFINED);
-                }
-                #[cfg(not(feature = "std"))]
-                {
-                    prev.ll_table = SeqTable::promote_ll(&build_decode_table_from_default(
-                        &LL_DEFAULT_DIST,
-                        LL_DEFAULT_ACCURACY,
-                    ));
-                }
-                prev.ll_kind = SequenceTableKind::Predefined;
-            }
+            prev.ll_kind = predefined_kind(prev.ll_kind);
             prev.ll_accuracy = LL_DEFAULT_ACCURACY;
             prev.ll_set = true;
         }
@@ -443,20 +385,7 @@ fn parse_sequence_tables_ws_impl(
 
     match of_mode {
         0 => {
-            if prev.of_kind != SequenceTableKind::Predefined {
-                #[cfg(feature = "std")]
-                {
-                    prev.of_table.clone_from(&OF_PREDEFINED);
-                }
-                #[cfg(not(feature = "std"))]
-                {
-                    prev.of_table = SeqTable::promote_of(&build_decode_table_from_default(
-                        &OF_DEFAULT_DIST,
-                        OF_DEFAULT_ACCURACY,
-                    ));
-                }
-                prev.of_kind = SequenceTableKind::Predefined;
-            }
+            prev.of_kind = predefined_kind(prev.of_kind);
             prev.of_accuracy = OF_DEFAULT_ACCURACY;
             prev.of_set = true;
         }
@@ -496,20 +425,7 @@ fn parse_sequence_tables_ws_impl(
 
     match ml_mode {
         0 => {
-            if prev.ml_kind != SequenceTableKind::Predefined {
-                #[cfg(feature = "std")]
-                {
-                    prev.ml_table.clone_from(&ML_PREDEFINED);
-                }
-                #[cfg(not(feature = "std"))]
-                {
-                    prev.ml_table = SeqTable::promote_ml(&build_decode_table_from_default(
-                        &ML_DEFAULT_DIST,
-                        ML_DEFAULT_ACCURACY,
-                    ));
-                }
-                prev.ml_kind = SequenceTableKind::Predefined;
-            }
+            prev.ml_kind = predefined_kind(prev.ml_kind);
             prev.ml_accuracy = ML_DEFAULT_ACCURACY;
             prev.ml_set = true;
         }

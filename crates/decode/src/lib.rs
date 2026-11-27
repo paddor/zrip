@@ -209,9 +209,9 @@ impl BlockDecodeWorkspace {
     /// for every frame that uses it.
     #[cfg(feature = "alloc")]
     pub(crate) fn cache_dict(&mut self, dict: &zrip_core::dict::Dictionary) {
-        let mut st = SequenceDecodeTables::new_default();
+        let mut st = Box::new(SequenceDecodeTables::new_default());
         st.load_dict(dict);
-        self.cached_dict_tables = Some(Box::new(st));
+        self.cached_dict_tables = Some(st);
         self.cached_dict_rep = *dict.rep_offsets();
         if let Some((t, l)) = dict.huf_table() {
             self.cached_dict_huf = Some((t.to_vec(), l));
@@ -638,6 +638,7 @@ fn decode_compressed_block(
 
     let table_data = &remaining[seq_count_size..];
     let tables_consumed = parse_sequence_tables_ws(table_data, seq_tables, ws)?;
+    let seq_tables = seq_tables.for_block();
 
     let seq_data = &table_data[tables_consumed..];
 
@@ -696,7 +697,7 @@ fn decode_compressed_block(
 pub(crate) fn decode_sequences_dispatch(
     seq_data: &[u8],
     num_sequences: u32,
-    seq_tables: &mut SequenceDecodeTables,
+    seq_tables: &SequenceDecodeTables,
     rep_offsets: &mut [u32; 3],
     literals: Literals<'_>,
     output: &mut Vec<u8>,
@@ -789,7 +790,7 @@ pub(crate) fn decode_sequences_dispatch(
 pub(crate) fn decode_sequences_dispatch_room(
     seq_data: &[u8],
     num_sequences: u32,
-    seq_tables: &mut SequenceDecodeTables,
+    seq_tables: &SequenceDecodeTables,
     rep_offsets: &mut [u32; 3],
     literals: Literals<'_>,
     output: &mut Vec<u8>,

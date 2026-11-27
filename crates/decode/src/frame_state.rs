@@ -456,7 +456,7 @@ impl FrameState {
             let result = decode_sequences_dispatch_room(
                 seq_data,
                 num_sequences,
-                &mut self.seq_tables,
+                self.seq_tables.for_block(),
                 &mut self.rep_offsets,
                 lits_at.resolve(block_data, &self.ws.literal_buf),
                 &mut self.history,
